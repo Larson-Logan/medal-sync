@@ -44,7 +44,10 @@ jobs:
         run: ./scripts/validate.ps1
       - name: Package and verify
         shell: pwsh
-        run: ./scripts/package-release.ps1
+        run: ./scripts/package-windows-installer.ps1
+      - name: Verify native install and uninstall
+        shell: pwsh
+        run: ./scripts/test-windows-installer.ps1
       - name: Create draft GitHub release
         shell: pwsh
         env:
@@ -54,5 +57,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.VersionPrefix
           $archive = ".medal-sync-dist/medal-sync-$version-win-x64.zip"
-          gh release create $env:RELEASE_TAG $archive "$archive.sha256" --verify-tag --draft --generate-notes --title "Medal Sync $version"
+          $setup = ".medal-sync-dist/medal-sync-$version-setup-win-x64.exe"
+          gh release create $env:RELEASE_TAG $setup "$setup.sha256" $archive "$archive.sha256" --verify-tag --draft --generate-notes --title "Medal Sync $version"
           if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed; existing releases are never overwritten.' }

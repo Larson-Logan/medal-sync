@@ -20,6 +20,6 @@ catch (Exception ex)
     {
         // The message box below still reports the failure.
     }
-    ui.Show($"medal-sync stopped unexpectedly: {ex.Message}\n\nDetails are in %LOCALAPPDATA%\\LarsonServer\\MedalSync\\logs.");
+    ui.Show($"medal-sync stopped unexpectedly: {ex.Message}\n\nDetails are in the logs directory of your Medal Sync user data folder.");
     return 1;
 }

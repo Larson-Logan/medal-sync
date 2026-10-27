@@ -1,109 +1,96 @@
 # Installation, updates and removal
 
-Use PowerShell 7 on Windows x64. The same `update-medal-sync.ps1` handles release
-discovery, download, installation, update and uninstall. It never kills Medal,
-changes library ownership or deletes recordings. Run a copy outside the installed
-`bin` directory so the tool can replace or remove its own installed files.
+Download `medal-sync-VERSION-setup-win-x64.exe` from
+[GitHub Releases](https://github.com/Larson-Logan/medal-sync/releases) once a
+maintainer publishes a release. This is the normal Windows installer.
 
-## Automatic launch checks
+## Install
 
-Each desktop launch, including sign-in and opening an existing session, requests
-the latest stable release from the public GitHub API. The entire request and
-response have a two-second cancellation budget and a one-megabyte response limit.
-A newer release with the expected Windows package and digest produces a notice.
-The request contains no account, configuration, device identity or credentials.
+1. Run the setup EXE and approve Windows' administrator prompt.
+2. Review the license and program folder. The default is
+   `C:\Program Files\Medal Sync`.
+3. Choose whether to add a desktop shortcut, then select **Install**.
+4. Open **Medal Sync** from the Start menu when you are ready to use it.
 
-Private repositories, unpublished releases, rate limits, offline operation and
-malformed responses silently continue normal launch. Once the repository is
-public and a stable release is published, discovery starts working without
-changing configuration. Checks do not install automatically.
+The installer includes the self-contained companion and .NET runtime. Ordinary
+installation needs neither PowerShell nor a separate .NET installation. rclone,
+WinFsp, storage configuration and library enrollment remain separate prerequisites;
+see [getting started](getting-started.md).
 
-## Check and download
+Setup checks the initiating user's library readiness before copying programs.
+Quit Medal normally and wait for Ready first. Running companion processes,
+retained session credentials, incomplete configuration, unavailable coordination
+storage and non-CLEAN ownership refuse installation. Setup never force-closes
+Medal or automatically reboots. While setup or uninstall is open, new companion
+library operations are blocked.
 
-From a source checkout (or a trusted copy of the release's scripts):
+## Programs and personal data
 
-```powershell
-$updater = './scripts/storage/medal-sync/update-medal-sync.ps1'
-pwsh -File $updater
-pwsh -File $updater -DownloadDirectory "$HOME/Downloads/MedalSync"
-# Select a specific stable release: add -Tag v0.2.0.
-```
+Executables go under the chosen program folder's `bin` directory. Settings,
+device identity, logs and backups stay in your user profile. The installed app
+reuses an existing `$HOME/.medal-sync` configuration first, then a legacy
+`%LOCALAPPDATA%/LarsonServer/MedalSync` configuration. A new setup uses
+`$HOME/.medal-sync`; setup does not generate an account, configuration or identity.
+Recordings, caches and shared library files remain in their existing locations.
 
-The downloader uses only this project's public GitHub release endpoint. It
-requires GitHub's SHA-256 asset digest, checks the archive length and hash, then
-validates its manifest and every payload hash before retaining the download.
-No authentication token is used. A private repository or absent release fails
-with a visible error when you explicitly invoke the tool.
+Setup creates its own Start menu and optional desktop shortcuts. It does not
+replace Medal's per-user startup, URL handler or legacy portable shortcuts.
+The installed companion preserves that existing integration too. Existing
+portable binaries remain available for recovery; use the new Start menu shortcut
+for the Program Files build. Repointing existing Medal startup integration is
+an explicit advanced migration performed as the owning Windows user.
 
-When downloading manually, obtain the digest from the release's asset details
-or `.sha256` file through a trusted channel. A hash protects against corruption;
-it does not provide an independent publisher signature. Binaries are unsigned.
+## Upgrade and repair
 
-## Install or update
+Run a newer setup EXE and select the same program folder. It upgrades the
+existing installation with the same Installed apps identity and retains data.
+Running the same setup again repairs its managed program files. Older versions
+are refused. A destination containing a portable installation or user configuration
+is refused so that program and data locations remain separate.
 
-Extract the release into a temporary tools directory. Keep the updater, module
-and startup helper together. The archive remains the installation input:
-
-```powershell
-$package = "$HOME/Downloads/MedalSync/medal-sync-0.2.0-win-x64.zip"
-$hash = 'REPLACE_WITH_RELEASE_SHA256'
-$root = "$HOME/.medal-sync"
-# Run from the extracted tools directory:
-pwsh -File ./update-medal-sync.ps1 -PackagePath $package -ExpectedSha256 $hash
-# New installation (programs only):
-pwsh -File ./update-medal-sync.ps1 -PackagePath $package -ExpectedSha256 $hash -Install -Apply -StateRoot $root
-# Update an existing, configured installation:
-pwsh -File ./update-medal-sync.ps1 -PackagePath $package -ExpectedSha256 $hash -Apply -StateRoot $root
-```
-
-Without `-Apply`, a local package is only verified. New installation requires a
-new or empty bin directory; follow [setup](getting-started.md) to configure it.
-Reinstallation after a completed uninstall also uses `-Install`; it preserves
-retained configuration/identity, refuses downgrades and verifies Ready status
-using the newly copied CLI before completing. Failed verification removes the
-new programs and retains the state. Updates require both existing programs, valid adjacent state, no companion or
-Medal process, a reachable **CLEAN** journal with no owner/session, and no retained
-local session login files. The version must increase. Downgrades and reinstalling
-the same installed version through update are refused.
-
-All mutations hold the same Windows session mutex as launch/finish. Paths must
-be explicit, local and free of symbolic links or junctions. Only the named
-companion payload files change; configuration, identity, rclone, cache, media,
-databases and recovery backups remain in place. The package includes licenses.
+Each desktop launch checks the public GitHub endpoint for a newer stable release
+with a two-second network budget. Offline operation, private repositories, rate
+limits and missing or malformed releases continue normal launch. When an update
+is available, download and run its setup EXE after returning the library to Ready.
+There is no automatic background installation.
 
 ## Uninstall
 
-Use a copy of all three scripts outside the installation:
+Open Windows **Settings → Apps → Installed apps → Medal Sync → Uninstall**,
+or use **Uninstall Medal Sync** from the Start menu. The native uninstaller
+requires the programs to be stopped and checks readiness for its Windows user.
+If you supplied credentials for a different administrator account, quit all
+sessions and verify the original user's Ready status before uninstalling.
 
-```powershell
-pwsh -File ./update-medal-sync.ps1 -Uninstall -StateRoot "$HOME/.medal-sync"
-pwsh -File ./update-medal-sync.ps1 -Uninstall -Apply -StateRoot "$HOME/.medal-sync"
-```
+Uninstall removes managed program files, its own shortcuts and Installed apps
+registration. User settings, identity, recordings, cache, backups and unowned
+files are retained. Other accounts' personal state is not modified. The installer
+does not support automatically purging user data. Existing portable installations
+and their startup integration remain separate.
 
-The first command previews removal. Apply requires Medal stopped and, for a
-configured installation, verified Ready status. Saved startup entries and
-shortcuts are restored using the startup helper. Remaining references to this
-installation block binary removal. The companion payload is backed up and
-removed; configuration, identity, receipts, cache, media, databases and dependency
-programs are retained. There is no data-purge option.
+If setup or uninstall is interrupted, retain all personal state and recovery
+receipts, close the interrupted installer and rerun the same or a newer setup
+to repair the managed program files before launching Medal Sync. Uninstall does
+not provide an application downgrade or revert library generations.
 
-## Rollback and interrupted operations
+## Package verification
 
-Update and uninstall retain original payload files under
-`STATE_ROOT/updates/TRANSACTION/previous/`, with `receipt.json` describing the
-operation. Copy, verification or smoke-test failure restores previous payloads
-and records `rolledBack`. A successful operation records `complete`.
+Releases include a SHA-256 sidecar for the setup EXE. Check it against the
+trusted release before running the download. The release pipeline also produces
+a portable ZIP with an exact file allowlist and per-file SHA-256 manifest.
+Public GitHub asset digests support release discovery; requests send no account,
+configuration, identity or credentials. Hash verification depends on control of
+the repository and HTTPS and does not replace publisher signing. Medal Sync's
+own generated binaries and setup EXE are currently unsigned.
 
-Power loss is not an atomic multi-file update. Any unfinished receipt blocks
-another operation. Quit Medal, keep the installation offline, inspect that
-receipt and restore each previous payload to its exact `bin` name. For a failed
-fresh install, remove only the payload names listed by `Get-MedalPayloadNames`;
-there was no previous payload. Verify both executable versions before marking
-the receipt `rolledBack`. Preserve all evidence and state files.
+## Advanced portable lifecycle tool
 
-To undo a completed uninstall, use `-Install` with the same or a newer verified
-package, or restore its previous payload files to `bin` and verify both versions.
-Startup
-restoration is retained after a binary rollback; preview and reapply startup
-integration separately if needed. A normal relaunch performs the usual library
-admission checks.
+The portable ZIP retains `update-medal-sync.ps1` for existing per-user installs.
+Use PowerShell 7 and keep the updater, module and startup helper together outside
+that installation's bin directory. It supports verified download, preview,
+explicit `-Install -Apply`, update `-Apply`, and `-Uninstall -Apply`, with an
+explicit `-StateRoot` and trusted package digest. It keeps transactional backups
+and receipts under the state root's `updates` directory.
+
+Use the native setup and Windows uninstaller for Program Files installations;
+the portable script does not manage the native installer registration.

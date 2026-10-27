@@ -21,3 +21,8 @@ tools/medal-sync/config/dependencies.json. See the upstream
 [rclone license](https://github.com/rclone/rclone/blob/master/COPYING) and
 [WinFsp license](https://github.com/winfsp/winfsp/blob/master/License.txt).
 They are not included in the Medal Sync release archive.
+
+The native setup EXE is built with pinned [Inno Setup](https://jrsoftware.org/isinfo.php).
+Its compiler installer is verified by SHA-256 and Authenticode before installation
+in the developer's ignored tool cache. Inno Setup's generated setup/uninstall
+runtime retains its upstream notices. The compiler is not part of the portable ZIP.

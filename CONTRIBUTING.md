@@ -2,7 +2,9 @@
 
 Use Windows, PowerShell 7, the .NET SDK pinned in global.json, Node 24 and
 Python 3.11+. Run `pwsh -File scripts/validate.ps1` to validate and
-`pwsh -File scripts/package-release.ps1` to build a verified release package.
+`pwsh -File scripts/package-windows-installer.ps1` to build the verified setup
+EXE and portable ZIP. The first build installs the pinned, signed Inno Setup
+compiler into ignored `.validation/build-tools/` for the current developer.
 
 Tests require no account, server, credentials or recordings. Fixtures are
 synthetic; Windows registry and shortcut tests use temporary resources.

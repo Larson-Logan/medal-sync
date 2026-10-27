@@ -28,6 +28,14 @@ public sealed class ReleaseUpdateTests
         Assert.Null(ReleaseUpdate.AvailableVersion(Release().Replace("https://github.com/", "https://example.com/"), "0.2.0"));
     }
 
+    [Fact]
+    public void FindsPublishedNativeSetupWithExpectedDigestAndRepositoryUrl()
+    {
+        string setup = Release().Replace("-win-x64.zip", "-setup-win-x64.exe");
+        Assert.Equal("0.3.0", ReleaseUpdate.AvailableVersion(setup, "0.2.0"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(setup.Replace("github.com/Larson-Logan", "example.com/other"), "0.2.0"));
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.NotFound)]
     [InlineData(HttpStatusCode.Forbidden)]
