@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.Json;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Session;
-using LarsonServer.MedalSync.Storage;
+using MedalSync.Config;
+using MedalSync.Coordination;
+using MedalSync.Session;
+using MedalSync.Storage;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 /// <summary>
 /// The rclone + WinFsp drive for one session. Not exercised by automated tests:
@@ -85,9 +85,17 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
         long pending = Directory.Exists(cache)
             ? new DirectoryInfo(cache).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length)
             : 0;
-        var verdict = CapacityAdmission.Evaluate(new CapacityInputs(drive.AvailableFreeSpace, (long)config.Mount.MinFreeGiB << 30,
-            bitrateMbps, TimeSpan.FromHours(config.MaxSessionHours), pending));
-        if (!verdict.Admitted) throw new UnsafeOperationException(verdict.Summary);
+        var inputs = new CapacityInputs(drive.AvailableFreeSpace, (long)config.Mount.MinFreeGiB << 30,
+            bitrateMbps, TimeSpan.FromHours(config.MaxSessionHours), pending);
+        IReadOnlyList<CapacityVerdict> verdicts = [CapacityAdmission.Evaluate(inputs)];
+        if (config.Replication?.LocalCopyRoot is { } persistent)
+        {
+            var local = new DriveInfo(Path.GetPathRoot(persistent)!);
+            verdicts = CapacityAdmission.WithPersistentCopy(inputs, local.AvailableFreeSpace,
+                string.Equals(local.Name, drive.Name, StringComparison.OrdinalIgnoreCase));
+        }
+        foreach (var verdict in verdicts)
+            if (!verdict.Admitted) throw new UnsafeOperationException(verdict.Summary);
     }
 
     public MountHealth Health()
@@ -101,7 +109,7 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
             using var document = JsonDocument.Parse(stats);
             if (document.RootElement.ValueKind != JsonValueKind.Object
                 || !document.RootElement.TryGetProperty("fs", out var fs) || fs.ValueKind != JsonValueKind.String
-                || !VfsStatus.SameRemote(fs.GetString()!, config.Remote))
+                || !VfsStatus.SameRemote(fs.GetString()!, config.MountRemote))
             {
                 return new MountHealth(false, $"{DriveRoot} is not serving {config.Remote}.");
             }
@@ -123,7 +131,7 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
     {
         var control = Control();
         if (control is null) return DrainVerdict.Unknown("This PC does not know the drive's session.");
-        return VfsStatus.Evaluate(control.Call("vfs/stats"), control.Call("vfs/queue"), config.Remote);
+        return VfsStatus.Evaluate(control.Call("vfs/stats"), control.Call("vfs/queue"), config.MountRemote);
     }
 
     public bool Stop()

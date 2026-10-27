@@ -1,13 +1,13 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.Json;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Storage;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Library;
+using MedalSync.Storage;
+using MedalSync.Util;
 using Microsoft.Win32;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 internal sealed record DriveSummary(string Letter, string Type, string? Format, double? TotalGb, double? FreeGb);
 
@@ -80,9 +80,9 @@ internal static class Inventory
             capacity = CapacityAdmission.Evaluate(new CapacityInputs(new DriveInfo(cacheDrive).AvailableFreeSpace,
                 (long)(config?.Mount.MinFreeGiB ?? 20) << 30, bitrate, TimeSpan.FromHours(config?.MaxSessionHours ?? 4), 0));
         }
-        string larsonServer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LarsonServer");
-        var folders = Try(() => SyncthingCheck.Folders(larsonServer), out _) ?? [];
-        var exclusions = config?.SyncExclusions ?? [new SyncExclusion("larson-drive-media", "/Videos/Clips")];
+        string legacyProfiles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LarsonServer");
+        var folders = Try(() => SyncthingCheck.Folders(legacyProfiles), out _) ?? [];
+        var exclusions = config?.SyncExclusions ?? [];
         return new InventoryReport(now, Environment.MachineName, Environment.UserName, RuntimeInformation.OSDescription,
             install?.Versions.App, install?.Versions.Recorder, install is not null && new MedalProcess(install).IsRunning(),
             library, libraryError, tree, Drives(), proposed, !Directory.Exists(proposed), capacity, StartupEntries(),
@@ -162,7 +162,7 @@ internal static class Inventory
         string? winfsp = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\WinFsp")?.GetValue("InstallDir") as string;
         result["WinFsp"] = winfsp is not null && File.Exists(Path.Combine(winfsp, "bin", "winfsp-x64.dll")) ? $"installed at {winfsp}" : "not installed";
         string rclone = config?.ExpandedRclonePath
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LarsonServer", "MedalSync", "bin", "rclone.exe");
+            ?? Path.Combine(LocalState.ForCurrentUser().Root, "bin", "rclone.exe");
         result["rclone"] = File.Exists(rclone) ? $"present at {rclone} (sha256 {Hashing.Sha256File(rclone)})" : $"not present at {rclone}";
         return result;
     }

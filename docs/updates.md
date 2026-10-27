@@ -6,11 +6,14 @@ maintainer publishes a release. This is the normal Windows installer.
 
 ## Install
 
-1. Run the setup EXE and approve Windows' administrator prompt.
-2. Review the license and program folder. The default is
-   `C:\Program Files\Medal Sync`.
+1. Run the setup EXE and choose installation for all users or just your account.
+   The all-users option requires Windows administrator approval.
+2. Review storage guidance, dependency status, license and program folder.
+   All-users setup defaults to `C:\Program Files\Medal Sync`; per-user setup
+   uses your local Programs folder.
 3. Choose whether to add a desktop shortcut, then select **Install**.
-4. Open **Medal Sync** from the Start menu when you are ready to use it.
+4. Read **Medal Sync Setup Guide** from the completion page or Start menu,
+   then open **Medal Sync** once configuration and enrollment are complete.
 
 The installer includes the self-contained companion and .NET runtime. Ordinary
 installation needs neither PowerShell nor a separate .NET installation. rclone,

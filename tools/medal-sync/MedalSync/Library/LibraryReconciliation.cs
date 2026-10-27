@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 internal sealed record IdentityMapping(string IncomingId, string SharedId);
 internal sealed record EnrollmentFile(string Source, string CapturePath);

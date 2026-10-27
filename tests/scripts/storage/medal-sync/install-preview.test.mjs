@@ -30,7 +30,7 @@ test('pinned downloads name their version and carry a SHA-256 digest', () => {
 test('dependency preview writes nothing and installs nothing', { skip: !(windows && pwsh) }, (t) => {
   const localAppData = fs.mkdtempSync(path.join(os.tmpdir(), 'medal-sync-preview-'));
   t.after(() => fs.rmSync(localAppData, { recursive: true, force: true }));
-  const result = spawnSync('pwsh', ['-NoProfile', '-File', path.join(scripts, 'install-medal-sync-dependencies.ps1')], {
+  const result = spawnSync('pwsh', ['-NoProfile', '-File', path.join(scripts, 'install-medal-sync-dependencies.ps1'), '-StateRoot', path.join(localAppData, 'state')], {
     env: { ...process.env, LOCALAPPDATA: localAppData },
     encoding: 'utf8',
   });

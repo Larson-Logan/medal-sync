@@ -1,7 +1,7 @@
 using System.Text.Json;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 internal enum AssetRole
 {

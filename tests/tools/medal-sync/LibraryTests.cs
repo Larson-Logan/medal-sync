@@ -1,8 +1,8 @@
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Tests.Fixtures;
+using MedalSync.Library;
+using MedalSync.Tests.Fixtures;
 using Microsoft.Data.Sqlite;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class LibraryTests : IDisposable
 {

@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Session;
+using MedalSync.Platform;
+using MedalSync.Session;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class WindowsShutdownTests
 {

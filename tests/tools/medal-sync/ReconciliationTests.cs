@@ -1,13 +1,13 @@
 using System.Text.Json.Nodes;
-using LarsonServer.MedalSync.Cli;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Tests.Fixtures;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Cli;
+using MedalSync.Config;
+using MedalSync.Coordination;
+using MedalSync.Library;
+using MedalSync.Platform;
+using MedalSync.Tests.Fixtures;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class ReconciliationTests : IDisposable
 {

@@ -6,7 +6,7 @@
   "remote": "\\\\192.0.2.10\\Data\\AppData\\MedalSync-spike",
   "captureFolder": "M:\\Clips",
   "cacheRoot": "E:\\MedalCache-spike",
-  "rclonePath": "%LOCALAPPDATA%\\LarsonServer\\MedalSync\\bin\\rclone.exe",
+  "rclonePath": "%USERPROFILE%\\.medal-sync\\bin\\rclone.exe",
   "mount": {
     "writeBackSeconds": 5,
     "cacheMaxGiB": 20,

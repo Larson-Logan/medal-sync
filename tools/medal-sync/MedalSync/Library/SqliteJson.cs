@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 /// <summary>
 /// Renders JSON exactly the way SQLite's <c>json()</c> does, so edited metadata

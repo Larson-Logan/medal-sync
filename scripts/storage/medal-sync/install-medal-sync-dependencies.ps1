@@ -5,13 +5,13 @@ Installs the pinned rclone build for medal-sync and checks WinFsp. Preview by de
 .DESCRIPTION
 Reads tools/medal-sync/config/dependencies.json. With -Apply it downloads the
 pinned rclone zip into a new empty folder, refuses it unless the SHA-256
-matches, and copies only rclone.exe into %LOCALAPPDATA%\LarsonServer\MedalSync\bin.
+matches, and copies only rclone.exe into %USERPROFILE%\.medal-sync\bin.
 WinFsp needs administrator approval, so this script never installs it: it
 reports whether it is present and prints the pinned MSI and digest for the
 owner to install. Nothing here changes Medal, its settings or any clip.
 #>
 [CmdletBinding()]
-param([switch]$Apply)
+param([switch]$Apply, [string]$StateRoot = (Join-Path $env:USERPROFILE '.medal-sync'))
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -19,7 +19,7 @@ if (-not $IsWindows) { throw 'medal-sync runs on Windows only.' }
 
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
 $pins = Get-Content -Raw -LiteralPath (Join-Path $root 'tools\medal-sync\config\dependencies.json') | ConvertFrom-Json
-$binDirectory = Join-Path $env:LOCALAPPDATA 'LarsonServer\MedalSync\bin'
+$binDirectory = Join-Path $StateRoot 'bin'
 $rclone = Join-Path $binDirectory 'rclone.exe'
 
 function Get-WinFspDirectory {

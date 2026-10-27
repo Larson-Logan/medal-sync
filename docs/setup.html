@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up Medal Sync</title>
+<style>
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.6; }
+body { max-width: 850px; margin: 3rem auto; padding: 0 1.5rem; }
+h1,h2 { line-height: 1.2; } h1 { font-size: 2.5rem; }
+article { border: 1px solid #8888; border-radius: 12px; padding: 1rem 1.5rem; margin: 1.25rem 0; }
+code { overflow-wrap: anywhere; } a { color: light-dark(#2254ad, #91b9ff); }
+.intro { font-size: 1.2rem; } li { margin: .6rem 0; }
+</style>
+<main>
+<p>MEDAL SYNC · WINDOWS SETUP</p>
+<h1>Your recordings, on your storage.</h1>
+<p class="intro">Setup has installed the companion. Follow these steps to connect a library and choose where your clips live.</p>
+<article><h2>1. Install the storage dependencies</h2>
+<p>The clip drive uses <a href="https://rclone.org/downloads/">rclone</a> and <a href="https://winfsp.dev/rel/">WinFsp</a>.
+Use the pinned dependency helper in the source distribution, or follow the
+<a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md">getting started guide</a>.
+The Medal Sync executables already include .NET.</p></article>
+<article><h2>2. Choose your storage</h2><ul>
+<li><strong>Server with SSD cache:</strong> keep your complete media collection on an SMB share and use local SSD space while recording.</li>
+<li><strong>Server and persistent local copy:</strong> add <code>--local-copy-root E:\MedalLibrary</code> when creating configuration.
+Clips are recorded locally and copied to the server before handoff. The local collection stays after the session.</li>
+<li><strong>Cloud replicas:</strong> configure OneDrive, Dropbox or Google Drive using <code>rclone config --config C:\Private\rclone.conf</code>,
+then add <code>--cloud-remote onedrive:MedalSync --rclone-config C:\Private\rclone.conf</code>.
+Cloud copies contain referenced media. The shared library journal stays on SMB.</li>
+</ul><p>Read the <a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/storage.md">storage guide</a> for complete examples and multiple cloud destinations.</p></article>
+<article><h2>3. Preview, verify, then enroll</h2>
+<p>Quit Medal normally and keep an independent media backup. Use <code>config create</code> to preview a candidate configuration,
+then <code>config validate --config FILE</code>. Follow the getting started guide to verify assets and initialize a new library,
+or enroll an additional PC into an existing one.</p><p>Your account login, microphone settings and device identity stay on each PC.</p></article>
+<article><h2>4. Launch through Medal Sync</h2>
+<p>Open Medal Sync from the Start menu. After quitting Medal, wait for <strong>Ready</strong> before switching PCs.
+An interrupted upload keeps the session and local files for retry. Updates and uninstall also require Ready.</p></article>
+<p><a href="https://github.com/Larson-Logan/medal-sync">Project</a> ·
+<a href="https://github.com/Larson-Logan/medal-sync/issues">Report an issue</a> ·
+<a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/updates.md">Updates and removal</a></p>
+</main>
+</html>

@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace LarsonServer.MedalSync.Tests.Fixtures;
+namespace MedalSync.Tests.Fixtures;
 
 /// <summary>
 /// Disposable synthetic Medal libraries built from the real schema (no real

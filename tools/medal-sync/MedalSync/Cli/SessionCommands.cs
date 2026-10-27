@@ -1,20 +1,21 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Session;
-using LarsonServer.MedalSync.Storage;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Coordination;
+using MedalSync.Library;
+using MedalSync.Platform;
+using MedalSync.Session;
+using MedalSync.Storage;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Cli;
+namespace MedalSync.Cli;
 
 /// <summary>Commands that need this PC's configuration. The mutating ones require <c>--apply</c>.</summary>
 [SupportedOSPlatform("windows")]
 internal static class SessionCommands
 {
-    private const string InstanceMutex = @"Local\LarsonServer.MedalSync";
+    // OS compatibility protocol: older installed supervisors and setup use this same name.
+    internal const string InstanceMutex = @"Local\LarsonServer.MedalSync";
 
     private sealed record Context(LocalState State, MedalSyncConfig Config, MedalInstall Install, DeviceIdentity Device, RotatingLog Log);
 
@@ -319,7 +320,12 @@ internal static class SessionCommands
                 SaveReviewedChanges(context.State.BackupDirectory, review);
                 context.Log.Write($"review: accepted {review.Changes.Count} change(s) in session {review.SessionId}, digest {review.After.Digest()}");
                 return true;
-            }, shutdown), store, mount);
+            }, shutdown, context.Config.Replication is null ? null : new StorageReplication(context.Config, context.State, () =>
+            {
+                shutdown?.RequireTime();
+                if (new MedalProcess(context.Install).IsRunning())
+                    throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
+            })), store, mount);
     }
 
     internal static string SaveReviewedChanges(string backupDirectory, LibraryChangeReview review)

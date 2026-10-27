@@ -1,9 +1,9 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Library;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Coordination;
+namespace MedalSync.Coordination;
 
 internal sealed record MedalVersions(string? App, string? Recorder);
 

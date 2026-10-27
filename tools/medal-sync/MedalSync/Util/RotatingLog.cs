@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text;
 
-namespace LarsonServer.MedalSync.Util;
+namespace MedalSync.Util;
 
 /// <summary>Plain-text log capped at <c>files</c> × <c>maxBytes</c> (plan: ten 5 MiB files per PC).</summary>
 internal sealed class RotatingLog(string directory, string name = "medal-sync", long maxBytes = 5L << 20, int files = 10)

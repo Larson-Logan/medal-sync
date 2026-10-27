@@ -23,7 +23,7 @@ param(
     [Parameter(ParameterSetName = 'Apply')][switch]$Apply,
     [Parameter(ParameterSetName = 'Restore')][switch]$Restore,
     [Parameter(ParameterSetName = 'Check')][switch]$Check,
-    [string]$StateRoot = (Join-Path $env:LOCALAPPDATA 'LarsonServer\MedalSync'),
+    [string]$StateRoot = (Join-Path $env:USERPROFILE '.medal-sync'),
     [string]$Launcher,
     # Tests point these at a scratch registry key standing in for HKCU:\Software
     # and at scratch shortcut folders.

@@ -1,4 +1,4 @@
-namespace LarsonServer.MedalSync.Util;
+namespace MedalSync.Util;
 
 /// <summary>
 /// Durable writes for the coordination directory and local state. Every write

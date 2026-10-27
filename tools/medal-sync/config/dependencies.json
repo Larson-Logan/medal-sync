@@ -13,7 +13,7 @@
       "https://downloads.rclone.org/v1.75.2/SHA256SUMS (PGP-signed list)",
       "GitHub release asset digest for rclone/rclone v1.75.2"
     ],
-    "installTo": "%LOCALAPPDATA%\\LarsonServer\\MedalSync\\bin\\rclone.exe"
+    "installTo": "%USERPROFILE%\\.medal-sync\\bin\\rclone.exe"
   },
   "winfsp": {
     "version": "2.1.25156",

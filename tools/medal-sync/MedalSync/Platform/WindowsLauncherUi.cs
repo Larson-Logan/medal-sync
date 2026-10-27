@@ -1,9 +1,9 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using LarsonServer.MedalSync.Cli;
-using LarsonServer.MedalSync.Library;
+using MedalSync.Cli;
+using MedalSync.Library;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 /// <summary>Plain Windows message boxes; no UI framework is bundled.</summary>
 [SupportedOSPlatform("windows")]

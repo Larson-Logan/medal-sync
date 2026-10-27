@@ -1,4 +1,4 @@
-namespace LarsonServer.MedalSync.Coordination;
+namespace MedalSync.Coordination;
 
 internal enum OwnershipState
 {

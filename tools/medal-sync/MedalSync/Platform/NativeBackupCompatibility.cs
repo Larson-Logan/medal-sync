@@ -1,10 +1,10 @@
 using System.Runtime.Versioning;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Library;
+using MedalSync.Util;
 using Microsoft.Win32;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 [SupportedOSPlatform("windows")]
 internal static class NativeBackupCompatibility
@@ -16,7 +16,7 @@ internal static class NativeBackupCompatibility
         // do not extrapolate this compatibility behavior to unknown builds.
         if (install.Versions.App != "2643.583.1" || install.Versions.Recorder != "2643.3040.1")
             throw new IncompatibleLibraryException("Medal's native backup compatibility needs verification for this application/recorder build.");
-        string backup = config.ServerCapture.Append("Databases", $"medal-{config.AccountId}.db").Display;
+        string backup = config.MountedCapture.Append("Databases", $"medal-{config.AccountId}.db").Display;
         NativeBackupIdentity.Align(install.DatabasePath, backup, Path.Combine(state.BackupDirectory, "native-identity"), config.AccountId);
         // Medal consults this registry map before it reads ClipFolder from the
         // local DB. A stale old-folder map could first restore another backup.

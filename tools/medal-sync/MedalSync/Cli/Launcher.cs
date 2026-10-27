@@ -1,13 +1,13 @@
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Session;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Library;
+using MedalSync.Platform;
+using MedalSync.Session;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Cli;
+namespace MedalSync.Cli;
 
 /// <summary>How the windowless launcher talks to the user.</summary>
 internal interface ILauncherUi

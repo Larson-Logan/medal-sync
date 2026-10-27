@@ -30,7 +30,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=commandline
+PrivilegesRequiredOverridesAllowed=dialog
 WizardStyle=modern dynamic windows11
 Compression=lzma2
 SolidCompression=yes
@@ -47,6 +47,7 @@ VersionInfoVersion={#AppVersion}
 Name: desktopicon; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Files]
+Source: "..\..\docs\setup.html"; DestDir: "{app}"; Flags: ignoreversion
 Source: "setup-layout.json"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#PayloadDir}\medal-sync.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#PayloadDir}\medal-sync-launch.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
@@ -57,16 +58,19 @@ Source: "{#PayloadDir}\DOTNET-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversi
 Source: "{#PayloadDir}\medal-sync.exe"; DestName: "medal-sync-check.exe"; Flags: dontcopy
 
 [Icons]
+Name: "{group}\Medal Sync Setup Guide"; Filename: "{app}\setup.html"
 Name: "{group}\Medal Sync"; Filename: "{app}\bin\medal-sync-launch.exe"; WorkingDir: "{app}\bin"
 Name: "{group}\Uninstall Medal Sync"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Medal Sync"; Filename: "{app}\bin\medal-sync-launch.exe"; WorkingDir: "{app}\bin"; Tasks: desktopicon
 
 [Run]
+Filename: "{app}\setup.html"; Description: "Read the setup and storage guide"; Flags: shellexec postinstall skipifsilent runasoriginaluser
 Filename: "{app}\bin\medal-sync-launch.exe"; Description: "Open Medal Sync"; Flags: nowait postinstall skipifsilent runasoriginaluser unchecked
 
 [Code]
 var
   CheckNumber: Integer;
+  StoragePage: TOutputMsgWizardPage;
 
 function CheckReady(ForUninstall: Boolean): String;
 var
@@ -142,7 +146,21 @@ begin
 end;
 
 procedure InitializeWizard();
+var
+  WinFspDirectory, DependencyStatus: String;
 begin
+  if RegQueryStringValue(HKLM32, 'SOFTWARE\WinFsp', 'InstallDir', WinFspDirectory) and
+     FileExists(AddBackslash(WinFspDirectory) + 'bin\winfsp-x64.dll') then
+    DependencyStatus := 'WinFsp is installed.'
+  else
+    DependencyStatus := 'WinFsp is not detected. Install it before opening a shared clip drive; the setup guide links to the required dependencies.';
+  StoragePage := CreateOutputMsgPage(wpWelcome, 'Plan your storage',
+    'Choose how to store your recordings after setup',
+    'Server with SSD cache: clips upload to your SMB server; the session cache is released after verified handoff.' + #13#10 + #13#10 +
+    'Keep a local copy: record to a persistent local folder, then copy and verify media on the server before switching PCs.' + #13#10 + #13#10 +
+    'Optional cloud copies: add OneDrive, Dropbox or Google Drive with a named rclone remote. Sign in through rclone after setup.' + #13#10 + #13#10 +
+    DependencyStatus + #13#10 + #13#10 +
+    'Setup installs programs and an offline guide. The guide explains configuration and enrollment.');
   WizardForm.WelcomeLabel2.Caption :=
     'This will install Medal Sync on your computer.' + #13#10 + #13#10 +
     'Programs are installed in Program Files. Your settings, library, recordings and cache stay in your user profile and existing storage locations.' + #13#10 + #13#10 +

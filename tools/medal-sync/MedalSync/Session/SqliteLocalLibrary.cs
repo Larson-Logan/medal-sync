@@ -1,7 +1,7 @@
 using System.Text.Json;
-using LarsonServer.MedalSync.Library;
+using MedalSync.Library;
 
-namespace LarsonServer.MedalSync.Session;
+namespace MedalSync.Session;
 
 /// <summary>The local Medal database, read and restored through the library adapter.</summary>
 internal sealed class SqliteLocalLibrary(string databasePath, string accountId, string backupDirectory, IClock clock) : ILocalLibrary

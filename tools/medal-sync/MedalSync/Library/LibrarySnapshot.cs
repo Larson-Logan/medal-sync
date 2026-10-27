@@ -1,9 +1,9 @@
 using System.Buffers;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 /// <summary>One stored value. A null cell is represented by a C# null.</summary>
 internal abstract record Cell;

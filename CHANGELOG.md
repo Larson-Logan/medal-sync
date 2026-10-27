@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 — Unreleased
+
+- Generic `MedalSync` code namespace and profile-based defaults, with existing
+  configurations, identities and compatibility mutexes retained.
+- Optional persistent local recording storage with verified upload to SMB.
+- Required OneDrive, Dropbox and Google Drive media replicas through named
+  rclone remotes, exact file lists and byte verification before handoff.
+- Replica failures, conflicts and shutdown interruption retain ownership and
+  media; successful verification produces a private receipt.
+- Setup storage guidance, WinFsp detection, per-user installation selection
+  and an offline guide available from the Start menu.
+- Expanded storage documentation, GitHub overview and credential-file hygiene.
+
 ## 0.3.0 — Unreleased
 
 - Native Windows setup EXE with a Program Files destination, Start menu and

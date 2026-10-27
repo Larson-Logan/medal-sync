@@ -30,6 +30,13 @@ then an older `%LOCALAPPDATA%/LarsonServer/MedalSync` configuration. Fresh
 installations use `$HOME/.medal-sync`. Existing portable installations continue
 using adjacent state. No identity or library data is copied by setup.
 
+## Choose storage
+
+Use server storage with an SSD cache, keep a persistent local copy that uploads
+back to the server, and optionally add verified OneDrive, Dropbox or Google Drive
+replicas. See [storage choices and configuration](storage.md) for commands and
+multiple-provider examples. SMB remains the shared ownership authority.
+
 ## Plan configuration before using live data
 
 The JSON examples under `tools/medal-sync/config/` contain placeholders. The

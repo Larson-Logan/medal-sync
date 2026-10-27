@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 /// <summary>Human-readable form of the inventory, with blockers called out.</summary>
 internal static class InventoryText

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace LarsonServer.MedalSync.Util;
+namespace MedalSync.Util;
 
 internal static class Json
 {

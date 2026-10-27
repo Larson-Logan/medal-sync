@@ -1,9 +1,9 @@
 using System.Text;
 using System.Text.RegularExpressions;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Util;
 using Microsoft.Data.Sqlite;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 /// <summary>What a library database's schema looks like, as read from it.</summary>
 internal sealed record SchemaInfo(

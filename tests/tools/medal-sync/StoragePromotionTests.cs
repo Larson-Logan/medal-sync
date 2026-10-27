@@ -1,9 +1,9 @@
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Storage;
-using LarsonServer.MedalSync.Tests.Fixtures;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Storage;
+using MedalSync.Tests.Fixtures;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class StoragePromotionTests : IDisposable
 {

@@ -1,6 +1,6 @@
-using LarsonServer.MedalSync.Util;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class WindowsPathTests
 {

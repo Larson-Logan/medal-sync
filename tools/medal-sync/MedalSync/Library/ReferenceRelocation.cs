@@ -1,6 +1,6 @@
-using LarsonServer.MedalSync.Util;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 /// <summary>One library path that moves from an old folder to the capture folder.</summary>
 internal sealed record Relocation(string ContentId, string Column, string Original, WindowsPath From, WindowsPath To);

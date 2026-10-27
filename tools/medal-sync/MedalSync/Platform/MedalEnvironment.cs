@@ -3,10 +3,10 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Session;
+using MedalSync.Coordination;
+using MedalSync.Session;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 internal sealed record MedalInstall(string InstallDirectory, string DatabasePath, string AccountId, string Executable, MedalVersions Versions);
 

@@ -1,10 +1,10 @@
 using System.Text.Json;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Library;
+using MedalSync.Platform;
+using MedalSync.Util;
 using Microsoft.Data.Sqlite;
 
-namespace LarsonServer.MedalSync.Cli;
+namespace MedalSync.Cli;
 
 /// <summary>Library commands. Only <c>repair</c> and <c>relocate</c> change the live database, with Medal quit and a backup first.</summary>
 internal static class LibraryCommands

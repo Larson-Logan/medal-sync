@@ -11,6 +11,13 @@ body:
     validations:
       required: true
   - type: textarea
+    id: storage
+    attributes:
+      label: Storage configuration
+      description: State whether you use server cache, persistent local storage, and which cloud provider names. Do not include credentials, remote account IDs or private paths.
+    validations:
+      required: true
+  - type: textarea
     id: reproduction
     attributes:
       label: Steps, expected behavior and actual behavior

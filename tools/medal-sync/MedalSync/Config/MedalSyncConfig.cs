@@ -1,8 +1,8 @@
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Storage;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Coordination;
+using MedalSync.Storage;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Config;
+namespace MedalSync.Config;
 
 internal sealed record MountConfig(
     int WriteBackSeconds,
@@ -18,7 +18,7 @@ internal sealed record MountConfig(
 internal sealed record SyncExclusion(string FolderId, string Pattern);
 
 /// <summary>
-/// Per-PC settings in <c>%LOCALAPPDATA%\LarsonServer\MedalSync\config.json</c>.
+/// Per-PC settings in the resolved Medal Sync user state directory.
 /// Holds no credentials: SMB access uses the PC's existing saved login.
 /// </summary>
 internal sealed record MedalSyncConfig(
@@ -35,6 +35,13 @@ internal sealed record MedalSyncConfig(
     IReadOnlyList<SyncExclusion> SyncExclusions)
 {
     public const int CurrentFormat = 1;
+
+    /// <summary>Optional persistent local storage and required media replicas.</summary>
+    public ReplicationConfig? Replication { get; init; }
+
+    public string MountRemote => Replication?.LocalCopyRoot ?? Remote;
+
+    public WindowsPath MountedCapture => Capture.Rebase(DriveRoot, WindowsPath.Parse(MountRemote));
 
     /// <summary>
     /// Written in the capture folder so a wrong or empty share is recognized. It
@@ -58,7 +65,7 @@ internal sealed record MedalSyncConfig(
     public string ExpandedRclonePath => Environment.ExpandEnvironmentVariables(RclonePath);
 
     public MountSettings MountSettings(string session, string logFile) => new(
-        Remote, Capture.Root[0], SessionCacheDirectory(session),
+        MountRemote, Capture.Root[0], SessionCacheDirectory(session),
         TimeSpan.FromSeconds(Mount.WriteBackSeconds), (long)Mount.CacheMaxGiB << 30, (long)Mount.MinFreeGiB << 30,
         TimeSpan.FromSeconds(Mount.CacheMaxAgeSeconds), TimeSpan.FromSeconds(Mount.CachePollSeconds),
         TimeSpan.FromHours(Mount.DirCacheHours), Mount.Transfers, Mount.ControlPort, "Medal Clips", logFile);
@@ -89,6 +96,7 @@ internal sealed record MedalSyncConfig(
             problems.Add("cacheRoot must be a local SSD folder, not the share or the virtual drive");
         }
         if (string.IsNullOrWhiteSpace(RclonePath)) problems.Add("rclonePath is required");
+        if (Replication is not null) problems.AddRange(Replication.Problems(this));
         if (MaxSessionHours is <= 0 or > 24) problems.Add("maxSessionHours must be between 0 and 24");
         if (problems.Count == 0)
         {

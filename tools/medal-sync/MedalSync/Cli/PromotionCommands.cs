@@ -1,11 +1,11 @@
 using System.Runtime.Versioning;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Storage;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Library;
+using MedalSync.Platform;
+using MedalSync.Storage;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Cli;
+namespace MedalSync.Cli;
 
 [SupportedOSPlatform("windows")]
 internal static class PromotionCommands

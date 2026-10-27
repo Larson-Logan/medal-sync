@@ -1,6 +1,6 @@
-using LarsonServer.MedalSync.Coordination;
+using MedalSync.Coordination;
 
-namespace LarsonServer.MedalSync.Session;
+namespace MedalSync.Session;
 
 /// <summary>The everyday status words from the plan, from this PC's point of view.</summary>
 internal static class StatusText

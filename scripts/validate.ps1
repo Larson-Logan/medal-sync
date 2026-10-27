@@ -17,6 +17,7 @@ try {
     Invoke-Checked python @('tests/scripts/storage/medal-sync/recycle-exclusion.test.py')
     Invoke-Checked pwsh @('-NoProfile','-File','tests/scripts/storage/medal-sync/update-release.test.ps1')
     Invoke-Checked python @('scripts/check-repository.py')
+    Invoke-Checked python @('scripts/update-source-manifest.py', '--check')
     Invoke-Checked python @('tests/test_source_hygiene.py')
     $docs = @(& python scripts/check-repository.py --list-docs)
     if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate source documentation.' }

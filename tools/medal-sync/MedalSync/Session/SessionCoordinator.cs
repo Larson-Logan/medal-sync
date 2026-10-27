@@ -1,10 +1,10 @@
 using System.Data.Common;
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Storage;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Coordination;
+using MedalSync.Library;
+using MedalSync.Storage;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Session;
+namespace MedalSync.Session;
 
 internal enum LaunchStatus
 {
@@ -44,7 +44,8 @@ internal sealed class SessionCoordinator(
     SessionOptions options,
     Action? prepareNativeBackup = null,
     Func<LibraryChangeReview, bool>? reviewLibraryChanges = null,
-    SessionShutdown? shutdown = null)
+    SessionShutdown? shutdown = null,
+    IStorageReplication? replication = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
 
@@ -137,6 +138,7 @@ internal sealed class SessionCoordinator(
             RequireNoUnsharedChanges(generation);
             restored = library.Restore(generation.Snapshot);
             RequireCaptureFolder();
+            replication?.Prepare(generation.Snapshot);
             mount.Start(session, forRecording: true);
             var health = mount.Health();
             if (!health.Healthy) throw new UnsafeOperationException(health.Detail);
@@ -298,6 +300,10 @@ internal sealed class SessionCoordinator(
             }
         }
         shutdown?.RequireTime();
+        replication?.Publish(snapshot);
+        if (Reopened(session) is { } duringReplication) return duringReplication;
+        if (library.Read().Digest() != snapshot.Digest())
+            return new FinishOutcome(FinishStatus.Blocked, "The library changed during replication; retry finish on this PC.", journal.CommittedGeneration);
         var onServer = assets.OnServer(snapshot);
         shutdown?.RequireTime();
         var missing = onServer.Blocking.ToList();

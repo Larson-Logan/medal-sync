@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 /// <summary>An exact, stopped-library review; approval never carries into another session or snapshot.</summary>
 internal sealed record LibraryChangeReview(string SessionId, long Generation, LibrarySnapshot Before,

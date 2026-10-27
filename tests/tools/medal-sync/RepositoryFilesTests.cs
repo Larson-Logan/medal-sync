@@ -1,8 +1,8 @@
 using System.Text.Json;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Library;
+using MedalSync.Config;
+using MedalSync.Library;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 /// <summary>Keeps the committed templates and pins in step with the code.</summary>
 public sealed class RepositoryFilesTests

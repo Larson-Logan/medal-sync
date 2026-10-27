@@ -1,4 +1,4 @@
-namespace LarsonServer.MedalSync.Storage;
+namespace MedalSync.Storage;
 
 internal sealed record CapacityInputs(long FreeBytes, long ReserveBytes, double BitrateMbps, TimeSpan MaxSession, long PendingUploadBytes);
 
@@ -11,6 +11,15 @@ internal sealed record CapacityVerdict(bool Admitted, long ProjectedCaptureBytes
 /// </summary>
 internal static class CapacityAdmission
 {
+    public static IReadOnlyList<CapacityVerdict> WithPersistentCopy(CapacityInputs cache, long persistentFreeBytes, bool sameVolume)
+    {
+        var cached = Evaluate(cache);
+        // On one volume, cached writes and the persistent copy may occupy space at the same time.
+        return sameVolume
+            ? [Evaluate(cache with { PendingUploadBytes = checked(cache.PendingUploadBytes + cached.ProjectedCaptureBytes) })]
+            : [cached, Evaluate(cache with { FreeBytes = persistentFreeBytes, PendingUploadBytes = 0 })];
+    }
+
     public static CapacityVerdict Evaluate(CapacityInputs inputs)
     {
         if (inputs.BitrateMbps <= 0 || double.IsNaN(inputs.BitrateMbps) || inputs.MaxSession <= TimeSpan.Zero)

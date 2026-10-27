@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 internal sealed record RestoreOptions(
     string ExpectedAccountId,
