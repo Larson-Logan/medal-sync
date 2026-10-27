@@ -39,11 +39,11 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         RequireOrdinaryDirectory(source);
         var files = ReplicationPlan.Files(snapshot, config.Capture, source, _probe);
         if (replication.LocalCopyRoot is not null)
-            CopyAndCheck(source.Display, config.ServerCapture.Display, files, cloud: false);
+            CopyAndCheck(source.Display, config.ServerCapture.Display, files, cloud: false, versionConflicts: replication.ConflictPolicy == ReplicaConflictPolicy.Version);
         foreach (var target in replication.Targets)
         {
             requireIdle();
-            CopyAndCheck(source.Display, ReplicationPlan.Destination(target, config.LibraryId), files, cloud: true);
+            CopyAndCheck(source.Display, ReplicationPlan.Destination(target, config.LibraryId), files, cloud: true, versionConflicts: replication.ConflictPolicy == ReplicaConflictPolicy.Version);
         }
         requireIdle();
         RequireMarker(source);
@@ -56,7 +56,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         }));
     }
 
-    private void CopyAndCheck(string source, string target, IReadOnlyList<string> files, bool cloud)
+    private void CopyAndCheck(string source, string target, IReadOnlyList<string> files, bool cloud, bool versionConflicts = false)
     {
         requireIdle();
         if (files.Count == 0) return;
@@ -78,10 +78,16 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         try
         {
             File.WriteAllLines(list, files, new System.Text.UTF8Encoding(false));
+            string attempt = DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ", System.Globalization.CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N");
+            string? versionDirectory = !versionConflicts ? null : WindowsPath.TryParse(target, out var localTarget, out _)
+                ? localTarget.Append(".medal-sync-history", attempt).Display : target.TrimEnd('/') + "/.medal-sync-history/" + attempt;
+            if (versionDirectory is not null && WindowsPath.TryParse(versionDirectory, out var localHistory, out _))
+                RequireOrdinaryDirectory(localHistory);
             foreach (string command in new[] { "copy", "check" })
             {
                 requireIdle();
-                var arguments = ReplicationPlan.Arguments(command, source, target, list, configFile);
+                var arguments = ReplicationPlan.Arguments(command, source, target, list, configFile,
+                    cloud ? config.Replication?.BandwidthLimitMiB : null, versionDirectory);
                 if (execute is not null) execute(arguments); else Execute(arguments);
             }
         }

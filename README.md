@@ -18,6 +18,7 @@ Switch between PCs while each keeps its own login and recording settings.
 | --- | --- |
 | Server + SSD cache | Record through a cached virtual drive; keep the collection on your SMB server. |
 | Local copy + server | Record to persistent local storage; upload and verify on the server before switching PCs. |
+| Local storage + optional cloud | Keep media and coordination on one PC, with no SMB server required. |
 | Cloud replicas | Add OneDrive, Dropbox, Google Drive, or multiple named rclone destinations to either mode. |
 
 ```mermaid
@@ -41,12 +42,14 @@ Persistent local media survives finished-session cache cleanup.
    maintainer publishes a release. The wizard offers per-user or all-users
    installation, Start menu shortcuts, repair, upgrades and removal through
    Windows **Installed apps**.
-2. Open the included **Medal Sync Setup Guide**. Install rclone and WinFsp,
+2. Open the included **Medal Sync Setup Guide**. Setup includes rclone and
+   offers the bundled WinFsp driver for all-users installation;
    then follow [getting started](docs/getting-started.md) to preview configuration
    and enroll a library. The companion executables already include .NET.
 3. Choose [storage options](docs/storage.md). Add `--local-copy-root` to retain
    a complete local collection; add `--cloud-remote` and `--rclone-config` for a
    provider authorized through rclone. Several providers can be configured in JSON.
+   Use `--storage-mode local` for a local collection with cloud copies and no SMB.
 4. Launch through Medal Sync. After quitting Medal, wait for **Ready** before
    switching PCs, updating or uninstalling.
 
@@ -58,9 +61,10 @@ short network budget; updates require an explicit installation request.
 ## Current limits
 
 **Experimental software for Windows x64. Keep an independent media backup.**
-An SMB coordination share remains required, including when keeping a local
-copy or using cloud replicas. Cloud copies contain referenced media, and are
-additive: destination conflicts require review and deletions are not propagated.
+Server mode uses an SMB coordination share for cross-PC handoff. Local mode
+keeps its journal on one PC. Cloud copies contain referenced media and retain
+older files. Destination conflicts stop by default; optional versioned updates
+preserve prior destination files before replacing them. Deletions are not propagated.
 Provider credentials, Medal logins and full databases stay outside those copies.
 
 Unknown schemas, uncertain uploads and unreviewed removals stop handoff and
@@ -78,6 +82,11 @@ no credentials or live Medal library are needed.
 pwsh -File scripts/validate.ps1
 pwsh -File scripts/package-windows-installer.ps1
 ```
+
+Run `scripts/test-storage-integration.ps1` for real rclone/WinFsp tests with
+synthetic libraries and named local test remotes. Native installation can also
+be tested with `scripts/test-windows-installer-isolated.ps1`, which gives setup
+its own registration, shortcuts and synthetic readiness probe.
 
 Builds and packages go into ignored `.medal-sync-dist/`. Windows CI validates
 pull requests and main, builds the installer, and checks native installation,

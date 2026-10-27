@@ -82,4 +82,17 @@ public sealed class ConfigurationWorkflowTests : IDisposable
         Assert.Equal(1, Run([.. Options(), "--new-library", "--cloud-remote", "onedrive:MedalSync", "--apply"]).Code);
         Assert.False(File.Exists(_fixture.PathFor("config.json")));
     }
+
+    [Fact]
+    public void LocalCloudConfigurationNeedsNoSmbServer()
+    {
+        var result = Run([.. Options(), "--new-library", "--storage-mode", "local", "--remote", @"E:\MedalLibrary",
+            "--coordination-root", @"C:\MedalState\coordination", "--cloud-remote", "dropbox:MedalSync",
+            "--rclone-config", @"C:\Private\rclone.conf", "--apply"]);
+        Assert.True(result.Code == 0, result.Error);
+        var config = MedalSyncConfig.Load(_fixture.PathFor("config.json"));
+        Assert.Equal(StorageMode.Local, config.StorageMode);
+        Assert.Equal(@"E:\MedalLibrary", config.MountRemote);
+        Assert.Equal(0, Run("config", "validate", "--config", _fixture.PathFor("config.json")).Code);
+    }
 }

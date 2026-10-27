@@ -15,18 +15,21 @@ code { overflow-wrap: anywhere; } a { color: light-dark(#2254ad, #91b9ff); }
 <p>MEDAL SYNC · WINDOWS SETUP</p>
 <h1>Your recordings, on your storage.</h1>
 <p class="intro">Setup has installed the companion. Follow these steps to connect a library and choose where your clips live.</p>
-<article><h2>1. Install the storage dependencies</h2>
-<p>The clip drive uses <a href="https://rclone.org/downloads/">rclone</a> and <a href="https://winfsp.dev/rel/">WinFsp</a>.
-Use the pinned dependency helper in the source distribution, or follow the
+<article><h2>1. Check the storage dependencies</h2>
+<p>Setup includes pinned <a href="https://rclone.org/downloads/">rclone</a> beside the companion.
+All-users setup offers the bundled <a href="https://winfsp.dev/rel/">WinFsp</a> driver when it is missing.
+Per-user setup needs an existing WinFsp installation or an administrator to install the driver once. Follow the
 <a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md">getting started guide</a>.
 The Medal Sync executables already include .NET.</p></article>
 <article><h2>2. Choose your storage</h2><ul>
 <li><strong>Server with SSD cache:</strong> keep your complete media collection on an SMB share and use local SSD space while recording.</li>
+<li><strong>Local storage with optional cloud copies:</strong> use <code>--storage-mode local --remote E:\MedalLibrary</code>.
+Your media and journal stay on this PC; an SMB server is not required.</li>
 <li><strong>Server and persistent local copy:</strong> add <code>--local-copy-root E:\MedalLibrary</code> when creating configuration.
 Clips are recorded locally and copied to the server before handoff. The local collection stays after the session.</li>
 <li><strong>Cloud replicas:</strong> configure OneDrive, Dropbox or Google Drive using <code>rclone config --config C:\Private\rclone.conf</code>,
 then add <code>--cloud-remote onedrive:MedalSync --rclone-config C:\Private\rclone.conf</code>.
-Cloud copies contain referenced media. The shared library journal stays on SMB.</li>
+Cloud copies contain referenced media. Server mode keeps the shared journal on SMB; local mode keeps its journal on this PC.</li>
 </ul><p>Read the <a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/storage.md">storage guide</a> for complete examples and multiple cloud destinations.</p></article>
 <article><h2>3. Preview, verify, then enroll</h2>
 <p>Quit Medal normally and keep an independent media backup. Use <code>config create</code> to preview a candidate configuration,

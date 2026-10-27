@@ -162,7 +162,7 @@ internal static class Inventory
         string? winfsp = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\WinFsp")?.GetValue("InstallDir") as string;
         result["WinFsp"] = winfsp is not null && File.Exists(Path.Combine(winfsp, "bin", "winfsp-x64.dll")) ? $"installed at {winfsp}" : "not installed";
         string rclone = config?.ExpandedRclonePath
-            ?? Path.Combine(LocalState.ForCurrentUser().Root, "bin", "rclone.exe");
+            ?? Cli.ConfigCommands.DefaultRclonePath();
         result["rclone"] = File.Exists(rclone) ? $"present at {rclone} (sha256 {Hashing.Sha256File(rclone)})" : $"not present at {rclone}";
         return result;
     }

@@ -17,7 +17,7 @@ internal static class ReplicationPlan
             string relative = string.Join('/', path.Segments.Skip(capture.Segments.Count));
             string extension = Path.GetExtension(relative).ToLowerInvariant();
             bool overlay = reference is { Role: AssetRole.Optional, Field: "metadata:$.keyboardOverlayFilePath" } && extension == ".json";
-            if (relative.Split('/').Any(s => s.Equals("Databases", StringComparison.OrdinalIgnoreCase))
+            if (relative.Split('/').Any(s => s.Equals("Databases", StringComparison.OrdinalIgnoreCase) || s.Equals(".medal-sync-history", StringComparison.OrdinalIgnoreCase))
                 || (!overlay && extension is not (".mp4" or ".mkv" or ".webm" or ".mov" or ".avi" or ".m4v"
                     or ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp" or ".avif" or ".heic")))
                 throw new UnsafeOperationException("A library reference points to private state instead of media; replication was refused.");
@@ -29,13 +29,24 @@ internal static class ReplicationPlan
         return files.Order(StringComparer.Ordinal).ToArray();
     }
 
-    public static IReadOnlyList<string> Arguments(string command, string source, string target, string fileList, string configPath)
+    public static IReadOnlyList<string> Arguments(string command, string source, string target, string fileList, string configPath, int? bandwidthLimitMiB = null, string? versionDirectory = null)
     {
         if (command is not ("copy" or "check")) throw new ArgumentException("Unsupported replication command.", nameof(command));
         List<string> arguments = [command, source, target, "--config", configPath, "--files-from-raw", fileList,
             "--retries", "2", "--low-level-retries", "3", "--contimeout", "10s", "--timeout", "60s", "--transfers", "2"];
         // Immutable prevents silent replacement. Download verification compares bytes on backends without a common hash.
-        arguments.AddRange(command == "copy" ? ["--immutable", "--checksum"] : new[] { "--one-way", "--download" });
+        if (command == "copy")
+        {
+            arguments.Add("--checksum");
+            if (versionDirectory is null) arguments.Add("--immutable");
+            else arguments.AddRange(["--backup-dir", versionDirectory]);
+        }
+        else arguments.AddRange(["--one-way", "--download"]);
+        if (bandwidthLimitMiB is { } bandwidth)
+        {
+            if (bandwidth is < 1 or > 10000) throw new ArgumentOutOfRangeException(nameof(bandwidthLimitMiB));
+            arguments.AddRange(["--bwlimit", bandwidth.ToString(System.Globalization.CultureInfo.InvariantCulture) + "Mi"]);
+        }
         return arguments;
     }
 

@@ -1018,6 +1018,23 @@ public sealed class SessionTests : IDisposable
     }
 
     [Fact]
+    public void ShutdownDuringHydrationReturnsOwnershipWithoutCrashingOrLaunchingMedal()
+    {
+        var shutdown = new SessionShutdown(_clock);
+        var replication = new FakeReplication { OnPrepare = () =>
+        {
+            shutdown.RequestEnd();
+            _clock.Sleep(shutdown.Budget);
+            shutdown.RequireTime();
+        } };
+        var pc = Computer(FirstPc, "first", shutdown: shutdown, replication: replication);
+        Assert.Equal(LaunchStatus.Waiting, pc.Coordinator.Launch().Status);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal(0, pc.Medal.Launches);
+        Assert.Empty(pc.Mount.Starts);
+    }
+
+    [Fact]
     public void ShutdownDuringReplicationRetainsOwnershipAndMedia()
     {
         var shutdown = new SessionShutdown(_clock);

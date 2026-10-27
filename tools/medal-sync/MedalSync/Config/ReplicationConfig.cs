@@ -6,13 +6,19 @@ namespace MedalSync.Config;
 /// <summary>A named rclone remote; credentials live only in the user's separate rclone config.</summary>
 internal sealed record ReplicaTarget(string Name, string Remote);
 
+internal enum ReplicaConflictPolicy { Stop, Version }
+
 internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneConfigPath, IReadOnlyList<ReplicaTarget> Targets)
 {
     public int TimeoutMinutes { get; init; } = 240;
+    public int? BandwidthLimitMiB { get; init; }
+    public ReplicaConflictPolicy ConflictPolicy { get; init; } = ReplicaConflictPolicy.Stop;
 
     public IEnumerable<string> Problems(MedalSyncConfig config)
     {
         if (TimeoutMinutes is < 1 or > 1440) yield return "replication timeoutMinutes must be 1 to 1440";
+        if (BandwidthLimitMiB is < 1 or > 10000) yield return "bandwidthLimitMiB must be 1 to 10000, or null for unlimited";
+        if (!Enum.IsDefined(ConflictPolicy)) yield return "replication conflictPolicy is not supported";
         WindowsPath.TryParse(config.CaptureFolder, out var capture, out _);
         if (Targets is null) { yield return "replication targets must be an array"; yield break; }
         if (Targets.Count > 8) yield return "at most 8 replication targets are supported";
@@ -28,9 +34,16 @@ internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneCo
                         yield return "localCopyRoot must not overlap the cache, coordination folder or server storage";
             }
         }
-        if (Targets.Count > 0 && (RcloneConfigPath is null || !WindowsPath.TryParse(Environment.ExpandEnvironmentVariables(RcloneConfigPath), out var credentials, out _)
-            || credentials.Root.StartsWith(@"\\", StringComparison.Ordinal) || credentials.Root == capture?.Root))
-            yield return "cloud targets require an explicit local rcloneConfigPath outside the mounted drive";
+        if (Targets.Count > 0)
+        {
+            if (RcloneConfigPath is null || !WindowsPath.TryParse(Environment.ExpandEnvironmentVariables(RcloneConfigPath), out var credentials, out _)
+                || credentials.Root.StartsWith(@"\\", StringComparison.Ordinal) || credentials.Root == capture?.Root)
+                yield return "cloud targets require an explicit local rcloneConfigPath outside the mounted drive";
+            else
+                foreach (string root in new[] { config.CacheRoot, config.MountRemote, config.CoordinationRoot })
+                    if (WindowsPath.TryParse(root, out var folder, out _) && credentials.IsWithin(folder))
+                        yield return "rclone credentials must stay outside media, cache and coordination folders";
+        }
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var destinations = new List<string>();
         foreach (var target in Targets)

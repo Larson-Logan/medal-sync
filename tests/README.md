@@ -18,6 +18,21 @@ global.json, PowerShell 7, Node 24 and Python 3.11+.
   then uninstalls and checks that an unowned file was preserved. This test refuses
   to run outside an ephemeral GitHub-hosted runner.
 
-No test needs a real Medal account, database, recording or server. Windows CI
-runs the suite and builds a release package. Actual WinFsp mounts, playback,
-two-PC round trips and physical reboot behavior need separate desktop acceptance.
+Run `pwsh -File scripts/test-storage-integration.ps1` to exercise real pinned
+rclone processes and WinFsp mounts with disposable synthetic libraries. It tests
+named remotes for all three provider slots, copy verification, conflict refusal,
+versioned updates, interruption/retry, persistent-local retention, local mode
+without SMB and a sequential two-PC simulation. Named test remotes alias local
+folders; no cloud service or account is contacted. WinFsp must already exist on
+a personal PC; driver installation is restricted to ephemeral hosted CI.
+
+After building packages, `pwsh -File scripts/test-windows-installer-isolated.ps1`
+tests native installation, bundled dependencies, shortcuts, repair, refusal and
+uninstall on a personal Windows PC. It builds a uniquely identified setup with
+its own registration, group, mutexes and synthetic readiness probe. Production
+payloads remain unchanged; no production flag bypasses readiness. Logs and a
+verification receipt stay under the ignored `.validation/` directory.
+
+No test needs a real Medal account, database, recording or server. Real provider
+account behavior, playback in Medal, physical PCs and reboot acceptance remain
+separate from these reproducible integration checks.

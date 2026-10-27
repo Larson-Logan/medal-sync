@@ -88,7 +88,8 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
         var inputs = new CapacityInputs(drive.AvailableFreeSpace, (long)config.Mount.MinFreeGiB << 30,
             bitrateMbps, TimeSpan.FromHours(config.MaxSessionHours), pending);
         IReadOnlyList<CapacityVerdict> verdicts = [CapacityAdmission.Evaluate(inputs)];
-        if (config.Replication?.LocalCopyRoot is { } persistent)
+        string? persistent = config.Replication?.LocalCopyRoot ?? (config.StorageMode == StorageMode.Local ? config.Remote : null);
+        if (persistent is not null)
         {
             var local = new DriveInfo(Path.GetPathRoot(persistent)!);
             verdicts = CapacityAdmission.WithPersistentCopy(inputs, local.AvailableFreeSpace,

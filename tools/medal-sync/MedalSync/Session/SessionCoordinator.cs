@@ -158,6 +158,8 @@ internal sealed class SessionCoordinator(
         {
             // Whatever failed, Medal never ran, so the session is given back.
             string cleanup = GiveBackStart(session, ex.Message);
+            if (ex is OperationCanceledException && shutdown?.Ending == true)
+                return new LaunchOutcome(LaunchStatus.Waiting, "Windows shutdown interrupted storage preparation. This PC can retry at next sign-in." + cleanup);
             if (!IsExpected(ex)) throw;
             return new LaunchOutcome(LaunchStatus.Blocked, ex.Message + cleanup);
         }

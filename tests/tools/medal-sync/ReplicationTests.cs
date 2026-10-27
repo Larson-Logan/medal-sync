@@ -51,6 +51,37 @@ public sealed class ReplicationTests : IDisposable
         Assert.Throws<InvalidDataException>(config.Validate);
     }
 
+    [Theory]
+    [InlineData(@"E:\Cache", @"C:\State")]
+    [InlineData(@"E:\Library", @"E:\Library\Journal")]
+    [InlineData(@"M:\Local", @"C:\State")]
+    [InlineData(@"\\server\Data\Library", @"C:\State")]
+    public void LocalModeRequiresSeparateLocalStorageAndJournal(string remote, string journal)
+    {
+        var config = Config() with { StorageMode = StorageMode.Local, Remote = remote, CoordinationRoot = journal };
+        Assert.Throws<InvalidDataException>(config.Validate);
+    }
+
+    [Fact]
+    public void BandwidthLimitIsOptionalAndBounded()
+    {
+        var plan = ReplicationPlan.Arguments("copy", "source", "dest", "list", "config", 5);
+        Assert.Equal("5Mi", plan[plan.ToList().IndexOf("--bwlimit") + 1]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => ReplicationPlan.Arguments("copy", "source", "dest", "list", "config", 0));
+    }
+
+    [Fact]
+    public void VersionedConflictPolicyKeepsBackupsAndByteVerification()
+    {
+        var copy = ReplicationPlan.Arguments("copy", "source", "dest", "list", "config", versionDirectory: "dest/.medal-sync-history/attempt");
+        Assert.Contains("--backup-dir", copy);
+        Assert.DoesNotContain("--immutable", copy);
+        Assert.Contains("--checksum", copy);
+        var check = ReplicationPlan.Arguments("check", "source", "dest", "list", "config", versionDirectory: "dest/.medal-sync-history/attempt");
+        Assert.Contains("--download", check);
+        Assert.DoesNotContain("--backup-dir", check);
+    }
+
     [Fact]
     public void CloudCredentialsMustBeExplicitAndReplicaFoldersCannotOverlap()
     {
@@ -60,6 +91,15 @@ public sealed class ReplicationTests : IDisposable
         var valid = Config() with { Replication = new(null, @"C:\Private\rclone.conf", [targets[0]]) };
         valid.Validate();
         Assert.EndsWith("/" + valid.LibraryId, ReplicationPlan.Destination(targets[0], valid.LibraryId));
+    }
+
+    [Theory]
+    [InlineData(@"E:\Cache\rclone.conf")]
+    [InlineData(@"E:\Persistent\rclone.conf")]
+    public void CredentialsCannotBeStoredInsideMediaOrDisposableCache(string credentials)
+    {
+        var config = Config() with { Replication = new(@"E:\Persistent", credentials, [new ReplicaTarget("cloud", "onedrive:MedalSync")]) };
+        Assert.Throws<InvalidDataException>(config.Validate);
     }
 
     [Fact]

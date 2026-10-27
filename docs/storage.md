@@ -1,13 +1,15 @@
 # Storage choices
 
 Medal Sync supports an SMB server, a persistent local media collection, and
-required cloud replicas. All modes retain the same one-PC-at-a-time library
-ownership. An SMB coordination share remains required on every PC.
+required cloud replicas. Server mode shares one-PC-at-a-time library ownership
+through SMB. Local mode keeps its media and journal on one PC and requires no
+server; optional replicas send its media to cloud storage.
 
 | Mode | Where Medal writes | What stays after handoff |
 | --- | --- | --- |
 | Server with SSD cache | SSD-backed virtual drive, uploaded to SMB | Server media; finished session cache is removed |
 | Local copy and server | Virtual drive backed by a persistent local folder | Complete referenced media on the local disk and server |
+| Local storage, with optional cloud copies | Virtual drive backed by a persistent local folder | Local media and optional verified cloud copies; no SMB dependency |
 | Either mode with cloud replicas | Same recording path as above | Media copied and verified at every configured cloud destination |
 
 The local collection and VFS cache are separate. `localCopyRoot` names a
@@ -61,6 +63,10 @@ Follow the provider's sign-in flow. Instructions and provider restrictions:
 [Google Drive](https://rclone.org/drive/). Protect this file: it holds tokens.
 Unattended runs require a config rclone can open without an interactive prompt.
 
+For the native installation, rclone is bundled beside the companion. Use
+`$env:ProgramFiles/Medal Sync/bin/rclone.exe` for an all-users installation,
+or `bin/rclone.exe` under your chosen per-user program folder.
+
 When creating configuration, add:
 
 ```powershell
@@ -91,6 +97,29 @@ to separate collections. Remotes must name a dedicated folder, not an entire
 provider root. Existing configuration files without `replication` retain their
 original storage behavior.
 
+## Local storage and cloud without a server
+
+Use `--storage-mode local` and a dedicated persistent folder as `--remote`:
+
+```powershell
+& $cli config create --storage-mode local --account-id YOUR_ACCOUNT_ID `
+  --new-library --remote E:\MedalLibrary --cache-root E:\MedalCache `
+  --coordination-root "$HOME/.medal-sync/coordination" `
+  --cloud-remote onedrive:MedalSync --rclone-config "$HOME/.medal-sync/rclone.conf" `
+  --out "$HOME/medal-sync-candidate.json"
+```
+
+The coordination root defaults to the resolved state directory's `coordination`
+folder when omitted in local mode. Preview, validation and guarded initialization
+rules still apply. Keep media, cache and journal in separate folders. Omit
+`--local-copy-root` because `--remote` is already persistent local storage.
+Omit cloud flags to use local storage alone. The JSON property is
+`"storageMode": "LOCAL"`; configurations without it retain server mode.
+
+Local mode supervises one PC. Do not synchronize its journal between computers
+or reuse its library ID for independent writers. Use server mode and the shared
+SMB journal for automatic cross-PC handoff.
+
 ## Verification, conflicts and recovery
 
 Copies use an exact list of known media references, including thumbnails and
@@ -103,7 +132,9 @@ Replication uses [rclone copy](https://rclone.org/commands/rclone_copy/) with
 immutable destinations, followed by
 [rclone check --download](https://rclone.org/commands/rclone_check/).
 Verification reads the selected files back from the destination; plan for
-provider bandwidth, API limits, time and possible download charges.
+provider bandwidth, API limits, time and possible download charges. Set
+`replication.bandwidthLimitMiB` to limit transfer bandwidth (1 to 10000 MiB/s),
+or leave it `null` for unlimited bandwidth.
 Every finish currently verifies all referenced media, including unchanged
 clips. Each transfer command has a four-hour default timeout; set
 `replication.timeoutMinutes` from 1 to 1440 for your collection and connection.
@@ -122,8 +153,22 @@ removes its library reference; retained replica files do not recreate that
 reference. Review conflicts and old files explicitly before deleting anything.
 Editing an existing clip in place may require resolving a replica conflict.
 
+For automatic updates with retained prior versions, choose
+`--replica-conflicts version` when creating configuration, or set
+`replication.conflictPolicy` to `"VERSION"`. Before replacing a destination
+file, rclone moves the previous file beneath
+`.medal-sync-history/TIMESTAMP-ATTEMPT/` at that destination. The replacement is
+then verified byte for byte. Histories are never copied back into the library
+or automatically pruned. Budget space for retained versions. The default
+`"STOP"` policy refuses replacements. Hydration from the server always refuses
+conflicting local files to protect unpublished work.
+
 Cloud folders cannot replace the SMB ownership journal: consumer sync does
 not provide the locking used by this companion. Cloud-only coordination and
-automatic two-way conflict merging are not supported. Live cloud sign-in,
-quota behavior and two-PC playback require acceptance with your providers;
-synthetic tests do not establish those results.
+automatic two-way conflict merging are not supported. Local mode avoids the
+server by keeping coordination on one PC. The reproducible integration suite
+uses real rclone processes, named local test remotes and real WinFsp mounts.
+It verifies publication, retry, cancellation, retention, versioned updates and
+sequential synthetic PCs without contacting OneDrive, Dropbox or Google Drive.
+Provider-specific account and quota behavior requires separate service
+acceptance when you choose to connect those accounts.

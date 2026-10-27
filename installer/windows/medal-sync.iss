@@ -7,24 +7,49 @@
 #ifndef OutputPath
   #error OutputPath must be supplied by the packaging script
 #endif
+#ifndef StorageDependencies
+  #error StorageDependencies must name the verified pinned storage dependency directory
+#endif
+
+#ifdef IsolatedTestId
+  #ifndef IsolatedTestRoot
+    #error IsolatedTestRoot is required for a test installer
+  #endif
+  #ifndef ReadyChecker
+    #error ReadyChecker is required for a test installer
+  #endif
+#endif
 
 [Setup]
+#ifdef IsolatedTestId
+AppId={#IsolatedTestId}
+AppName=Medal Sync Test {#IsolatedTestId}
+#else
 AppId={{168562DF-1041-441D-96D0-2244EA744E18}
 AppName=Medal Sync
+#endif
 AppVersion={#AppVersion}
 AppPublisher=Medal Sync contributors
 AppPublisherURL=https://github.com/Larson-Logan/medal-sync
 AppSupportURL=https://github.com/Larson-Logan/medal-sync/issues
 AppUpdatesURL=https://github.com/Larson-Logan/medal-sync/releases
 DefaultDirName={autopf}\Medal Sync
+#ifdef IsolatedTestId
+DefaultGroupName=Medal Sync Test {#IsolatedTestId}
+#else
 DefaultGroupName=Medal Sync
+#endif
 DisableProgramGroupPage=yes
 DisableDirPage=no
 DisableWelcomePage=no
 AllowUNCPath=no
 LicenseFile={#PayloadDir}\LICENSE
 OutputDir={#OutputPath}
+#ifdef IsolatedTestId
+OutputBaseFilename=medal-sync-isolated-{#IsolatedTestId}
+#else
 OutputBaseFilename=medal-sync-{#AppVersion}-setup-win-x64
+#endif
 UninstallDisplayIcon={app}\bin\medal-sync-launch.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -37,16 +62,25 @@ SolidCompression=yes
 CloseApplications=no
 RestartApplications=no
 AllowCancelDuringInstall=no
+#ifdef IsolatedTestId
+SetupMutex=Local\MedalSync.Test.Setup.{#IsolatedTestId}
+AppMutex=Local\MedalSync.Test.App.{#IsolatedTestId}
+#else
 SetupMutex=Global\LarsonServer.MedalSync.Setup
 AppMutex=Local\LarsonServer.MedalSync
+#endif
 Uninstallable=yes
 UninstallLogMode=append
 VersionInfoVersion={#AppVersion}
 
 [Tasks]
 Name: desktopicon; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
+Name: winfsp; Description: "Install the pinned WinFsp clip-drive driver if it is missing (all-users setup)"; GroupDescription: "Storage dependencies:"; Check: ShouldOfferWinFsp
 
 [Files]
+Source: "{#StorageDependencies}\rclone.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
+Source: "{#StorageDependencies}\RCLONE-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StorageDependencies}\winfsp.msi"; Flags: dontcopy
 Source: "..\..\docs\setup.html"; DestDir: "{app}"; Flags: ignoreversion
 Source: "setup-layout.json"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#PayloadDir}\medal-sync.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
@@ -55,7 +89,12 @@ Source: "{#PayloadDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\THIRD_PARTY.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\DOTNET-LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\DOTNET-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
+#ifdef IsolatedTestId
+Source: "{#ReadyChecker}"; DestName: "medal-sync-check.exe"; Flags: dontcopy
+Source: "{#ReadyChecker}"; DestDir: "{app}\bin"; DestName: "medal-sync-test-check.exe"; Flags: ignoreversion
+#else
 Source: "{#PayloadDir}\medal-sync.exe"; DestName: "medal-sync-check.exe"; Flags: dontcopy
+#endif
 
 [Icons]
 Name: "{group}\Medal Sync Setup Guide"; Filename: "{app}\setup.html"
@@ -72,6 +111,23 @@ var
   CheckNumber: Integer;
   StoragePage: TOutputMsgWizardPage;
 
+function WinFspInstalled(): Boolean;
+var
+  Directory: String;
+begin
+  Result := RegQueryStringValue(HKLM32, 'SOFTWARE\WinFsp', 'InstallDir', Directory) and
+    FileExists(AddBackslash(Directory) + 'bin\winfsp-x64.dll');
+end;
+
+function ShouldOfferWinFsp(): Boolean;
+begin
+#ifdef IsolatedTestId
+  Result := False;
+#else
+  Result := IsAdminInstallMode and (not WinFspInstalled());
+#endif
+end;
+
 function CheckReady(ForUninstall: Boolean): String;
 var
   Executable, ReportPath, Params: String;
@@ -83,8 +139,14 @@ begin
   Inc(CheckNumber);
   ReportPath := ExpandConstant('{tmp}\medal-sync-ready-') + IntToStr(CheckNumber) + '.txt';
   Params := 'setup check --out "' + ReportPath + '"';
+#ifdef IsolatedTestId
+  Params := Params + ' --state-root "{#IsolatedTestRoot}"';
+#endif
   if ForUninstall then begin
     Executable := ExpandConstant('{app}\bin\medal-sync.exe');
+#ifdef IsolatedTestId
+    Executable := ExpandConstant('{app}\bin\medal-sync-test-check.exe');
+#endif
     if not FileExists(Executable) then begin
       Result := 'The installed readiness checker is missing. Reinstall Medal Sync before uninstalling.';
       exit;
@@ -105,6 +167,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Installed, Target: Int64;
+  ResultCode: Integer;
   ProgramPath: String;
 begin
   Result := '';
@@ -128,18 +191,39 @@ begin
     end;
   end;
   Result := CheckReady(False);
+  if Result <> '' then exit;
+  if ShouldOfferWinFsp() and WizardIsTaskSelected('winfsp') then begin
+    ExtractTemporaryFile('winfsp.msi');
+    if not Exec(ExpandConstant('{sys}\msiexec.exe'), '/i "' + ExpandConstant('{tmp}\winfsp.msi') + '" /passive /norestart',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      Result := 'WinFsp installation could not start. Retry setup or install the pinned driver separately.'
+    else if ResultCode = 3010 then begin
+      NeedsRestart := True;
+      Result := 'WinFsp requires a Windows restart. Restart when convenient, then rerun Medal Sync setup.';
+    end
+    else if (ResultCode <> 0) or (not WinFspInstalled()) then
+      Result := 'WinFsp installation did not complete. Retry setup or install the pinned driver separately.';
+  end;
 end;
 
 function InitializeUninstall(): Boolean;
 var
   Error: String;
 begin
+#ifdef IsolatedTestId
+  if CheckForMutexes('Local\MedalSync.Test.Setup.{#IsolatedTestId}') then begin
+#else
   if CheckForMutexes('Global\LarsonServer.MedalSync.Setup') then begin
+#endif
     SuppressibleMsgBox('Another Medal Sync setup or uninstall is open. Close it before uninstalling.', mbError, MB_OK, IDOK);
     Result := False;
     exit;
   end;
+#ifdef IsolatedTestId
+  CreateMutex('Local\MedalSync.Test.Setup.{#IsolatedTestId}');
+#else
   CreateMutex('Global\LarsonServer.MedalSync.Setup');
+#endif
   Error := CheckReady(True);
   Result := Error = '';
   if not Result then SuppressibleMsgBox(Error, mbError, MB_OK, IDOK);
@@ -153,16 +237,16 @@ begin
      FileExists(AddBackslash(WinFspDirectory) + 'bin\winfsp-x64.dll') then
     DependencyStatus := 'WinFsp is installed.'
   else
-    DependencyStatus := 'WinFsp is not detected. Install it before opening a shared clip drive; the setup guide links to the required dependencies.';
+    DependencyStatus := 'WinFsp is not detected. All-users setup can install the bundled pinned driver. Per-user setup needs an administrator to install WinFsp separately.';
   StoragePage := CreateOutputMsgPage(wpWelcome, 'Plan your storage',
     'Choose how to store your recordings after setup',
     'Server with SSD cache: clips upload to your SMB server; the session cache is released after verified handoff.' + #13#10 + #13#10 +
     'Keep a local copy: record to a persistent local folder, then copy and verify media on the server before switching PCs.' + #13#10 + #13#10 +
     'Optional cloud copies: add OneDrive, Dropbox or Google Drive with a named rclone remote. Sign in through rclone after setup.' + #13#10 + #13#10 +
     DependencyStatus + #13#10 + #13#10 +
-    'Setup installs programs and an offline guide. The guide explains configuration and enrollment.');
+    'Setup includes rclone and an offline guide. Local storage with cloud copies works without an SMB server. Multi-PC handoff uses SMB.');
   WizardForm.WelcomeLabel2.Caption :=
     'This will install Medal Sync on your computer.' + #13#10 + #13#10 +
-    'Programs are installed in Program Files. Your settings, library, recordings and cache stay in your user profile and existing storage locations.' + #13#10 + #13#10 +
+    'Programs are installed in the folder you choose. Your settings, library, recordings and cache stay in your user profile and existing storage locations.' + #13#10 + #13#10 +
     'Quit Medal normally and wait for Ready before continuing.';
 end;

@@ -41,6 +41,7 @@ if (-not (Test-Path -LiteralPath $key) -or -not (Test-Path -LiteralPath $shortcu
 foreach ($name in @('medal-sync.exe','medal-sync-launch.exe')) {
     if ((Get-FileHash -LiteralPath (Join-Path $app "bin/$name")).Hash -ne (Get-FileHash -LiteralPath (Join-Path $root ".medal-sync-dist/$name")).Hash) { throw 'Installed executable hash differs from release.' }
 }
+if (-not (Test-Path -LiteralPath (Join-Path $app 'bin/rclone.exe')) -or -not (Test-Path -LiteralPath (Join-Path $app 'RCLONE-LICENSE.txt'))) { throw 'Native setup did not install bundled storage dependencies and notices.' }
 $sentinel = Join-Path $app 'unowned-user-file.txt'
 'preserve me' | Set-Content -LiteralPath $sentinel
 if ((Run-Setup) -ne 0) { throw 'Native in-place upgrade/repair failed.' }

@@ -23,6 +23,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="MedalSync.Tests" />
     <InternalsVisibleTo Include="medal-sync-launch" />
+    <InternalsVisibleTo Include="MedalSync.Integration" />
   </ItemGroup>
 
 </Project>

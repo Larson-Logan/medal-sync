@@ -17,6 +17,8 @@ internal sealed record MountConfig(
 /// <summary>A Syncthing folder that overlaps the clip destination and must ignore it.</summary>
 internal sealed record SyncExclusion(string FolderId, string Pattern);
 
+internal enum StorageMode { Server, Local }
+
 /// <summary>
 /// Per-PC settings in the resolved Medal Sync user state directory.
 /// Holds no credentials: SMB access uses the PC's existing saved login.
@@ -35,6 +37,9 @@ internal sealed record MedalSyncConfig(
     IReadOnlyList<SyncExclusion> SyncExclusions)
 {
     public const int CurrentFormat = 1;
+
+    /// <summary>Local mode owns its journal and persistent media on this PC; server mode shares ownership through SMB.</summary>
+    public StorageMode StorageMode { get; init; } = StorageMode.Server;
 
     /// <summary>Optional persistent local storage and required media replicas.</summary>
     public ReplicationConfig? Replication { get; init; }
@@ -84,8 +89,30 @@ internal sealed record MedalSyncConfig(
         if (Format != CurrentFormat) problems.Add($"format {Format} is not supported");
         if (!CoordinationStore.IsValidId(LibraryId)) problems.Add("libraryId must be 32 lowercase hex characters");
         if (string.IsNullOrEmpty(AccountId) || !AccountId.All(char.IsAsciiDigit)) problems.Add("accountId must be the numeric Medal account ID");
-        if (!IsUnc(CoordinationRoot)) problems.Add("coordinationRoot must be a UNC path on the private share");
-        if (!IsUnc(Remote)) problems.Add("remote must be a UNC path on the private share");
+        if (!Enum.IsDefined(StorageMode)) problems.Add("storageMode is not supported");
+        if (StorageMode == StorageMode.Server)
+        {
+            if (!IsUnc(CoordinationRoot)) problems.Add("coordinationRoot must be a UNC path on the private share");
+            if (!IsUnc(Remote)) problems.Add("remote must be a UNC path on the private share");
+        }
+        else
+        {
+            if (!IsLocalFolder(CoordinationRoot)) problems.Add("local mode requires a dedicated local coordinationRoot");
+            if (!IsLocalFolder(Remote)) problems.Add("local mode requires a persistent local storage folder as remote");
+            if (Replication?.LocalCopyRoot is not null) problems.Add("local mode already retains the remote folder; omit localCopyRoot");
+            if (WindowsPath.TryParse(Remote, out var local, out _))
+            {
+                foreach (string other in new[] { CoordinationRoot, CacheRoot, CaptureFolder })
+                    if (WindowsPath.TryParse(other, out var path, out _) && (path.IsWithin(local) || local.IsWithin(path)))
+                        problems.Add("local storage must not overlap coordination, cache or capture paths");
+            }
+            if (WindowsPath.TryParse(CoordinationRoot, out var coordination, out _))
+            {
+                foreach (string other in new[] { CacheRoot, CaptureFolder })
+                    if (WindowsPath.TryParse(other, out var path, out _) && (path.IsWithin(coordination) || coordination.IsWithin(path)))
+                        problems.Add("local coordination must not overlap cache or capture paths");
+            }
+        }
         if (!WindowsPath.TryParse(CaptureFolder, out var capture, out _) || capture.Root.StartsWith(@"\\", StringComparison.Ordinal) || capture.Segments.Count == 0)
         {
             problems.Add("captureFolder must be a folder on the virtual drive, such as M:\\Clips (Medal rejects drive roots)");
@@ -96,8 +123,10 @@ internal sealed record MedalSyncConfig(
             problems.Add("cacheRoot must be a local SSD folder, not the share or the virtual drive");
         }
         if (string.IsNullOrWhiteSpace(RclonePath)) problems.Add("rclonePath is required");
+        if (Mount is null) problems.Add("mount settings are required");
+        if (SyncExclusions is null) problems.Add("syncExclusions must be an array");
         if (Replication is not null) problems.AddRange(Replication.Problems(this));
-        if (MaxSessionHours is <= 0 or > 24) problems.Add("maxSessionHours must be between 0 and 24");
+        if (!double.IsFinite(MaxSessionHours) || MaxSessionHours is <= 0 or > 24) problems.Add("maxSessionHours must be between 0 and 24");
         if (problems.Count == 0)
         {
             try
@@ -114,4 +143,7 @@ internal sealed record MedalSyncConfig(
 
     private static bool IsUnc(string value) =>
         WindowsPath.TryParse(value, out var path, out _) && path.Root.StartsWith(@"\\", StringComparison.Ordinal);
+
+    private static bool IsLocalFolder(string value) =>
+        WindowsPath.TryParse(value, out var path, out _) && !path.Root.StartsWith(@"\\", StringComparison.Ordinal) && path.Segments.Count > 0;
 }

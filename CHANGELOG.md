@@ -2,6 +2,14 @@
 
 ## 0.4.0 — Unreleased
 
+- Native setup bundles pinned rclone and its license, and offers the pinned
+  WinFsp MSI for all-users installation. Dependency downloads are verified.
+- Local mode supports a persistent collection and cloud replicas without SMB.
+- Optional replica versioning preserves prior destination files before updates;
+  configurable bandwidth limits support slower connections.
+- Reproducible integration tests run real rclone transfers, cancellation/retry,
+  real WinFsp mounts, sequential synthetic PCs and uniquely identified native setup.
+
 - Generic `MedalSync` code namespace and profile-based defaults, with existing
   configurations, identities and compatibility mutexes retained.
 - Optional persistent local recording storage with verified upload to SMB.
