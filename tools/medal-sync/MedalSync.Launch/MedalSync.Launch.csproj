@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    medal-sync-launch.exe: the same program without a console window, started by
+    Medal's rewired Run value, shortcuts and medal:// handler. All logic lives in
+    MedalSync (Cli/Launcher.cs); this project only gives it a Windows entry point.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>medal-sync-launch</AssemblyName>
+    <RootNamespace>LarsonServer.MedalSync.Launch</RootNamespace>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MedalSync\MedalSync.csproj" />
+  </ItemGroup>
+
+</Project>

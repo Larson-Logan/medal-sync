@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "libraryId": "00000000000000000000000000000000",
+  "accountId": "0",
+  "coordinationRoot": "\\\\192.0.2.10\\Data\\AppData\\MedalSync",
+  "remote": "\\\\192.0.2.10\\Data\\Media\\Videos",
+  "captureFolder": "M:\\Clips",
+  "cacheRoot": "E:\\MedalCache",
+  "rclonePath": "%LOCALAPPDATA%\\LarsonServer\\MedalSync\\bin\\rclone.exe",
+  "mount": {
+    "writeBackSeconds": 5,
+    "cacheMaxGiB": 20,
+    "minFreeGiB": 20,
+    "cacheMaxAgeSeconds": 300,
+    "cachePollSeconds": 30,
+    "dirCacheHours": 1000,
+    "transfers": 2,
+    "controlPort": 53682
+  },
+  "maxSessionHours": 4,
+  "syncExclusions": [
+    { "folderId": "larson-drive-media", "pattern": "/Videos/Clips" }
+  ]
+}

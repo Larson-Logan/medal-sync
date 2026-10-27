@@ -1,0 +1,189 @@
+using System.Text.RegularExpressions;
+using LarsonServer.MedalSync.Library;
+using LarsonServer.MedalSync.Util;
+
+namespace LarsonServer.MedalSync.Coordination;
+
+/// <summary>Identity marker written once when the shared library is created.</summary>
+internal sealed record LibraryIdentity(int Format, string LibraryId, string AccountId, DateTimeOffset CreatedAt, DeviceIdentity CreatedBy)
+{
+    public const int CurrentFormat = 1;
+}
+
+internal sealed record HandoffRequest(int Format, DeviceIdentity Device, string RequestId, DateTimeOffset RequestedAt)
+{
+    public const int CurrentFormat = 1;
+}
+
+/// <summary>
+/// The owner-only coordination directory on the server, for one library:
+/// <c>library.json</c> (identity), <c>journal.json</c> (ownership),
+/// <c>writer.lock</c>, <c>requests/</c> and <c>generations/</c>.
+/// The lock only serializes journal updates for a few seconds at a time; the
+/// journal itself is the ownership, so a dropped connection cannot release it.
+/// A PC waiting for a handoff never holds the lock.
+/// </summary>
+internal sealed partial class CoordinationStore
+{
+    private static readonly TimeSpan LockRetry = TimeSpan.FromMilliseconds(200);
+
+    private CoordinationStore(string root, LibraryIdentity identity)
+    {
+        Root = root;
+        Identity = identity;
+        Generations = new GenerationStore(Path.Combine(root, "generations"), identity.LibraryId, identity.AccountId);
+    }
+
+    public string Root { get; }
+
+    public LibraryIdentity Identity { get; }
+
+    public GenerationStore Generations { get; }
+
+    private string JournalPath => Path.Combine(Root, "journal.json");
+
+    private string LockPath => Path.Combine(Root, "writer.lock");
+
+    private string RequestsPath => Path.Combine(Root, "requests");
+
+    public static bool IsValidId(string value) => IdPattern().IsMatch(value);
+
+    /// <summary>Opens an existing coordination directory and checks its identity.</summary>
+    public static CoordinationStore Open(string root, string expectedLibraryId, string expectedAccountId)
+    {
+        string marker = Path.Combine(root, "library.json");
+        if (!File.Exists(marker))
+        {
+            throw new UnsafeOperationException(
+                $"No Medal library marker at '{root}'. The server share may be unreachable; nothing was started.");
+        }
+        var identity = Json.ReadFile<LibraryIdentity>(marker, "Library marker");
+        if (identity.LibraryId != expectedLibraryId || identity.AccountId != expectedAccountId)
+        {
+            throw new IncompatibleLibraryException(
+                $"'{root}' holds library {identity.LibraryId} for account {identity.AccountId}, not {expectedLibraryId} for {expectedAccountId}.");
+        }
+        return new CoordinationStore(root, identity);
+    }
+
+    /// <summary>
+    /// Creates a new shared library from a reviewed snapshot as generation 0.
+    /// Refuses if anything already exists at <paramref name="root"/>.
+    /// </summary>
+    public static CoordinationStore Create(string root, string libraryId, LibrarySnapshot initial, AssetManifest assets,
+        DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now)
+    {
+        if (!IsValidId(libraryId)) throw new ArgumentException("A library ID is 32 lowercase hex characters.", nameof(libraryId));
+        if (Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any())
+        {
+            throw new UnsafeOperationException($"'{root}' is not empty. An existing library is never reinitialized.");
+        }
+        Directory.CreateDirectory(root);
+        var identity = new LibraryIdentity(LibraryIdentity.CurrentFormat, libraryId, initial.AccountId, now, device);
+        var store = new CoordinationStore(root, identity);
+        using (store.AcquireWriterLock(TimeSpan.FromSeconds(5)))
+        {
+            store.Generations.Publish(0, null, session, device, initial, assets, medal, now);
+            AtomicFile.CreateNew(store.JournalPath, Json.Serialize(Ownership.Initial(libraryId, initial.AccountId, now)));
+            AtomicFile.CreateNew(Path.Combine(root, "library.json"), Json.Serialize(identity));
+        }
+        return store;
+    }
+
+    public OwnershipRecord ReadJournal()
+    {
+        var record = Json.ReadFile<OwnershipRecord>(JournalPath, "Ownership journal");
+        if (record.Format != OwnershipRecord.CurrentFormat) throw new InvalidDataException($"Journal format {record.Format} is not supported.");
+        if (record.LibraryId != Identity.LibraryId || record.AccountId != Identity.AccountId)
+        {
+            throw new InvalidDataException("The ownership journal belongs to a different library.");
+        }
+        if (!Generations.Exists(record.CommittedGeneration))
+        {
+            throw new InvalidDataException($"The journal's committed generation {record.CommittedGeneration} is missing.");
+        }
+        return record;
+    }
+
+    /// <summary>Applies one transition under the writer lock, checking the revision it was based on.</summary>
+    public OwnershipRecord Update(Func<OwnershipRecord, OwnershipRecord> transition, TimeSpan lockTimeout)
+    {
+        using var _ = AcquireWriterLock(lockTimeout);
+        var current = ReadJournal();
+        var next = transition(current);
+        if (ReferenceEquals(next, current)) return current;
+        if (next.Revision != current.Revision + 1 || next.LibraryId != current.LibraryId || next.AccountId != current.AccountId)
+        {
+            throw new InvalidOperationException("A journal transition must advance the revision by exactly one.");
+        }
+        if (next.CommittedGeneration != current.CommittedGeneration && !Generations.Exists(next.CommittedGeneration))
+        {
+            throw new InvalidDataException($"Generation {next.CommittedGeneration} must be published before it is committed.");
+        }
+        AtomicFile.Replace(JournalPath, Json.Serialize(next));
+        var written = ReadJournal();
+        if (written != next) throw new IOException("The ownership journal did not read back as written.");
+        return written;
+    }
+
+    public IDisposable AcquireWriterLock(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            try
+            {
+                return new FileStream(LockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException ex) when (IsSharingViolation(ex) && DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(LockRetry);
+            }
+            catch (IOException ex) when (IsSharingViolation(ex))
+            {
+                throw new StorageBusyException("Another PC is updating the Medal library right now. Try again in a moment.");
+            }
+        }
+    }
+
+    /// <summary>ERROR_SHARING_VIOLATION or ERROR_LOCK_VIOLATION; anything else is a real failure.</summary>
+    private static bool IsSharingViolation(IOException ex) => (ex.HResult & 0xFFFF) is 32 or 33;
+
+    public void WriteRequest(HandoffRequest request)
+    {
+        if (!IsValidId(request.Device.DeviceId) || !IsValidId(request.RequestId)) throw new ArgumentException("Invalid request identity.", nameof(request));
+        Directory.CreateDirectory(RequestsPath);
+        AtomicFile.Replace(Path.Combine(RequestsPath, request.Device.DeviceId + ".json"), Json.Serialize(request));
+    }
+
+    public IReadOnlyList<HandoffRequest> PendingRequests()
+    {
+        if (!Directory.Exists(RequestsPath)) return [];
+        var requests = new List<HandoffRequest>();
+        foreach (string file in Directory.EnumerateFiles(RequestsPath, "*.json"))
+        {
+            string name = Path.GetFileNameWithoutExtension(file);
+            if (!IsValidId(name)) continue;
+            try
+            {
+                var request = Json.ReadFile<HandoffRequest>(file, "Handoff request");
+                if (request.Device?.DeviceId == name && request.Device.DisplayName is not null) requests.Add(request);
+            }
+            catch (InvalidDataException)
+            {
+                // A half-written or foreign file is not a request.
+            }
+        }
+        return requests.OrderBy(r => r.RequestedAt).ToList();
+    }
+
+    public void RemoveRequest(DeviceIdentity device)
+    {
+        if (!IsValidId(device.DeviceId)) throw new ArgumentException("Invalid device ID.", nameof(device));
+        string path = Path.Combine(RequestsPath, device.DeviceId + ".json");
+        if (File.Exists(path)) File.Delete(path);
+    }
+
+    [GeneratedRegex("^[0-9a-f]{32}$")]
+    private static partial Regex IdPattern();
+}

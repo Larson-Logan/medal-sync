@@ -1,0 +1,11 @@
+* text=auto
+*.cs text eol=lf
+*.ps1 text eol=lf
+*.psm1 text eol=lf
+*.py text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.conf text eol=lf

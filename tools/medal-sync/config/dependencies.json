@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "checkedAt": "2026-10-24",
+  "note": "Pinned from the vendors' release metadata; each digest was confirmed from two sources. Recheck before installing a newer release.",
+  "rclone": {
+    "version": "v1.75.2",
+    "published": "2026-10-09",
+    "asset": "rclone-v1.75.2-windows-amd64.zip",
+    "url": "https://downloads.rclone.org/v1.75.2/rclone-v1.75.2-windows-amd64.zip",
+    "sha256": "8a9db2bad1dc79a65b3348fd857069598e2aab7cf4d118b77b1df23055aff818",
+    "exeSha256": "41eab3e118d264920b62c3327966c5ece0dc4dd715ee617d9e30450d8ead95a4",
+    "digestSources": [
+      "https://downloads.rclone.org/v1.75.2/SHA256SUMS (PGP-signed list)",
+      "GitHub release asset digest for rclone/rclone v1.75.2"
+    ],
+    "installTo": "%LOCALAPPDATA%\\LarsonServer\\MedalSync\\bin\\rclone.exe"
+  },
+  "winfsp": {
+    "version": "2.1.25156",
+    "release": "v2.1 (WinFsp 2025)",
+    "published": "2025-06-05",
+    "asset": "winfsp-2.1.25156.msi",
+    "url": "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi",
+    "bytes": 2191360,
+    "sha256": "073a70e00f77423e34bed98b86e600def93393ba5822204fac57a29324db9f7a",
+    "digestSources": [
+      "GitHub release asset digest for winfsp/winfsp v2.1",
+      "GitHub releases API (latest)"
+    ],
+    "installBy": "The owner, with the normal MSI installer (needs administrator approval once). Medal and medal-sync never run elevated."
+  },
+  "dotnet": {
+    "targetFramework": "net10.0",
+    "support": ".NET 10 LTS, supported until November 2028",
+    "packages": "Locked in tools/medal-sync/MedalSync/packages.lock.json and tests/tools/medal-sync/packages.lock.json"
+  }
+}

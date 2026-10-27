@@ -1,0 +1,58 @@
+name: Release Medal Sync
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Verify release tag and main ancestry
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.VersionPrefix
+          if ($env:RELEASE_TAG -cne "v$version") { throw 'Tag must match Directory.Build.props.' }
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Release commit must be on main.' }
+      - name: Validate
+        shell: pwsh
+        run: ./scripts/validate.ps1
+      - name: Package and verify
+        shell: pwsh
+        run: ./scripts/package-release.ps1
+      - name: Create draft GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.VersionPrefix
+          $archive = ".medal-sync-dist/medal-sync-$version-win-x64.zip"
+          gh release create $env:RELEASE_TAG $archive "$archive.sha256" --verify-tag --draft --generate-notes --title "Medal Sync $version"
+          if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed; existing releases are never overwritten.' }

@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <VersionPrefix>0.2.0</VersionPrefix>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+</Project>

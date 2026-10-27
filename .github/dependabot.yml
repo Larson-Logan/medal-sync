@@ -1,0 +1,13 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: nuget
+    directories:
+      - /tools/medal-sync/MedalSync
+      - /tools/medal-sync/MedalSync.Launch
+      - /tests/tools/medal-sync
+    schedule:
+      interval: monthly

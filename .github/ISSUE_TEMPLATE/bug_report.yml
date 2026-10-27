@@ -1,0 +1,19 @@
+name: Bug report
+description: Report a reproducible problem using synthetic details.
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach real databases, media, configs, device identities or raw logs.
+  - type: input
+    id: version
+    attributes:
+      label: Medal Sync and Windows versions
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected behavior and actual behavior
+      description: Include the command and a redacted error with personal paths removed.
+    validations:
+      required: true
