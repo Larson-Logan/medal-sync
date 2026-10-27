@@ -1,4 +1,4 @@
-namespace LarsonServer.MedalSync.Cli;
+namespace MedalSync.Cli;
 
 /// <summary>A tiny, strict parser: unknown options are errors, never ignored.</summary>
 internal sealed class Arguments

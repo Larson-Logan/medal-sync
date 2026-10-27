@@ -1,15 +1,17 @@
 # Getting started
 
 Medal Sync provides an SSD-backed virtual capture drive and shares library
-records between Windows PCs. A server journal grants one PC ownership at a
-time. After Medal quits, the companion waits for uploads, verifies server
+records between Windows PCs in server mode. A shared server journal grants one
+PC ownership at a time; local mode keeps media and its journal on one PC.
+After Medal quits, the companion waits for uploads, verifies storage
 assets, publishes an immutable library generation and releases ownership.
 Each PC keeps its own Medal database, login, audio/encoder settings and identity.
 
 ## Requirements and limits
 
 - Windows x64, PowerShell 7, Medal, rclone and WinFsp.
-- An SMB share reachable from each PC and a local SSD with adequate cache space.
+- A local SSD with adequate cache and storage space. Server mode also needs an
+  SMB share reachable from each PC; local mode needs no SMB server.
 - One Medal account and a compatible, explicitly supported database schema.
 - An independent media backup. A shared library and cache are not a backup.
 
@@ -22,6 +24,7 @@ real playback, cross-PC handoff and physical reboot need desktop acceptance.
 
 Follow [installation and updates](updates.md). The setup EXE installs programs
 into `C:\Program Files\Medal Sync` by default and creates Start menu shortcuts.
+It bundles pinned rclone and offers the bundled WinFsp driver in all-users mode.
 It does not enroll a library, mount storage or change Medal's startup entries.
 
 Configuration and identity stay in your profile, separate from Program Files.
@@ -29,6 +32,15 @@ The managed installation reuses an existing `$HOME/.medal-sync` configuration,
 then an older `%LOCALAPPDATA%/LarsonServer/MedalSync` configuration. Fresh
 installations use `$HOME/.medal-sync`. Existing portable installations continue
 using adjacent state. No identity or library data is copied by setup.
+
+## Choose storage
+
+Use server storage with an SSD cache, keep a persistent local copy that uploads
+back to the server, and optionally add verified OneDrive, Dropbox or Google Drive
+replicas. See [storage choices and configuration](storage.md) for commands and
+multiple-provider examples. SMB remains the shared ownership authority.
+Local mode keeps media and coordination on this PC, with optional cloud copies
+and no SMB dependency. It does not provide automatic handoff to another PC.
 
 ## Plan configuration before using live data
 

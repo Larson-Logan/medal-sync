@@ -1,10 +1,10 @@
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Tests.Fixtures;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Coordination;
+using MedalSync.Platform;
+using MedalSync.Tests.Fixtures;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class WindowsSetupTests : IDisposable
 {
@@ -55,6 +55,17 @@ public sealed class WindowsSetupTests : IDisposable
         Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, "config.json"), "synthetic");
         Assert.Equal(root, LocalState.ResolveRoot(ManagedBin(), DirectoryFor("user"), appData));
+    }
+
+    [Fact]
+    public void UnmanagedBuildRetainsLegacyIdentityWithoutMovingOrCopyingIt()
+    {
+        string appData = DirectoryFor("appdata");
+        string root = Path.Combine(appData, "LarsonServer", "MedalSync");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "device.json"), "synthetic identity");
+        Assert.Equal(root, LocalState.ResolveRoot(DirectoryFor("build"), DirectoryFor("user"), appData));
+        Assert.Equal("synthetic identity", File.ReadAllText(Path.Combine(root, "device.json")));
     }
 
     [Fact]

@@ -1,7 +1,7 @@
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Storage;
+namespace MedalSync.Storage;
 
 internal sealed record PromotionFile(string Relative, long Bytes, string Sha256);
 internal sealed record PromotionReceipt(int Format, string Source, string Target, string LibraryId, string SpikeId,

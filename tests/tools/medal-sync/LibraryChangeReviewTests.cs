@@ -1,8 +1,8 @@
-using LarsonServer.MedalSync.Cli;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Tests.Fixtures;
+using MedalSync.Cli;
+using MedalSync.Library;
+using MedalSync.Tests.Fixtures;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class LibraryChangeReviewTests : IDisposable
 {

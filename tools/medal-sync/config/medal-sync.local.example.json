@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "storageMode": "LOCAL",
+  "libraryId": "00000000000000000000000000000000",
+  "accountId": "0",
+  "coordinationRoot": "C:\\MedalState\\coordination",
+  "remote": "E:\\MedalLibrary",
+  "captureFolder": "M:\\Clips",
+  "cacheRoot": "E:\\MedalCache",
+  "rclonePath": "%USERPROFILE%\\.medal-sync\\bin\\rclone.exe",
+  "mount": {
+    "writeBackSeconds": 5,
+    "cacheMaxGiB": 20,
+    "minFreeGiB": 20,
+    "cacheMaxAgeSeconds": 300,
+    "cachePollSeconds": 30,
+    "dirCacheHours": 1000,
+    "transfers": 2,
+    "controlPort": 53682
+  },
+  "maxSessionHours": 4,
+  "syncExclusions": [],
+  "replication": {
+    "localCopyRoot": null,
+    "rcloneConfigPath": "%USERPROFILE%\\.medal-sync\\rclone.conf",
+    "conflictPolicy": "VERSION",
+    "timeoutMinutes": 240,
+    "bandwidthLimitMiB": null,
+    "targets": [
+      { "name": "onedrive", "remote": "onedrive:MedalSync" },
+      { "name": "dropbox", "remote": "dropbox:MedalSync" },
+      { "name": "google", "remote": "gdrive:MedalSync" }
+    ]
+  }
+}

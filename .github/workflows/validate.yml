@@ -35,3 +35,9 @@ jobs:
       - name: Test native setup, upgrade and uninstall in isolated user installation
         shell: pwsh
         run: ./scripts/test-windows-installer.ps1
+      - name: Test real rclone replication and sequential synthetic PCs through WinFsp
+        shell: pwsh
+        run: ./scripts/test-storage-integration.ps1
+      - name: Test native setup with unique registration and synthetic readiness failures
+        shell: pwsh
+        run: ./scripts/test-windows-installer-isolated.ps1

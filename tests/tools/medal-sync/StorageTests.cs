@@ -1,6 +1,6 @@
-using LarsonServer.MedalSync.Storage;
+using MedalSync.Storage;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class StorageTests
 {
@@ -101,7 +101,7 @@ public sealed class StorageTests
     {
         var bad = change switch
         {
-            "remote" => Settings() with { Remote = @"C:\local\folder" },
+            "remote" => Settings() with { Remote = "onedrive:folder" },
             "letter" => Settings() with { DriveLetter = 'C' },
             "cache-on-share" => Settings() with { CacheDirectory = @"\\192.0.2.10\Data\cache" },
             "cache-on-mount" => Settings() with { CacheDirectory = @"M:\cache" },

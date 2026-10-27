@@ -1,4 +1,4 @@
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 /// <summary>
 /// Medal schema-4 builds use application_id as a library lineage marker. A

@@ -29,7 +29,11 @@ ZIP remains available for advanced per-user deployments. It contains exactly
 the two programs, portable lifecycle scripts, licenses and `release.json` with
 per-file hashes. No personal configuration, database, logs or build staging
 files are included. Native setup contains only the programs, a static layout
-marker, licenses and generated uninstall runtime.
+marker, offline guide, licenses and generated uninstall runtime. It also bundles
+the pinned rclone executable and vendor notices, plus the pinned WinFsp MSI for
+optional all-users driver installation. `scripts/setup-storage-toolchain.ps1`
+downloads and verifies those dependencies into an ignored build cache without
+installing them.
 
 Move an existing portable archive aside before packaging again; ZIPs are not
 silently overwritten. `scripts/package-windows-installer.ps1 -SkipPackage`
@@ -42,6 +46,13 @@ formats and test native install, in-place upgrade, active-session refusal,
 registration, shortcuts and uninstall on an ephemeral hosted runner. The native
 integration test uses a temporary per-user program folder and refuses to run
 on an ordinary desktop or over an existing installation.
+
+`scripts/test-windows-installer-isolated.ps1` provides a separate test on an
+ordinary Windows PC: it compiles a unique test identity, shortcut group, mutexes
+and readiness probe while installing the unchanged production payload. It never
+uses the real library or installed registration. The real rclone/WinFsp suite
+in `scripts/test-storage-integration.ps1` uses disposable synthetic libraries
+and named local remotes, without provider accounts.
 
 Actions are pinned to SHAs and checkout does not retain credentials. Ordinary
 validation has read-only repository permissions. Dependabot proposes monthly

@@ -1,9 +1,9 @@
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Storage;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Coordination;
+using MedalSync.Library;
+using MedalSync.Storage;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Session;
+namespace MedalSync.Session;
 
 /// <summary>Medal's own processes on this PC.</summary>
 internal interface IMedalProcess
@@ -76,6 +76,13 @@ internal interface IClock
     DateTimeOffset Now { get; }
 
     void Sleep(TimeSpan duration);
+}
+
+/// <summary>Hydrates persistent local media and verifies required replicas before handoff.</summary>
+internal interface IStorageReplication
+{
+    void Prepare(LibrarySnapshot snapshot);
+    void Publish(LibrarySnapshot snapshot);
 }
 
 internal sealed class SystemClock : IClock

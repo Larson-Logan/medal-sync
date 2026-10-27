@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 internal enum MediaChangeKind
 {

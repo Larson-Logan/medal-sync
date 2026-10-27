@@ -71,6 +71,15 @@ class SourceHygieneTests(unittest.TestCase):
         self.assertNotEqual(0, refused.returncode)
         self.assertIn('must remain untracked', refused.stderr)
 
+    def test_provider_credentials_stay_ignored_and_cannot_be_force_added(self):
+        self.init()
+        for name in ['rclone.conf', 'private.rclone.conf']:
+            (self.root / name).write_text('[provider]\ntoken = synthetic', encoding='utf-8')
+            self.git('check-ignore', '--quiet', name)
+            self.git('add', '-f', name)
+            self.assertNotEqual(0, self.check().returncode)
+            self.git('rm', '--cached', '--', name)
+
 
 if __name__ == '__main__':
     unittest.main()

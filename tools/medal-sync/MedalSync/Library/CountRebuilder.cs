@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 /// <summary>
 /// Recomputes <c>content_counts</c> by replaying a snapshot's rows through

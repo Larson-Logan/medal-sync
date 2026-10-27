@@ -1,8 +1,8 @@
 using System.Data.Common;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Storage;
+using MedalSync.Library;
+using MedalSync.Storage;
 
-namespace LarsonServer.MedalSync.Cli;
+namespace MedalSync.Cli;
 
 /// <summary>
 /// Entry point. Exit codes: 0 done, 1 refused or blocked (nothing unsafe was
@@ -15,6 +15,9 @@ internal static class CommandRunner
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config",
         "--from", "--wait-for-server", "--state-root",
+        "--local-copy-root", "--cloud-remote", "--rclone-config",
+        "--storage-mode",
+        "--replica-conflicts",
         "--account-id", "--cache-root", "--remote", "--coordination-root", "--library-id", "--capture-folder", "--rclone-path", "--sync-folder", "--sync-pattern", "--spike-config", "--server-ignore",
     };
 
@@ -36,9 +39,13 @@ internal static class CommandRunner
           enroll recover --out DIRECTORY [--apply]  Recover an exact native-backup rollback after enrollment
 
         Changes state (need the configuration from the runbook):
-          config create --account-id ID --cache-root DIR --remote UNC --coordination-root UNC --out FILE
+          config create --account-id ID --cache-root DIR --remote PATH --out FILE
                         (--new-library | --library-id ID) [--spike] [--apply]
                         [--capture-folder M:\Clips] [--rclone-path FILE] [--sync-folder ID] [--sync-pattern PATTERN]
+                        [--local-copy-root DIR] [--cloud-remote NAME:FOLDER --rclone-config FILE]
+                        [--storage-mode server|local]  Local mode keeps media/journal on this PC; no SMB needed
+                        [--coordination-root PATH]  Required UNC share in server mode; optional local folder in local mode
+                        [--replica-conflicts stop|version]  Preserve earlier destination files when updating
                                                  Preview/create a config; never overwrite an existing file
           init [--apply]                         Create the shared library from this PC (generation 0)
           launch [--replace-local-library] [--wait-for-server SECONDS]
@@ -51,7 +58,7 @@ internal static class CommandRunner
           abandon --session ID --reason TEXT [--apply]   Give up a lost PC's session explicitly
           spike start|status|stop --config FILE  Gate B mount experiment on a disposable '*spike*' remote
 
-        See docs/medal-sync.md before using any command that changes state.
+        See docs/getting-started.md and docs/storage.md before changing a live library.
         """;
 
     public static int Run(string[] args, TextWriter output, TextWriter error) => Run(args, output, error, null);

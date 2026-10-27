@@ -1,7 +1,7 @@
-using LarsonServer.MedalSync.Cli;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Cli;
+using MedalSync.Config;
+using MedalSync.Platform;
+using MedalSync.Util;
 
 if (!OperatingSystem.IsWindows()) return 2;
 var ui = new WindowsLauncherUi();

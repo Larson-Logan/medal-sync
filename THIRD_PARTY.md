@@ -16,11 +16,16 @@ Upstream license and notice sources:
 - [SQLite copyright statement](https://www.sqlite.org/copyright.html).
 - [xUnit license](https://github.com/xunit/xunit/blob/main/LICENSE) (tests only).
 
-rclone and WinFsp are downloaded separately; their URLs and SHA-256 pins are in
-tools/medal-sync/config/dependencies.json. See the upstream
+rclone and WinFsp URLs and SHA-256 pins are in
+tools/medal-sync/config/dependencies.json. Native setup bundles the pinned rclone
+executable and its full vendor README (including the MIT copyright and license)
+as RCLONE-LICENSE.txt, plus the original pinned WinFsp MSI. The MSI retains its
+upstream license and notices and is offered only as an optional all-users driver
+installation. See the upstream
 [rclone license](https://github.com/rclone/rclone/blob/master/COPYING) and
 [WinFsp license](https://github.com/winfsp/winfsp/blob/master/License.txt).
-They are not included in the Medal Sync release archive.
+The advanced portable ZIP does not include these dependencies; its helper
+downloads rclone separately and reports the pinned WinFsp installer.
 
 The native setup EXE is built with pinned [Inno Setup](https://jrsoftware.org/isinfo.php).
 Its compiler installer is verified by SHA-256 and Authenticode before installation

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 /// <summary>A place Windows can start Medal from, and whether it goes through the launcher.</summary>
 internal sealed record StartupEntry(string Name, string? Command, bool ViaLauncher);

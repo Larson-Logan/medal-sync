@@ -7,7 +7,7 @@ Publishes tools/medal-sync with locked package versions into the ignored
 .medal-sync-dist folder: medal-sync.exe (the command line) and
 medal-sync-launch.exe (the same program without a console window, for the
 rewired startup entries). With -Install it copies both to
-%LOCALAPPDATA%\LarsonServer\MedalSync\bin, keeping any previous copies. It does
+%USERPROFILE%\.medal-sync\bin, keeping any previous copies. It does
 not change any startup entry or shortcut; set-medal-startup.ps1 does that, as
 a separately reviewed step in docs/medal-sync.md. Use -StateRoot for a
 configured per-user installation outside AppData when packaged tools and the
@@ -16,7 +16,7 @@ ordinary desktop see different virtualized directories.
 [CmdletBinding()]
 param(
     [switch]$Install,
-    [string]$StateRoot = (Join-Path $env:LOCALAPPDATA 'LarsonServer\MedalSync')
+    [string]$StateRoot = (Join-Path $env:USERPROFILE '.medal-sync')
 )
 
 Set-StrictMode -Version Latest

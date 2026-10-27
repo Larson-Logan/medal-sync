@@ -1,8 +1,8 @@
 using System.Text;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Util;
 using Microsoft.Data.Sqlite;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 /// <summary>Opens Medal library databases and reads consistent snapshots from them.</summary>
 internal static class LibraryDatabase

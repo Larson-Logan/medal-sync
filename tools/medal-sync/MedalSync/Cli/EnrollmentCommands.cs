@@ -1,12 +1,12 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Coordination;
+using MedalSync.Library;
+using MedalSync.Platform;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Cli;
+namespace MedalSync.Cli;
 
 internal sealed record EnrollmentReview(int Format, string LibraryId, string DeviceId, long Generation, string SharedDigest,
     string LocalDigest, string CandidateDigest, string Source, string Destination, int Added, int Matched,
@@ -43,7 +43,7 @@ internal static class EnrollmentCommands
         if (original is null) throw new UnsafeOperationException("No verified original database for this PC was retained in the review directory.");
         output.WriteLine("The exact pre-enrollment shared library replaced this PC's union. Recovery will restore this PC's own saved device settings and the committed union; no media is removed.");
         if (!apply) { output.WriteLine("Preview only. Add --apply with Medal quit to recover this verified case."); return 0; }
-        using var mutex = new Mutex(false, @"Local\LarsonServer.MedalSync");
+        using var mutex = new Mutex(false, SessionCommands.InstanceMutex);
         bool locked;
         try { locked = mutex.WaitOne(0); } catch (AbandonedMutexException) { locked = true; }
         if (!locked) throw new UnsafeOperationException("Another medal-sync operation is running.");
@@ -79,7 +79,7 @@ internal static class EnrollmentCommands
         var install = MedalEnvironment.Locate();
         var device = state.Device();
         if (install.AccountId != config.AccountId) throw new IncompatibleLibraryException("Enrollment account differs from this PC's signed-in Medal account.");
-        using var mutex = new Mutex(false, @"Local\LarsonServer.MedalSync");
+        using var mutex = new Mutex(false, SessionCommands.InstanceMutex);
         bool locked;
         try { locked = mutex.WaitOne(0); } catch (AbandonedMutexException) { locked = true; }
         if (!locked) throw new UnsafeOperationException("Another medal-sync operation is running on this PC.");

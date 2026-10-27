@@ -1,6 +1,6 @@
-using LarsonServer.MedalSync.Session;
+using MedalSync.Session;
 
-namespace LarsonServer.MedalSync.Util;
+namespace MedalSync.Util;
 
 internal static class Waiting
 {

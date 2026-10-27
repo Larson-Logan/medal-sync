@@ -1,4 +1,4 @@
-namespace LarsonServer.MedalSync;
+namespace MedalSync;
 
 /// <summary>A refusal the user should read. The message says what to do next.</summary>
 internal class MedalSyncException(string message, Exception? inner = null) : Exception(message, inner);

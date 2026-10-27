@@ -12,7 +12,7 @@ ignore under /root/backups as well before passing its UNC path; see the runbook.
 param(
     [Parameter(Mandatory)][string[]]$IgnoreFile,
     [string]$Pattern = '/Videos/Clips',
-    [string]$BackupRoot = (Join-Path $env:LOCALAPPDATA 'LarsonServer/MedalSync/Backups'),
+    [string]$BackupRoot = (Join-Path $env:USERPROFILE '.medal-sync/Backups'),
     [switch]$Apply
 )
 Set-StrictMode -Version Latest

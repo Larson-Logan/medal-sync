@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 
-namespace LarsonServer.MedalSync.Util;
+namespace MedalSync.Util;
 
 internal static class Hashing
 {

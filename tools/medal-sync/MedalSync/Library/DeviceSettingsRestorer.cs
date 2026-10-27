@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 
-namespace LarsonServer.MedalSync.Library;
+namespace MedalSync.Library;
 
 /// <summary>Explicit recovery from Medal's full-database auto-restore. Restore
 /// this PC's own saved settings only; never take them from a shared generation.</summary>

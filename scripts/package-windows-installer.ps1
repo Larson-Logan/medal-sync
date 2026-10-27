@@ -13,6 +13,7 @@ if (-not $SkipPackage) {
     if ($LASTEXITCODE -ne 0) { throw 'Release packaging failed.' }
 }
 $compiler = & (Join-Path $PSScriptRoot 'setup-installer-toolchain.ps1')
+$storageDependencies = & (Join-Path $PSScriptRoot 'setup-storage-toolchain.ps1')
 Import-Module (Join-Path $PSScriptRoot 'storage/medal-sync/MedalSync.Update.psm1') -Force
 $output = Join-Path $root '.medal-sync-dist'
 $archive = Join-Path $output "medal-sync-$version-win-x64.zip"
@@ -21,7 +22,7 @@ $payload = Join-Path $output ('setup-payload-' + [guid]::NewGuid().ToString('N')
 try {
     $manifest = Read-MedalReleasePackage $archive $hash $payload
     if ($manifest.version -cne $version) { throw 'Setup and payload versions differ.' }
-    $arguments = @('/Qp',('/DAppVersion={0}' -f $version),('/DPayloadDir={0}' -f $payload),('/DOutputPath={0}' -f $output),(Join-Path $root 'installer/windows/medal-sync.iss'))
+    $arguments = @('/Qp',('/DAppVersion={0}' -f $version),('/DPayloadDir={0}' -f $payload),('/DStorageDependencies={0}' -f $storageDependencies),('/DOutputPath={0}' -f $output),(Join-Path $root 'installer/windows/medal-sync.iss'))
     & $compiler @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Windows setup compilation failed.' }
     $setup = Join-Path $output "medal-sync-$version-setup-win-x64.exe"

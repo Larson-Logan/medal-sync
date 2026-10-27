@@ -1,8 +1,8 @@
 using System.Net;
 using System.Text.Json;
-using LarsonServer.MedalSync.Platform;
+using MedalSync.Platform;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class ReleaseUpdateTests
 {

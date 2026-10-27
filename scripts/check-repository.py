@@ -45,7 +45,7 @@ def main():
                 r'gh[pousr]_[A-Za-z0-9]{30,}', r'github_pat_[A-Za-z0-9_]{30,}']
     private_extensions = {'.exe', '.dll', '.msi', '.db', '.sqlite', '.sqlite3',
                           '.mp4', '.mkv', '.webm', '.log', '.key', '.pem', '.pfx', '.p12'}
-    private_names = {'.env', 'device.json', 'config.local.json', 'startup-originals.json'}
+    private_names = {'.env', 'device.json', 'config.local.json', 'startup-originals.json', 'rclone.conf'}
     for name in files:
         if private_agent_path(name):
             failures.append(f'Personal agent instructions/settings must remain untracked: {name}')
@@ -59,7 +59,7 @@ def main():
         if not path.is_file():
             failures.append(f'Missing source file: {name}')
             continue
-        if (path.suffix.lower() in private_extensions or path.name in private_names
+        if (path.suffix.lower() in private_extensions or path.name in private_names or path.name.endswith('.rclone.conf')
                 or re.search(r'\.(?:db|sqlite\d?)-(?:wal|shm|journal)$', path.name)
                 or (path.name.startswith('.env.') and path.name != '.env.example')):
             failures.append(f'Runtime/private file: {name}')

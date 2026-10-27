@@ -13,7 +13,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
     <AssemblyName>medal-sync-launch</AssemblyName>
-    <RootNamespace>LarsonServer.MedalSync.Launch</RootNamespace>
+    <RootNamespace>MedalSync.Launch</RootNamespace>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>

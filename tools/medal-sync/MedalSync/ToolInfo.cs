@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace LarsonServer.MedalSync;
+namespace MedalSync;
 
 internal static class ToolInfo
 {

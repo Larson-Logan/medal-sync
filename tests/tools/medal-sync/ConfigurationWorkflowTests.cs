@@ -1,8 +1,8 @@
-using LarsonServer.MedalSync.Cli;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Tests.Fixtures;
+using MedalSync.Cli;
+using MedalSync.Config;
+using MedalSync.Tests.Fixtures;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class ConfigurationWorkflowTests : IDisposable
 {
@@ -61,5 +61,38 @@ public sealed class ConfigurationWorkflowTests : IDisposable
         var config = MedalSyncConfig.Load(_fixture.PathFor("config.json"));
         Assert.Equal(53683, config.Mount.ControlPort);
         Assert.Empty(config.SyncExclusions);
+    }
+
+    [Fact]
+    public void LocalAndCloudOptionsRoundTripWithoutReadingTheProviderOrLibrary()
+    {
+        var result = Run([.. Options(), "--new-library", "--local-copy-root", @"E:\MedalLibrary",
+            "--cloud-remote", "onedrive:MedalSync", "--rclone-config", @"C:\Private\rclone.conf", "--apply"]);
+        Assert.True(result.Code == 0, result.Error);
+        var config = MedalSyncConfig.Load(_fixture.PathFor("config.json"));
+        Assert.Equal(@"E:\MedalLibrary", config.Replication!.LocalCopyRoot);
+        Assert.Equal("onedrive:MedalSync", Assert.Single(config.Replication.Targets).Remote);
+        Assert.Equal(0, Run("config", "validate", "--config", _fixture.PathFor("config.json")).Code);
+        Assert.False(Directory.Exists(_fixture.PathFor("replication")));
+    }
+
+    [Fact]
+    public void CloudOptionsWithoutCredentialFileAreRefusedBeforeWriting()
+    {
+        Assert.Equal(1, Run([.. Options(), "--new-library", "--cloud-remote", "onedrive:MedalSync", "--apply"]).Code);
+        Assert.False(File.Exists(_fixture.PathFor("config.json")));
+    }
+
+    [Fact]
+    public void LocalCloudConfigurationNeedsNoSmbServer()
+    {
+        var result = Run([.. Options(), "--new-library", "--storage-mode", "local", "--remote", @"E:\MedalLibrary",
+            "--coordination-root", @"C:\MedalState\coordination", "--cloud-remote", "dropbox:MedalSync",
+            "--rclone-config", @"C:\Private\rclone.conf", "--apply"]);
+        Assert.True(result.Code == 0, result.Error);
+        var config = MedalSyncConfig.Load(_fixture.PathFor("config.json"));
+        Assert.Equal(StorageMode.Local, config.StorageMode);
+        Assert.Equal(@"E:\MedalLibrary", config.MountRemote);
+        Assert.Equal(0, Run("config", "validate", "--config", _fixture.PathFor("config.json")).Code);
     }
 }

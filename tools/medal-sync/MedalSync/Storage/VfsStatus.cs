@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace LarsonServer.MedalSync.Storage;
+namespace MedalSync.Storage;
 
 internal enum DrainState
 {

@@ -1,9 +1,9 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using LarsonServer.MedalSync.Session;
+using MedalSync.Session;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 /// <summary>
 /// A real hidden top-level window (message-only windows do not receive shutdown

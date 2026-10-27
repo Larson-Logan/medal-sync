@@ -2,7 +2,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 /// <summary>Best-effort public release discovery. Never installs or sends local state.</summary>
 internal static partial class ReleaseUpdate

@@ -1,8 +1,8 @@
 using System.Runtime.Versioning;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Platform;
+using MedalSync.Config;
+using MedalSync.Platform;
 
-namespace LarsonServer.MedalSync.Cli;
+namespace MedalSync.Cli;
 
 internal static class SetupCommands
 {
@@ -36,10 +36,5 @@ internal static class SetupCommands
         return result;
     }
 
-    private static string ManagedStateRoot()
-    {
-        string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".medal-sync");
-        return File.Exists(Path.Combine(profile, "config.json")) || File.Exists(Path.Combine(profile, "device.json"))
-            ? profile : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LarsonServer", "MedalSync");
-    }
+    private static string ManagedStateRoot() => LocalState.ForCurrentUser().Root;
 }

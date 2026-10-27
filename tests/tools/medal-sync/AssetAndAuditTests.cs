@@ -1,8 +1,8 @@
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Tests.Fixtures;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Library;
+using MedalSync.Tests.Fixtures;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class AssetAndAuditTests : IDisposable
 {

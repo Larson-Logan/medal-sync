@@ -1,11 +1,11 @@
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Session;
-using LarsonServer.MedalSync.Storage;
-using LarsonServer.MedalSync.Tests.Fixtures;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Coordination;
+using MedalSync.Library;
+using MedalSync.Session;
+using MedalSync.Storage;
+using MedalSync.Tests.Fixtures;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class SessionTests : IDisposable
 {
@@ -139,7 +139,7 @@ public sealed class SessionTests : IDisposable
     private readonly FakeAssets _assets = new() { OnServerFiles = { @"M:\Clips\Clips\one.mp4" } };
 
     private Pc Computer(DeviceIdentity device, string machine, bool acceptChanges = false, bool replaceLocal = false, string? database = null, Action? prepareNativeBackup = null,
-        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null)
+        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
@@ -147,7 +147,7 @@ public sealed class SessionTests : IDisposable
         var options = new SessionOptions(device, WindowsPath.Parse(@"M:\Clips"), Versions,
             TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal);
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
-        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown));
+        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication));
     }
 
     [Fact]
@@ -966,6 +966,104 @@ public sealed class SessionTests : IDisposable
 
     private static void AssertStarted(LaunchOutcome outcome) =>
         Assert.True(outcome.Status == LaunchStatus.Started, $"{outcome.Status}: {outcome.Message}");
+
+    private sealed class FakeReplication : IStorageReplication
+    {
+        public Action? OnPrepare { get; set; }
+        public Action? OnPublish { get; set; }
+        public int Published { get; private set; }
+        public void Prepare(LibrarySnapshot snapshot) => OnPrepare?.Invoke();
+        public void Publish(LibrarySnapshot snapshot) { Published++; OnPublish?.Invoke(); }
+    }
+
+    [Fact]
+    public void FailedReplicaRetainsOwnershipCacheAndGenerationThenRetries()
+    {
+        var replication = new FakeReplication { OnPublish = () => throw new IOException("provider quota") };
+        var pc = Computer(FirstPc, "first", replication: replication);
+        string session = pc.Coordinator.Launch().Session!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        Assert.Equal(FinishStatus.Pending, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
+        Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.True(pc.Mount.IsRunning);
+        replication.OnPublish = null;
+        Assert.Equal(FinishStatus.Published, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(2, replication.Published);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void UnchangedLibraryStillRequiresReplicaVerification()
+    {
+        var replication = new FakeReplication();
+        var pc = Computer(FirstPc, "first", replication: replication);
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(1, replication.Published);
+    }
+
+    [Fact]
+    public void HydrationFailureReturnsOwnershipBeforeMedalLaunch()
+    {
+        var replication = new FakeReplication { OnPrepare = () => throw new IOException("conflicting local file") };
+        var pc = Computer(FirstPc, "first", replication: replication);
+        Assert.Equal(LaunchStatus.Blocked, pc.Coordinator.Launch().Status);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Empty(pc.Mount.Starts);
+        Assert.Equal(0, pc.Medal.Launches);
+    }
+
+    [Fact]
+    public void ShutdownDuringHydrationReturnsOwnershipWithoutCrashingOrLaunchingMedal()
+    {
+        var shutdown = new SessionShutdown(_clock);
+        var replication = new FakeReplication { OnPrepare = () =>
+        {
+            shutdown.RequestEnd();
+            _clock.Sleep(shutdown.Budget);
+            shutdown.RequireTime();
+        } };
+        var pc = Computer(FirstPc, "first", shutdown: shutdown, replication: replication);
+        Assert.Equal(LaunchStatus.Waiting, pc.Coordinator.Launch().Status);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal(0, pc.Medal.Launches);
+        Assert.Empty(pc.Mount.Starts);
+    }
+
+    [Fact]
+    public void ShutdownDuringReplicationRetainsOwnershipAndMedia()
+    {
+        var shutdown = new SessionShutdown(_clock);
+        var replication = new FakeReplication { OnPublish = () =>
+        {
+            shutdown.RequestEnd();
+            _clock.Sleep(shutdown.Budget);
+            shutdown.RequireTime();
+        } };
+        var pc = Computer(FirstPc, "first", shutdown: shutdown, replication: replication);
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        Assert.Equal(FinishStatus.Pending, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
+        Assert.Empty(pc.Mount.Forgotten);
+    }
+
+    [Fact]
+    public void ReopeningMedalDuringReplicationPreventsPublication()
+    {
+        var replication = new FakeReplication();
+        var pc = Computer(FirstPc, "first", replication: replication);
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        replication.OnPublish = () => pc.Medal.Running = true;
+        Assert.Equal(FinishStatus.Pending, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
+        Assert.Empty(pc.Mount.Forgotten);
+    }
 
     private sealed class StoppingClock(IClock inner, Action onSleep) : IClock
     {

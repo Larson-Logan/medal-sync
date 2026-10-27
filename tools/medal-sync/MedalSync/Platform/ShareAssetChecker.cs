@@ -1,9 +1,9 @@
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Session;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Library;
+using MedalSync.Session;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 /// <summary>
 /// Checks library files through the mounted drive (what Medal will see) and

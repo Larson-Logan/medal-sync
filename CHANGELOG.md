@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.0 — 2026-10-27
+
+- Verified native-backup compatibility for Medal 2644.591.1 with recorder
+  2643.3040.1; unknown app/recorder pairs remain refused.
+
+- Native setup bundles pinned rclone and its license, and offers the pinned
+  WinFsp MSI for all-users installation. Dependency downloads are verified.
+- Local mode supports a persistent collection and cloud replicas without SMB.
+- Optional replica versioning preserves prior destination files before updates;
+  configurable bandwidth limits support slower connections.
+- Reproducible integration tests run real rclone transfers, cancellation/retry,
+  real WinFsp mounts, sequential synthetic PCs and uniquely identified native setup.
+
+- Generic `MedalSync` code namespace and profile-based defaults, with existing
+  configurations, identities and compatibility mutexes retained.
+- Optional persistent local recording storage with verified upload to SMB.
+- Required OneDrive, Dropbox and Google Drive media replicas through named
+  rclone remotes, exact file lists and byte verification before handoff.
+- Replica failures, conflicts and shutdown interruption retain ownership and
+  media; successful verification produces a private receipt.
+- Setup storage guidance, WinFsp detection, per-user installation selection
+  and an offline guide available from the Start menu.
+- Expanded storage documentation, GitHub overview and credential-file hygiene.
+
 ## 0.3.0 — Unreleased
 
 - Native Windows setup EXE with a Program Files destination, Start menu and

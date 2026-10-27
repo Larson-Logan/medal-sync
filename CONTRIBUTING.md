@@ -1,5 +1,10 @@
 # Contributing to Medal Sync
 
+After source changes, refresh the public source inventory with
+`python scripts/update-source-manifest.py`. Validation checks its file list and
+hashes. The generator runs source hygiene first and includes only Git-visible
+files; personal configuration and runtime files remain excluded.
+
 Use Windows, PowerShell 7, the .NET SDK pinned in global.json, Node 24 and
 Python 3.11+. Run `pwsh -File scripts/validate.ps1` to validate and
 `pwsh -File scripts/package-windows-installer.ps1` to build the verified setup

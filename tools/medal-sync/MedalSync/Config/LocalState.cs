@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
-using LarsonServer.MedalSync.Coordination;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Coordination;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Config;
+namespace MedalSync.Config;
 
 internal sealed record DeviceFile(int Format, string DeviceId, string DisplayName);
 
@@ -10,7 +10,7 @@ internal sealed record DeviceFile(int Format, string DeviceId, string DisplayNam
 internal sealed record SessionSecret(int Format, string Session, string User, string Password, DateTimeOffset CreatedAt);
 
 /// <summary>
-/// <c>%LOCALAPPDATA%\LarsonServer\MedalSync</c>: configuration, this PC's
+/// User state (normally <c>%USERPROFILE%\.medal-sync</c>): configuration, this PC's
 /// identity, rollback backups, logs and per-session control logins. The folder
 /// sits in the user's profile, which only this user (and administrators) can read.
 /// </summary>
@@ -22,13 +22,15 @@ internal sealed class LocalState(string root)
 
     internal static string ResolveRoot(string executableDirectory, string userProfile, string localAppData)
     {
-        string appDataRoot = Path.Combine(localAppData, "LarsonServer", "MedalSync");
-        if (!IsManagedInstall(executableDirectory)) return InstalledRoot(executableDirectory) ?? appDataRoot;
+        string appDataRoot = Path.Combine(localAppData, "MedalSync");
+        string legacyRoot = Path.Combine(localAppData, "LarsonServer", "MedalSync");
+        if (!IsManagedInstall(executableDirectory) && InstalledRoot(executableDirectory) is { } portable) return portable;
         string profileRoot = Path.Combine(userProfile, ".medal-sync");
         // The Program Files installation never writes user data beside its binaries.
         // Prefer the explicit physical profile root and preserve older AppData setups.
         if (File.Exists(Path.Combine(profileRoot, "config.json")) || File.Exists(Path.Combine(profileRoot, "device.json"))) return profileRoot;
         if (File.Exists(Path.Combine(appDataRoot, "config.json")) || File.Exists(Path.Combine(appDataRoot, "device.json"))) return appDataRoot;
+        if (File.Exists(Path.Combine(legacyRoot, "config.json")) || File.Exists(Path.Combine(legacyRoot, "device.json"))) return legacyRoot;
         return profileRoot;
     }
 

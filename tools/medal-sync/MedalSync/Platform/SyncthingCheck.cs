@@ -1,7 +1,7 @@
 using System.Xml.Linq;
-using LarsonServer.MedalSync.Config;
+using MedalSync.Config;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 internal sealed record SyncFolder(string Profile, string Id, string Label, string Path, string Type);
 

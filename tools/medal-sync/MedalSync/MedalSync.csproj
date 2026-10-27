@@ -8,7 +8,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
     <AssemblyName>medal-sync</AssemblyName>
-    <RootNamespace>LarsonServer.MedalSync</RootNamespace>
+    <RootNamespace>MedalSync</RootNamespace>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- Single-file publish must carry the native SQLite library. -->
@@ -23,6 +23,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="MedalSync.Tests" />
     <InternalsVisibleTo Include="medal-sync-launch" />
+    <InternalsVisibleTo Include="MedalSync.Integration" />
   </ItemGroup>
 
 </Project>

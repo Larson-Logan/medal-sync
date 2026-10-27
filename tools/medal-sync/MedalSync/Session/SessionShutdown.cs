@@ -1,4 +1,4 @@
-namespace LarsonServer.MedalSync.Session;
+namespace MedalSync.Session;
 
 /// <summary>One Windows end-session attempt. A query alone must not stop a session.</summary>
 internal sealed class SessionShutdown(IClock clock, TimeSpan? budget = null)

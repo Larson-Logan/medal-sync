@@ -1,7 +1,7 @@
 using System.Globalization;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Storage;
+namespace MedalSync.Storage;
 
 internal sealed record MountSettings(
     string Remote,
@@ -57,11 +57,14 @@ internal static class MountPlan
     public static void Validate(MountSettings settings)
     {
         var problems = new List<string>();
-        if (!WindowsPath.TryParse(settings.Remote, out var remote, out _) || !remote.Root.StartsWith(@"\\", StringComparison.Ordinal))
+        if (!WindowsPath.TryParse(settings.Remote, out var remote, out _)
+            || (!remote.Root.StartsWith(@"\\", StringComparison.Ordinal) && remote.Segments.Count == 0))
         {
-            problems.Add("the remote must be a UNC path to the private SMB share");
+            problems.Add("the remote must be a UNC share folder or an absolute local storage folder");
         }
         char letter = char.ToUpperInvariant(settings.DriveLetter);
+        if (remote is not null && !remote.Root.StartsWith(@"\\", StringComparison.Ordinal) && remote.Root[0] == letter)
+            problems.Add("the storage folder cannot be on the mounted drive");
         if (letter is < 'D' or > 'Z') problems.Add("the drive letter must be D through Z");
         if (!WindowsPath.TryParse(settings.CacheDirectory, out var cache, out _) || cache.Root.StartsWith(@"\\", StringComparison.Ordinal)
             || cache.Root[0] == letter)

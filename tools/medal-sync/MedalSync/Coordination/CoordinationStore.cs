@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Library;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Coordination;
+namespace MedalSync.Coordination;
 
 /// <summary>Identity marker written once when the shared library is created.</summary>
 internal sealed record LibraryIdentity(int Format, string LibraryId, string AccountId, DateTimeOffset CreatedAt, DeviceIdentity CreatedBy)

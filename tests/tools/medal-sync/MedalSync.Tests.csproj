@@ -9,7 +9,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <IsPackable>false</IsPackable>
     <AssemblyName>MedalSync.Tests</AssemblyName>
-    <RootNamespace>LarsonServer.MedalSync.Tests</RootNamespace>
+    <RootNamespace>MedalSync.Tests</RootNamespace>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 

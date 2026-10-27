@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Coordination;
+using MedalSync.Config;
+using MedalSync.Coordination;
 
-namespace LarsonServer.MedalSync.Platform;
+namespace MedalSync.Platform;
 
 internal static class SetupMaintenance
 {
+    // Retained so current and older installers cannot mutate an installation concurrently.
     internal const string MutexName = @"Global\LarsonServer.MedalSync.Setup";
 
     public static void RequireNotRunning()

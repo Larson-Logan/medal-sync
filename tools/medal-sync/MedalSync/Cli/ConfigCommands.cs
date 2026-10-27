@@ -1,8 +1,8 @@
 using System.Text;
-using LarsonServer.MedalSync.Config;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Config;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Cli;
+namespace MedalSync.Cli;
 
 /// <summary>Portable configuration preparation; never opens Medal or a share.</summary>
 internal static class ConfigCommands
@@ -13,8 +13,9 @@ internal static class ConfigCommands
         args.RequireAllUsed();
         var config = MedalSyncConfig.Load(path);
         output.WriteLine($"Valid configuration: account {config.AccountId}, library {config.LibraryId}.");
-        output.WriteLine($"Capture: {config.Capture.Display}; server: {config.ServerCapture.Display}; cache: {config.CacheRoot}.");
-        output.WriteLine("Syntax and path checks only; share access, sync exclusions and device readiness are separate checks.");
+        output.WriteLine($"Capture: {config.Capture.Display}; storage: {config.ServerCapture.Display}; cache: {config.CacheRoot}.");
+        output.WriteLine($"Recording storage: {config.MountRemote}; cloud replicas: {config.Replication?.Targets.Count ?? 0}.");
+        output.WriteLine("Syntax and path checks only; storage access, sync exclusions and device readiness are separate checks.");
         return 0;
     }
 
@@ -23,7 +24,10 @@ internal static class ConfigCommands
         string account = args.Required("--account-id");
         string cache = args.Required("--cache-root");
         string remote = args.Required("--remote");
-        string coordination = args.Required("--coordination-root");
+        string mode = args.Value("--storage-mode") ?? "server";
+        if (mode is not ("server" or "local")) throw new UsageException("--storage-mode must be server or local.");
+        string coordination = args.Value("--coordination-root") ?? (mode == "local"
+            ? Path.Combine(LocalState.ForCurrentUser().Root, "coordination") : throw new UsageException("--coordination-root is required for server mode."));
         string target = Path.GetFullPath(args.Required("--out"));
         string? library = args.Value("--library-id");
         bool fresh = args.Flag("--new-library");
@@ -31,7 +35,12 @@ internal static class ConfigCommands
         bool apply = args.Flag("--apply");
         string capture = args.Value("--capture-folder") ?? @"M:\Clips";
         string? rclone = args.Value("--rclone-path");
-        string folder = args.Value("--sync-folder") ?? "larson-drive-media";
+        string? localCopy = args.Value("--local-copy-root");
+        string? cloudConfig = args.Value("--rclone-config");
+        string? cloudRemote = args.Value("--cloud-remote");
+        string conflicts = args.Value("--replica-conflicts") ?? "stop";
+        if (conflicts is not ("stop" or "version")) throw new UsageException("--replica-conflicts must be stop or version.");
+        string? folder = args.Value("--sync-folder");
         string pattern = args.Value("--sync-pattern") ?? "/Videos/Clips";
         args.RequireAllUsed();
         if (fresh == (library is not null)) throw new UsageException("Choose exactly one of --new-library or --library-id ID (reuse the existing ID on another PC).");
@@ -40,9 +49,15 @@ internal static class ConfigCommands
         if (File.Exists(target)) throw new UnsafeOperationException($"'{target}' already exists. Validate and reuse it; configuration creation never replaces an existing identity.");
         if (!Directory.Exists(Path.GetDirectoryName(target))) throw new UnsafeOperationException("The output parent directory must already exist.");
         var config = new MedalSyncConfig(1, library ?? Guid.NewGuid().ToString("N"), account, coordination, remote, capture, cache,
-            rclone ?? @"%LOCALAPPDATA%\LarsonServer\MedalSync\bin\rclone.exe",
+            rclone ?? DefaultRclonePath(),
             new MountConfig(5, 20, 20, 300, 30, 1000, 2, spike ? 53683 : 53682), 4,
-            spike ? [] : [new SyncExclusion(folder, pattern)]);
+            spike || folder is null ? [] : [new SyncExclusion(folder, pattern)])
+        {
+            StorageMode = mode == "local" ? StorageMode.Local : StorageMode.Server,
+            Replication = localCopy is null && cloudRemote is null && cloudConfig is null && conflicts == "stop" ? null
+                : new ReplicationConfig(localCopy, cloudConfig, cloudRemote is null ? [] : [new ReplicaTarget("cloud", cloudRemote)])
+                    { ConflictPolicy = conflicts == "version" ? ReplicaConflictPolicy.Version : ReplicaConflictPolicy.Stop },
+        };
         config.Validate();
         if (spike && !config.RemoteRoot.Segments.LastOrDefault("").Contains("spike", StringComparison.OrdinalIgnoreCase))
             throw new UsageException("A spike remote must end in a folder whose name contains 'spike'.");
@@ -58,4 +73,7 @@ internal static class ConfigCommands
         output.WriteLine($"Created '{target}' for library {config.LibraryId}. No Medal, startup, server or sync settings changed.");
         return 0;
     }
+
+    internal static string DefaultRclonePath() => File.Exists(Path.Combine(AppContext.BaseDirectory, "rclone.exe"))
+        ? Path.Combine(AppContext.BaseDirectory, "rclone.exe") : Path.Combine(LocalState.ForCurrentUser().Root, "bin", "rclone.exe");
 }

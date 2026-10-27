@@ -1,13 +1,13 @@
 using System.Text;
 using System.Runtime.InteropServices;
-using LarsonServer.MedalSync.Cli;
-using LarsonServer.MedalSync.Library;
-using LarsonServer.MedalSync.Platform;
-using LarsonServer.MedalSync.Session;
-using LarsonServer.MedalSync.Tests.Fixtures;
-using LarsonServer.MedalSync.Util;
+using MedalSync.Cli;
+using MedalSync.Library;
+using MedalSync.Platform;
+using MedalSync.Session;
+using MedalSync.Tests.Fixtures;
+using MedalSync.Util;
 
-namespace LarsonServer.MedalSync.Tests;
+namespace MedalSync.Tests;
 
 public sealed class LauncherAndRelocationTests : IDisposable
 {

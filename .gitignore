@@ -27,6 +27,8 @@ __pycache__/
 Backups/
 MedalCache/
 config.local.json
+rclone.conf
+*.rclone.conf
 device.json
 startup-originals.json
 .claude/settings.local.json

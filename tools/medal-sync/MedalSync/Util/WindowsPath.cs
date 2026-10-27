@@ -1,4 +1,4 @@
-namespace LarsonServer.MedalSync.Util;
+namespace MedalSync.Util;
 
 /// <summary>
 /// A strictly parsed absolute Windows path. Parsing is pure string work, so
