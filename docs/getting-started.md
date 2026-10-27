@@ -20,16 +20,15 @@ real playback, cross-PC handoff and physical reboot need desktop acceptance.
 
 ## Install the programs
 
-Follow [installation and updates](updates.md). Install into an explicit per-user
-directory such as `$HOME/.medal-sync`. The installer copies programs only;
-it does not enroll a library, mount storage, change startup or start Medal.
+Follow [installation and updates](updates.md). The setup EXE installs programs
+into `C:\Program Files\Medal Sync` by default and creates Start menu shortcuts.
+It does not enroll a library, mount storage or change Medal's startup entries.
 
-Configuration and device identity live in the state root, with executables
-under its `bin` directory. Once both `config.json` and `device.json` exist,
-the installed programs use that adjacent state root. Otherwise they fall back
-to `%LOCALAPPDATA%/LarsonServer/MedalSync`. Establish initial state in that
-default location, then move the stopped state as a unit to a custom location
-before rewiring startup. Never run a partially configured custom installation.
+Configuration and identity stay in your profile, separate from Program Files.
+The managed installation reuses an existing `$HOME/.medal-sync` configuration,
+then an older `%LOCALAPPDATA%/LarsonServer/MedalSync` configuration. Fresh
+installations use `$HOME/.medal-sync`. Existing portable installations continue
+using adjacent state. No identity or library data is copied by setup.
 
 ## Plan configuration before using live data
 
@@ -39,7 +38,7 @@ Choose a separate disposable spike share to test mounting first. Commands
 below are a configuration preview; they do not create a library:
 
 ```powershell
-$cli = "$HOME/.medal-sync/bin/medal-sync.exe"
+$cli = "$env:ProgramFiles/Medal Sync/bin/medal-sync.exe"
 & $cli config create --account-id YOUR_ACCOUNT_ID --new-library `
   --cache-root E:\MedalCache --remote '\\YOUR-SERVER\Data\Media\Videos' `
   --coordination-root '\\YOUR-SERVER\Data\AppData\MedalSync' `
@@ -58,8 +57,10 @@ paths and isolate the SSD cache from file synchronization. `init` without
 new shared library. A second PC uses the same library ID and `enroll` preview
 to review its existing records. Never initialize an existing journal.
 
-After configuration and enrollment are verified, the startup helper previews
-per-user shortcut and startup changes:
+The new Start menu shortcut opens the companion without replacing Medal's own
+startup entries. Existing portable startup integration remains in place. Advanced
+per-user integration can be changed using the portable startup helper after
+configuration and enrollment have been verified:
 
 ```powershell
 & "$HOME/.medal-sync/bin/set-medal-startup.ps1" -StateRoot "$HOME/.medal-sync"

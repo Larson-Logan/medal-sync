@@ -2,56 +2,69 @@
 
 `Directory.Build.props` is the single version source for both programs. Stable
 releases use `MAJOR.MINOR.PATCH` and the exact tag `vMAJOR.MINOR.PATCH`.
-Prerelease channels are not implemented. Changelog entries remain Unreleased
-until a maintainer actually publishes the release.
+Changelog entries remain Unreleased until publication.
 
 ## Build locally
 
 ```powershell
 pwsh -File scripts/validate.ps1
-pwsh -File scripts/package-release.ps1
+pwsh -File scripts/package-windows-installer.ps1
 ```
 
+The first setup build downloads the compiler version pinned in
+`installer/windows/toolchain.json`, verifies its SHA-256 and Authenticode
+signature, then installs it per-user under ignored `.validation/build-tools/`.
+The compiler is a build dependency only. End users need no PowerShell or .NET
+installation to run the resulting setup EXE.
+
 The packager performs locked, self-contained Windows x64 publishing, checks PE
-subsystems, smoke-tests the CLI, verifies both executable versions and creates:
+subsystems, smoke-tests the CLI and verifies both executable versions. Output:
 
-- `.medal-sync-dist/medal-sync-VERSION-win-x64.zip`
-- The matching `.zip.sha256` file.
+- `.medal-sync-dist/medal-sync-VERSION-setup-win-x64.exe` and its `.sha256` sidecar.
+- `.medal-sync-dist/medal-sync-VERSION-win-x64.zip` and its `.sha256` sidecar.
 
-The ZIP contains exactly the CLI, windowless launcher, updater, shared module,
-startup helper, LICENSE, THIRD_PARTY.md, the SDK distribution's .NET license
-and third-party notices, and `release.json`. Every payload file
-has a SHA-256 entry in the manifest. Packaging opens and verifies its own ZIP.
-No config, databases, logs or build staging directories are included.
-Move an existing archive aside before packaging again; releases are never
-silently overwritten. `-SkipBuild` packages already-built matching binaries.
+The native setup is the primary download. It installs in Program Files, creates
+shortcuts and registers the native uninstaller in Installed apps. The portable
+ZIP remains available for advanced per-user deployments. It contains exactly
+the two programs, portable lifecycle scripts, licenses and `release.json` with
+per-file hashes. No personal configuration, database, logs or build staging
+files are included. Native setup contains only the programs, a static layout
+marker, licenses and generated uninstall runtime.
+
+Move an existing portable archive aside before packaging again; ZIPs are not
+silently overwritten. `scripts/package-windows-installer.ps1 -SkipPackage`
+recompiles setup from an already verified matching ZIP.
 
 ## GitHub pipeline
 
-Pull requests and pushes to main run Windows validation and package smoke
-checks. Actions are pinned to commit SHAs, credentials are not retained by
-checkout and ordinary validation has read-only permissions. Dependabot proposes
-monthly action and NuGet updates.
+Pull requests and pushes to main run Windows validation, build both distribution
+formats and test native install, in-place upgrade, active-session refusal,
+registration, shortcuts and uninstall on an ephemeral hosted runner. The native
+integration test uses a temporary per-user program folder and refuses to run
+on an ordinary desktop or over an existing installation.
 
-For a release, update the version/changelog, merge validated changes to main,
-then tag that commit and push the tag. For example, for version 0.2.0:
+Actions are pinned to SHAs and checkout does not retain credentials. Ordinary
+validation has read-only repository permissions. Dependabot proposes monthly
+action and NuGet updates.
+
+Update the version and changelog, merge validated changes to main, then tag
+that commit and push the exact version tag. For version 0.3.0:
 
 ```powershell
-git tag -a v0.2.0 -m 'Medal Sync 0.2.0'
-git push origin v0.2.0
+git tag -a v0.3.0 -m 'Medal Sync 0.3.0'
+git push origin v0.3.0
 ```
 
-The release workflow requires exact tag/version equality and main ancestry,
-runs the full suite, packages the programs and creates a **draft** GitHub release
-with ZIP, checksum and generated notes. Only this job has contents-write access.
-Existing releases cause failure rather than replacement. A failed run can be
-retried while no release exists; inspect partial drafts before retrying.
+The release workflow checks tag/version equality and main ancestry, runs tests,
+builds both packages, verifies native installation and creates a **draft** GitHub
+release with setup EXE, portable ZIP, checksums and generated notes. Only this
+job has contents-write permission. Existing releases cause failure rather than
+replacement.
 
-Review the draft's assets, version, checksums and notes, and complete applicable
-desktop acceptance before publishing it. Drafts and prereleases are invisible
-to automatic update checks. Publishing a stable release exposes its GitHub
-asset digest to the updater. New versions are advertised on the next desktop
-launch; installation remains explicit and requires Ready status.
+Review assets, versions, hashes and release notes before publishing the draft.
+Drafts and prereleases are invisible to automatic update checks. A published
+stable setup is advertised on the next desktop launch; installation stays
+explicit and verifies Ready status. Publisher code signing is not configured.
 
-Branch rules, tag rules, secret scanning, private vulnerability reporting and
-repository visibility are GitHub settings managed separately from these files.
+Repository visibility, branch/tag rules and vulnerability reporting remain
+separate GitHub settings. No build or test deploys onto a live library.

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 — Unreleased
+
+- Native Windows setup EXE with a Program Files destination, Start menu and
+  optional desktop shortcuts, in-place upgrades and Installed apps uninstallation.
+- Writable per-user state stays separate from program files; existing physical
+  profile and AppData configurations are retained without copying identities.
+- Setup verifies running applications and library readiness before installation,
+  and prevents new library operations while installation or uninstall is open.
+- Machine-wide installation owns its shortcuts and preserves existing portable
+  Medal startup integration. It never automatically closes Medal or reboots.
+- GitHub releases publish the standard setup EXE alongside the advanced portable ZIP.
+
 ## 0.2.0 — Unreleased
 
 - Versioned Windows x64 packages with manifests and SHA-256 checksums.

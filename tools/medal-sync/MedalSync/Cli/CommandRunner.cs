@@ -14,7 +14,7 @@ internal static class CommandRunner
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config",
-        "--from", "--wait-for-server",
+        "--from", "--wait-for-server", "--state-root",
         "--account-id", "--cache-root", "--remote", "--coordination-root", "--library-id", "--capture-folder", "--rclone-path", "--sync-folder", "--sync-pattern", "--spike-config", "--server-ignore",
     };
 
@@ -22,6 +22,7 @@ internal static class CommandRunner
         medal-sync: SSD-cached Medal storage and one-PC-at-a-time library handoff.
 
         Read-only:
+          setup check [--state-root DIR] [--out FILE]  Verify readiness for Windows setup; no library changes
           config validate --config FILE          Validate a candidate config without reading Medal or the share
           inspect [--json]                       Phase 0 inventory of this PC (Gate A evidence)
           snapshot export --out FILE [--db DB]   Write the library tables to a new private file
@@ -90,6 +91,7 @@ internal static class CommandRunner
         Func<LibraryChangeReview, bool>? reviewLibraryChanges, Session.SessionShutdown? shutdown)
     {
         string command = string.Join(' ', args.Words);
+        if (command != "version" && command != "setup check") Platform.SetupMaintenance.RequireNotRunning();
         switch (command)
         {
             case "version":
@@ -108,6 +110,7 @@ internal static class CommandRunner
         if (!OperatingSystem.IsWindows()) throw new UsageException($"'{command}' runs only on Windows.");
         return command switch
         {
+            "setup check" => SetupCommands.Check(args, output),
             "inspect" => SessionCommands.Inspect(args, output),
             "status" => SessionCommands.Status(args, output),
             "mount-plan" => SessionCommands.MountPlanCommand(args, output),

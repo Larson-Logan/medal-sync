@@ -13,8 +13,14 @@ with Medal.
 
 ## Getting started
 
+Download the Windows **setup EXE** from
+[GitHub Releases](https://github.com/Larson-Logan/medal-sync/releases) once a
+maintainer publishes a release. Run it, choose the program folder (default:
+`C:\Program Files\Medal Sync`), and follow the wizard. It adds Start menu
+shortcuts and supports removal through Windows **Installed apps**.
+
 Read [setup and the safety model](docs/getting-started.md) before configuring a
-live library. Published programs are self-contained; users do not need .NET.
+live library. Setup includes .NET; ordinary installation needs no PowerShell.
 Storage requires rclone, WinFsp, an SSD cache and a reachable SMB server.
 
 [GitHub Releases](https://github.com/Larson-Logan/medal-sync/releases) is the
@@ -30,7 +36,7 @@ Python 3.11+. No credentials or live Medal library are needed for tests.
 
 ```powershell
 pwsh -File scripts/validate.ps1
-pwsh -File scripts/package-release.ps1
+pwsh -File scripts/package-windows-installer.ps1
 ```
 
 Builds and release packages go into ignored `.medal-sync-dist/`. Building a

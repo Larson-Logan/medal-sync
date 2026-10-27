@@ -89,6 +89,7 @@ internal static partial class Launcher
         try
         {
             request = Parse(args);
+            SetupMaintenance.RequireNotRunning();
             ReleaseUpdate.NotifyAtLaunch(ui.Notify);
             medal = new MedalProcess(MedalEnvironment.Locate());
         }

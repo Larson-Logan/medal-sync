@@ -21,7 +21,9 @@ internal static partial class ReleaseUpdate
         string? tag = release.GetProperty("tag_name").GetString();
         if (tag is null || !StableTag().IsMatch(tag) || !Version.TryParse(tag[1..], out var latest)
             || !Version.TryParse(installed, out var current) || latest <= current) return null;
-        string assetName = $"medal-sync-{tag[1..]}-win-x64.zip";
+        string setupName = $"medal-sync-{tag[1..]}-setup-win-x64.exe";
+        bool hasSetup = release.GetProperty("assets").EnumerateArray().Any(a => a.GetProperty("name").GetString() == setupName);
+        string assetName = hasSetup ? setupName : $"medal-sync-{tag[1..]}-win-x64.zip";
         string assetUrl = $"https://github.com/Larson-Logan/medal-sync/releases/download/{tag}/{assetName}";
         var assets = release.GetProperty("assets").EnumerateArray().Where(a => a.GetProperty("name").GetString() == assetName).ToList();
         if (assets.Count != 1 || assets[0].GetProperty("browser_download_url").GetString() != assetUrl) return null;
@@ -61,6 +63,6 @@ internal static partial class ReleaseUpdate
         using var timeout = new CancellationTokenSource(LaunchTimeout);
         string? version = CheckAsync(client, ToolInfo.Version, timeout.Token).GetAwaiter().GetResult();
         if (version is not null)
-            notify($"Medal Sync {version} is available. Quit Medal and wait for Ready, then use update-medal-sync.ps1 to download and install it. See GitHub Releases for details.");
+            notify($"Medal Sync {version} is available. Quit Medal and wait for Ready, then download and run the Windows setup from GitHub Releases.");
     }
 }

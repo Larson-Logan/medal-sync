@@ -31,4 +31,7 @@ jobs:
         run: ./scripts/validate.ps1
       - name: Smoke test release packaging
         shell: pwsh
-        run: ./scripts/package-release.ps1
+        run: ./scripts/package-windows-installer.ps1
+      - name: Test native setup, upgrade and uninstall in isolated user installation
+        shell: pwsh
+        run: ./scripts/test-windows-installer.ps1

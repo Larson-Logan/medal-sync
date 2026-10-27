@@ -166,6 +166,9 @@ internal static class SessionCommands
     /// <summary>Keeps the Run value and medal:// handler on the launcher once startup is rewired; never fails a launch.</summary>
     private static void GuardStartup(Context context)
     {
+        // Machine-wide setup owns its own shortcuts, not Medal's per-user hooks.
+        // Keep the existing portable integration intact until explicitly migrated.
+        if (LocalState.IsManagedInstall(AppContext.BaseDirectory)) return;
         string launcher = Path.Combine(AppContext.BaseDirectory, StartupEntries.LauncherFile);
         try
         {
