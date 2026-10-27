@@ -92,8 +92,9 @@ begin
     Started := ExecAsOriginalUser(Executable, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   if (not Started) or (ResultCode <> 0) then begin
-    if LoadStringFromFile(ReportPath, Report) then Result := Utf8Decode(Report)
-    else Result := 'Cannot verify that Medal Sync is Ready. Quit Medal normally and finish any pending session, then retry.';
+    if LoadStringFromFile(ReportPath, Report) then Result := Utf8Decode(Report);
+    if Result = '' then
+      Result := 'Cannot verify that Medal Sync is Ready. Cancel setup, quit Medal normally and finish any pending session, then run setup again.';
   end;
 end;
 

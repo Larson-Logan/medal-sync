@@ -162,7 +162,7 @@
     "docs/releases.md": "5d7fd8b4b5a333a33819137a04d97dbc648275db4440c695eff8b7828b374068",
     "docs/updates.md": "6f29989d56b00a5de5969bd67b6edd2fc1d37a28eaaa2283da0bd7939192cd84",
     "global.json": "be0c643b7bc73619c12e5571c06ddae8a754358a295fe3167520ec0825477679",
-    "installer/windows/medal-sync.iss": "de1114c62fdd86ea3758082ce80c10e3b53555866d89248f66787a70355976f0",
+    "installer/windows/medal-sync.iss": "da58404c5f20a67ca81eb84c0a01bdb82f0fa1e145ddd38eb5230b581ffc9eb5",
     "installer/windows/setup-layout.json": "a18ae27432424c680f752132cc208c20068dd2c4c6993cd44bb597f161486996",
     "installer/windows/toolchain.json": "bd6899644c4f444d48b3cf1364793398a843ff9d917af872b311ee341fe5d7e5",
     "scripts/check-doc-links.mjs": "6ed33260a1a8987e8aab8fa24cce4cdcc28bf1032242fa441e2abdb72684b861",
