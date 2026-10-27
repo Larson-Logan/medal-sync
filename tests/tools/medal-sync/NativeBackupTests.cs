@@ -1,4 +1,6 @@
 using MedalSync.Library;
+using MedalSync.Coordination;
+using MedalSync.Platform;
 using MedalSync.Tests.Fixtures;
 using MedalSync.Util;
 
@@ -8,6 +10,20 @@ public sealed class NativeBackupTests : IDisposable
 {
     private readonly MedalFixture _fixture = new();
     public void Dispose() => _fixture.Dispose();
+
+    [Theory]
+    [InlineData("2643.583.1", "2643.3040.1", true)]
+    [InlineData("2644.591.1", "2643.3040.1", true)]
+    [InlineData("2644.591.2", "2643.3040.1", false)]
+    [InlineData("2644.591.1", "2643.3040.2", false)]
+    [InlineData(null, "2643.3040.1", false)]
+    [InlineData("2644.591.1", null, false)]
+    public void NativeBackupCompatibilityAcceptsOnlyReviewedExactBuildPairs(string? app, string? recorder, bool supported)
+    {
+        var versions = new MedalVersions(app, recorder);
+        if (supported) Assert.Null(Record.Exception(() => NativeBackupBuilds.RequireSupported(versions)));
+        else Assert.Throws<IncompatibleLibraryException>(() => NativeBackupBuilds.RequireSupported(versions));
+    }
 
     [Fact]
     public void NativeBackupLineageIsAlignedWithoutReplacingLibraryOrDeviceSettings()

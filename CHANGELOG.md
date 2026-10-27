@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.4.0 — Unreleased
+## 0.4.0 — 2026-10-27
+
+- Verified native-backup compatibility for Medal 2644.591.1 with recorder
+  2643.3040.1; unknown app/recorder pairs remain refused.
 
 - Native setup bundles pinned rclone and its license, and offers the pinned
   WinFsp MSI for all-users installation. Dependency downloads are verified.

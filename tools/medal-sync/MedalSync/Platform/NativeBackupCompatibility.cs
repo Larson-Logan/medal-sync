@@ -14,8 +14,7 @@ internal static class NativeBackupCompatibility
         if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Quit Medal before preparing its native backup identity.");
         // Verified against the installed worker's restore/track implementation;
         // do not extrapolate this compatibility behavior to unknown builds.
-        if (install.Versions.App != "2643.583.1" || install.Versions.Recorder != "2643.3040.1")
-            throw new IncompatibleLibraryException("Medal's native backup compatibility needs verification for this application/recorder build.");
+        NativeBackupBuilds.RequireSupported(install.Versions);
         string backup = config.MountedCapture.Append("Databases", $"medal-{config.AccountId}.db").Display;
         NativeBackupIdentity.Align(install.DatabasePath, backup, Path.Combine(state.BackupDirectory, "native-identity"), config.AccountId);
         // Medal consults this registry map before it reads ClipFolder from the
