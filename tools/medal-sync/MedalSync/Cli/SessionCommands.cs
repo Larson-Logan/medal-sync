@@ -93,12 +93,7 @@ internal static class SessionCommands
             output.WriteLine($"Preview only. With --apply this creates {context.Config.LibraryCoordinationDirectory} and the storage marker.");
             return 0;
         }
-        string marker = context.Config.ServerCapture.Append(MedalSyncConfig.StorageMarker).Display;
-        if (File.Exists(marker) && File.ReadAllText(marker).Trim() != context.Config.LibraryId)
-        {
-            throw new UnsafeOperationException($"{marker} already names a different library.");
-        }
-        if (!File.Exists(marker)) AtomicFile.CreateNew(marker, System.Text.Encoding.UTF8.GetBytes(context.Config.LibraryId + "\n"));
+        StorageIdentity.Initialize(context.Config.ServerCapture.Display, context.Config.LibraryId);
         CoordinationStore.Create(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, snapshot, AssetManifest.From(onServer),
             context.Device, SessionCoordinator.NewId(), context.Install.Versions, DateTimeOffset.UtcNow);
         context.Log.Write($"init: generation 0 created from {LibraryCommands.Counts(snapshot)}");

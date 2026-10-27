@@ -15,6 +15,19 @@ public sealed class ReplicationTests : IDisposable
         @"\\server\Data\Coordination", @"\\server\Data\Videos", @"M:\Clips", @"E:\Cache", @"C:\Tools\rclone.exe",
         new MountConfig(5, 20, 20, 300, 30, 1000, 2, 53682), 4, []);
 
+    [Fact]
+    public void FreshLocalStorageIsCreatedAndExistingLibraryIdentityIsNeverReplaced()
+    {
+        string folder = _fixture.PathFor("fresh-storage", "Clips");
+        StorageIdentity.Initialize(folder, Config().LibraryId);
+        string marker = Path.Combine(folder, MedalSyncConfig.StorageMarker);
+        byte[] original = File.ReadAllBytes(marker);
+        StorageIdentity.Initialize(folder, Config().LibraryId);
+        Assert.Equal(original, File.ReadAllBytes(marker));
+        Assert.Throws<UnsafeOperationException>(() => StorageIdentity.Initialize(folder, new string('a', 32)));
+        Assert.Equal(original, File.ReadAllBytes(marker));
+    }
+
     [Theory]
     [InlineData("onedrive:MedalSync", true)]
     [InlineData("dropbox:MedalSync/Media", true)]
