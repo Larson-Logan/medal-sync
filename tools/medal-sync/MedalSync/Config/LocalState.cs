@@ -22,10 +22,8 @@ internal sealed class LocalState(string root)
 
     internal static string ResolveRoot(string executableDirectory, string userProfile, string localAppData)
     {
-        string? adjacent = InstalledRoot(executableDirectory);
-        if (adjacent is not null) return adjacent;
         string appDataRoot = Path.Combine(localAppData, "LarsonServer", "MedalSync");
-        if (!IsManagedInstall(executableDirectory)) return appDataRoot;
+        if (!IsManagedInstall(executableDirectory)) return InstalledRoot(executableDirectory) ?? appDataRoot;
         string profileRoot = Path.Combine(userProfile, ".medal-sync");
         // The Program Files installation never writes user data beside its binaries.
         // Prefer the explicit physical profile root and preserve older AppData setups.

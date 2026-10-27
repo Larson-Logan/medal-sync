@@ -58,6 +58,17 @@ public sealed class WindowsSetupTests : IDisposable
     }
 
     [Fact]
+    public void ManagedInstallationNeverAdoptsConfigurationCopiedIntoProgramFiles()
+    {
+        string bin = ManagedBin();
+        string programs = Path.GetDirectoryName(bin)!;
+        File.WriteAllText(Path.Combine(programs, "config.json"), "synthetic");
+        File.WriteAllText(Path.Combine(programs, "device.json"), "synthetic");
+        string profile = DirectoryFor("user");
+        Assert.Equal(Path.Combine(profile, ".medal-sync"), LocalState.ResolveRoot(bin, profile, DirectoryFor("appdata")));
+    }
+
+    [Fact]
     public void UnknownLayoutRefusesInsteadOfWritingToProgramFiles()
     {
         string bin = ManagedBin();

@@ -18,7 +18,7 @@ $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{168562DF-1041
 $machineKey = $key.Replace('HKCU:', 'HKLM:')
 if ((Test-Path -LiteralPath $key) -or (Test-Path -LiteralPath $machineKey)) { throw 'An existing installation is present; refusing an integration test.' }
 $scratch = Join-Path $root ('.validation/setup-smoke-' + [guid]::NewGuid().ToString('N'))
-$app = Join-Path $scratch 'app'
+$app = Join-Path $scratch 'Program Files/Medal Sync'
 $group = 'Medal Sync Integration ' + [guid]::NewGuid().ToString('N')
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) "$group/Medal Sync.lnk"
 New-Item -ItemType Directory -Path $scratch -Force | Out-Null
@@ -28,7 +28,15 @@ function Run-Setup {
     return $process.ExitCode
 }
 if ((Run-Setup) -ne 0) { throw 'Native fresh install failed. Inspect the setup log.' }
-if (-not (Test-Path -LiteralPath $key) -or -not (Test-Path -LiteralPath $shortcut)) { throw 'Installed apps registration or Start menu shortcut is missing.' }
+if (-not (Test-Path -LiteralPath $key) -or -not (Test-Path -LiteralPath $shortcut)) {
+    Write-Output "Expected registration: $key; exists=$(Test-Path -LiteralPath $key)"
+    Write-Output "Expected shortcut: $shortcut; exists=$(Test-Path -LiteralPath $shortcut)"
+    foreach ($hive in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
+        Get-ChildItem -LiteralPath $hive -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath } | Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -like '*Medal*' } | Select-Object PSChildName,DisplayName,InstallLocation | Format-List
+    }
+    Get-Content -LiteralPath (Join-Path $scratch 'setup.log') -Tail 100
+    throw 'Installed apps registration or Start menu shortcut is missing.'
+}
 foreach ($name in @('medal-sync.exe','medal-sync-launch.exe')) {
     if ((Get-FileHash -LiteralPath (Join-Path $app "bin/$name")).Hash -ne (Get-FileHash -LiteralPath (Join-Path $root ".medal-sync-dist/$name")).Hash) { throw 'Installed executable hash differs from release.' }
 }
@@ -40,6 +48,11 @@ try { if ((Run-Setup) -eq 0) { throw 'Setup did not refuse an active session mut
 $cli = Join-Path $app 'bin/medal-sync.exe'
 & $cli version
 if ($LASTEXITCODE -ne 0) { throw 'Installed CLI smoke check failed.' }
+$setupMutex = [Threading.Mutex]::new($false, 'Global\LarsonServer.MedalSync.Setup')
+try {
+    $busyUninstall = Start-Process -FilePath (Join-Path $app 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -WindowStyle Hidden -Wait -PassThru
+    if ($busyUninstall.ExitCode -eq 0 -or -not (Test-Path -LiteralPath $cli)) { throw 'Uninstall did not refuse concurrent setup.' }
+} finally { $setupMutex.Dispose() }
 $uninstall = Start-Process -FilePath (Join-Path $app 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -WindowStyle Hidden -Wait -PassThru
 if ($uninstall.ExitCode -ne 0) { throw 'Native uninstall failed.' }
 if ((Test-Path -LiteralPath $key) -or (Test-Path -LiteralPath $shortcut) -or (Test-Path -LiteralPath $cli)) { throw 'Uninstall left managed registration, shortcut or executable behind.' }

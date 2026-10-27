@@ -129,6 +129,11 @@ function InitializeUninstall(): Boolean;
 var
   Error: String;
 begin
+  if CheckForMutexes('Global\LarsonServer.MedalSync.Setup') then begin
+    SuppressibleMsgBox('Another Medal Sync setup or uninstall is open. Close it before uninstalling.', mbError, MB_OK, IDOK);
+    Result := False;
+    exit;
+  end;
   CreateMutex('Global\LarsonServer.MedalSync.Setup');
   Error := CheckReady(True);
   Result := Error = '';
