@@ -19,10 +19,11 @@ $machineKey = $key.Replace('HKCU:', 'HKLM:')
 if ((Test-Path -LiteralPath $key) -or (Test-Path -LiteralPath $machineKey)) { throw 'An existing installation is present; refusing an integration test.' }
 $scratch = Join-Path $root ('.validation/setup-smoke-' + [guid]::NewGuid().ToString('N'))
 $app = Join-Path $scratch 'Program Files/Medal Sync'
-$group = 'Medal Sync Integration ' + [guid]::NewGuid().ToString('N')
+$group = 'Medal Sync'
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) "$group/Medal Sync.lnk"
+if (Test-Path -LiteralPath (Split-Path -Parent $shortcut)) { throw 'An existing shortcut group is present; refusing an integration test.' }
 New-Item -ItemType Directory -Path $scratch -Force | Out-Null
-$arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',('/DIR="{0}"' -f $app),('/GROUP="{0}"' -f $group),('/LOG="{0}"' -f (Join-Path $scratch 'setup.log')))
+$arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',('/DIR="{0}"' -f $app),('/LOG="{0}"' -f (Join-Path $scratch 'setup.log')))
 function Run-Setup {
     $process = Start-Process -FilePath $setup -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
     return $process.ExitCode

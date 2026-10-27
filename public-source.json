@@ -177,7 +177,7 @@
     "scripts/storage/medal-sync/set-medal-startup.ps1": "f4543660c0e6b9517a5c09f12fb472b31fd506761b04864633bc4dd9f6763b30",
     "scripts/storage/medal-sync/set-medal-sync-exclusions.ps1": "6293fdce864fc68a1a1bf11ccbfb430d442ac56b7a101f6b8e111cda1f74bbd6",
     "scripts/storage/medal-sync/update-medal-sync.ps1": "d9aa99578fd8b9384c5c3667c33e62ba160a75fc9e04cd3e1b5cded9103a121b",
-    "scripts/test-windows-installer.ps1": "8c2a0b8ca2a2034d0d68961c16a314e4540e09232774f20ea353dfbeeee509bb",
+    "scripts/test-windows-installer.ps1": "e837d4a1fe4123e7d00bb2137fb5868462a18c448e3ecd3f6f5df909ed0677d3",
     "scripts/validate.ps1": "7407d0283ec020fdc721d4329423a919761d04b5bc91609c032812f7d656b598",
     "tests/README.md": "554fd03e872336dde2106bc9ca080735e5d0637dcebb9dbd1e92c2e4dac6e46e",
     "tests/fixtures/smb.conf": "64228c11515a15e9175561e626e85c253d9476f7e68c7e696bc527449ba41a90",
