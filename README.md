@@ -10,7 +10,8 @@ Switch between PCs while each keeps its own login and recording settings.
 
 [Download Windows setup](https://github.com/Larson-Logan/medal-sync/releases) ·
 [Getting started](docs/getting-started.md) · [Storage guide](docs/storage.md) ·
-[Report an issue](https://github.com/Larson-Logan/medal-sync/issues)
+[Get help](SUPPORT.md) ·
+[Report an issue](https://github.com/Larson-Logan/medal-sync/issues/new/choose)
 
 ## Choose where your recordings live
 
@@ -97,5 +98,17 @@ maintainer review.
   [tests](tests/README.md) and [changelog](CHANGELOG.md)
 - [Release process](docs/releases.md), [security](SECURITY.md) and
   [third-party dependencies](THIRD_PARTY.md)
+
+## Help improve Medal Sync
+
+[Report a bug or suggest a feature](https://github.com/Larson-Logan/medal-sync/issues/new/choose),
+ask a setup question, or improve an unclear instruction. Use synthetic examples
+and keep private library files out of reports. The [support guide](SUPPORT.md)
+explains which details help maintainers reproduce a problem safely.
+
+For a code or documentation change, read [contributing](CONTRIBUTING.md), open
+a focused PR against `main`, and include validation results. Maintainers follow
+the [triage and review guide](docs/triage.md). Please follow the
+[code of conduct](CODE_OF_CONDUCT.md) in project conversations.
 
 Licensed under the [MIT license](LICENSE). Dependencies retain their own licenses.

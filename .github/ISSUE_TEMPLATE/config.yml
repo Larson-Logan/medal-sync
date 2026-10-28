@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Installation and storage guides
+    url: https://github.com/Larson-Logan/medal-sync/blob/main/SUPPORT.md
+    about: Find setup, storage, update and recovery guidance before opening an issue.
+  - name: Security reporting
+    url: https://github.com/Larson-Logan/medal-sync/security/policy
+    about: Follow the security policy for private vulnerability reporting; keep exploit details out of issues.
