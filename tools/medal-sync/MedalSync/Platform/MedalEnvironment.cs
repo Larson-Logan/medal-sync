@@ -75,7 +75,7 @@ internal static partial class MedalEnvironment
 /// Medal in the tray, so the window is never taken as proof that it exited.
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed class MedalProcess(MedalInstall install) : IMedalProcess
+internal sealed class MedalProcess(MedalInstall install, string? launchLink = null, Action<ProcessStartInfo>? start = null) : IMedalProcess
 {
     private static readonly string[] Names = ["Medal", "MedalEncoder", "Update"];
 
@@ -104,7 +104,7 @@ internal sealed class MedalProcess(MedalInstall install) : IMedalProcess
 
     private static bool IsMedalNamed(Process process) => process.ProcessName.StartsWith("Medal", StringComparison.OrdinalIgnoreCase);
 
-    public void Launch() => Open(null);
+    public void Launch() => Open(launchLink);
 
     /// <summary>
     /// Starts Medal, optionally with a <c>medal://</c> link. When Medal is already
@@ -114,12 +114,21 @@ internal sealed class MedalProcess(MedalInstall install) : IMedalProcess
     {
         if (!File.Exists(install.Executable)) throw new UnsafeOperationException($"Medal is not installed at '{install.Executable}'.");
         // Shell execute keeps Medal from inheriting medal-sync's console handles.
-        using var _ = Process.Start(new ProcessStartInfo(install.Executable)
+        var request = new ProcessStartInfo(install.Executable)
         {
             UseShellExecute = true,
             WorkingDirectory = Path.GetDirectoryName(install.Executable)!,
             Arguments = link is null ? "" : $"\"{MedalLink.Require(link)}\"",
-        });
+        };
+        try
+        {
+            if (start is not null) start(request);
+            else { using var _ = Process.Start(request); }
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            throw new UnsafeOperationException($"Windows could not open Medal at '{install.Executable}': {ex.Message}. Check the Medal installation, then retry through Medal Sync. Your session and cache are retained.");
+        }
     }
 }
 

@@ -124,7 +124,19 @@ internal sealed record MedalSyncConfig(
         }
         if (string.IsNullOrWhiteSpace(RclonePath)) problems.Add("rclonePath is required");
         if (Mount is null) problems.Add("mount settings are required");
+        else if (Mount.DirCacheHours < 1 || Mount.DirCacheHours > TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerHour)
+            problems.Add("mount.dirCacheHours must be a positive duration within the supported range");
         if (SyncExclusions is null) problems.Add("syncExclusions must be an array");
+        else
+            foreach (var exclusion in SyncExclusions)
+            {
+                if (exclusion is null) { problems.Add("syncExclusions cannot contain null"); continue; }
+                if (string.IsNullOrWhiteSpace(exclusion.FolderId)) problems.Add("each sync exclusion requires a folderId");
+                string? pattern = exclusion.Pattern;
+                if (pattern is null || pattern.Length < 2 || pattern[0] != '/' || pattern.EndsWith('/') || pattern.Contains('\\')
+                    || !WindowsPath.TryParse(@"X:\" + pattern[1..], out _, out _))
+                    problems.Add("each sync exclusion requires one rooted folder pattern such as /Videos/Clips; no wildcards or relative segments");
+            }
         if (Replication is not null) problems.AddRange(Replication.Problems(this));
         if (!double.IsFinite(MaxSessionHours) || MaxSessionHours is <= 0 or > 24) problems.Add("maxSessionHours must be between 0 and 24");
         if (problems.Count == 0)

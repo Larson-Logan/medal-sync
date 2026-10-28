@@ -22,8 +22,10 @@ real playback, cross-PC handoff and physical reboot need desktop acceptance.
 
 ## Install the programs
 
-Follow [installation and updates](updates.md). The setup EXE installs programs
-into `C:\Program Files\Medal Sync` by default and creates Start menu shortcuts.
+Follow [installation and updates](updates.md). The setup EXE offers per-user
+and all-users installation and creates Start menu shortcuts. All-users setup
+defaults to `C:\Program Files\Medal Sync`; per-user setup uses your local
+programs folder. Use the location selected in the installer for CLI commands.
 It bundles pinned rclone and offers the bundled WinFsp driver in all-users mode.
 It does not enroll a library, mount storage or change Medal's startup entries.
 
@@ -32,6 +34,11 @@ The managed installation reuses an existing `$HOME/.medal-sync` configuration,
 then an older `%LOCALAPPDATA%/LarsonServer/MedalSync` configuration. Fresh
 installations use `$HOME/.medal-sync`. Existing portable installations continue
 using adjacent state. No identity or library data is copied by setup.
+
+An unconfigured desktop launch shows the expected configuration path and points
+to **Medal Sync Setup Guide** in the Start menu. An unconfigured sign-in launch
+exits quietly. Neither launch creates configuration or a device identity.
+Repeated sign-in launches also leave an already supervised session alone.
 
 ## Choose storage
 
@@ -50,6 +57,7 @@ Choose a separate disposable spike share to test mounting first. Commands
 below are a configuration preview; they do not create a library:
 
 ```powershell
+# Use your chosen installation location (this example is all-users setup).
 $cli = "$env:ProgramFiles/Medal Sync/bin/medal-sync.exe"
 & $cli config create --account-id YOUR_ACCOUNT_ID --new-library `
   --cache-root E:\MedalCache --remote '\\YOUR-SERVER\Data\Media\Videos' `
@@ -61,6 +69,12 @@ Use `--apply` only after reviewing the preview; it creates a new candidate file
 and refuses to overwrite an existing file. Validate it with
 `config validate --config FILE`. Validation checks syntax and paths, not
 server readiness. Keep real configuration and identity outside Git.
+
+After validating the candidate, place it at `config.json` in the resolved user
+data folder described above or shown by an unconfigured desktop launch. Create
+that folder if needed; do not replace an existing configuration or copy another
+PC's `device.json`. The
+candidate is a plan, so creating it alone does not configure a desktop launch.
 
 Before `init --apply`, quit Medal normally, preserve a verified database and
 media backup, prove all referenced assets exist on the server, verify capture
@@ -82,6 +96,12 @@ configuration and enrollment have been verified:
 The helper saves originals before changes. Launch through the Medal Library
 shortcut so storage and ownership are checked before Medal opens. After exit,
 wait for **Ready** before switching PCs, updating or uninstalling.
+
+The desktop launcher passes `medal://` links through the same ownership and
+storage checks. A first launch opens the link as part of starting Medal; an
+already supervised session receives it immediately. An unmanaged Medal process
+must pass recovery checks before receiving the link. Advanced CLI launches can
+use `launch --medal-link 'medal://...'` too.
 
 ## Recovery rules
 

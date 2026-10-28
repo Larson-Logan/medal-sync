@@ -111,6 +111,8 @@ internal static class SessionCommands
     {
         bool replaceLocal = args.Flag("--replace-local-library");
         var wait = WaitSeconds(args.Value("--wait-for-server"));
+        string? link = args.Value("--medal-link");
+        if (link is not null) link = MedalLink.Require(link);
         args.RequireAllUsed();
         var context = Load();
         using var instance = SingleInstance();
@@ -124,12 +126,16 @@ internal static class SessionCommands
         }
         if (shutdown.Ending) return 3;
         GuardStartup(context);
-        var (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown);
+        var (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link);
         var journal = store.ReadJournal();
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
         var outcome = coordinator.Launch();
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
         if (outcome.Status is not (LaunchStatus.Started or LaunchStatus.AlreadyRunning)) return outcome.Status == LaunchStatus.Waiting ? 3 : 1;
+        // A recovered, already-running session must pass the coordinator's drive
+        // and ownership checks before it receives a link.
+        if (outcome.Status == LaunchStatus.AlreadyRunning && link is not null
+            && !shutdown.TryLaunch(() => new MedalProcess(context.Install).Open(link))) return 3;
         using var cancel = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) =>
         {
@@ -291,7 +297,8 @@ internal static class SessionCommands
     }
 
     private static (SessionCoordinator, CoordinationStore, RcloneClipMount) Coordinator(Context context, bool acceptChanges,
-        bool replaceLocal = false, Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null)
+        bool replaceLocal = false, Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
+        string? launchLink = null)
     {
         var clock = new SystemClock();
         var store = CoordinationStore.Open(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, context.Config.AccountId);
@@ -306,7 +313,7 @@ internal static class SessionCommands
         var checker = new ShareAssetChecker(context.Config.Capture, context.Config.ServerCapture, context.Config.LibraryId, new FileSystemProbe());
         var options = new SessionOptions(context.Device, context.Config.Capture, context.Install.Versions,
             TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal);
-        return (new SessionCoordinator(store, library, mount, new MedalProcess(context.Install), checker, clock, options,
+        return (new SessionCoordinator(store, library, mount, new MedalProcess(context.Install, launchLink), checker, clock, options,
             () => NativeBackupCompatibility.Prepare(context.Config, context.Install, context.State),
             reviewLibraryChanges is null ? null : review =>
             {
