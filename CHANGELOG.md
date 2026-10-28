@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Retain ownership when an aborted startup cannot verify that its mount stopped,
+  and retry cleanup on the owning PC.
 - Refuse Windows device names, malformed UNC roots and separators inside appended
   path segments before accessing or replicating media.
 - Keep authenticated rclone control requests on reviewed loopback endpoints,

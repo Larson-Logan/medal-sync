@@ -102,9 +102,8 @@ internal sealed class SessionCoordinator(
         string session = journal.SessionId!;
         if (journal.State == OwnershipState.Starting)
         {
-            if (mount.IsRunning && !mount.Stop()) return new LaunchOutcome(LaunchStatus.Blocked, "The previous session's drive did not stop.");
-            store.Update(r => Ownership.AbortStart(r, Me, session, "restarted before Medal launched", clock.Now), options.LockTimeout);
-            return null;
+            string cleanup = GiveBackStart(session, "restarted before Medal launched");
+            return cleanup.Length == 0 ? null : new LaunchOutcome(LaunchStatus.Blocked, cleanup.TrimStart(), session);
         }
         var finished = Finish(session);
         return finished.Status is FinishStatus.Published or FinishStatus.Unchanged
@@ -166,7 +165,8 @@ internal sealed class SessionCoordinator(
         }
         catch (Exception ex)
         {
-            // Whatever failed, Medal never ran, so the session is given back.
+            // Medal never ran, but ownership can only be given back after the
+            // writable mount is verified stopped.
             string cleanup = GiveBackStart(session, ex.Message);
             if (ex is OperationCanceledException && shutdown?.Ending == true)
                 return new LaunchOutcome(LaunchStatus.Waiting, "Windows shutdown interrupted storage preparation. This PC can retry at next sign-in." + cleanup);
@@ -189,13 +189,16 @@ internal sealed class SessionCoordinator(
     {
         try
         {
-            if (mount.IsRunning) mount.Stop();
+            if (mount.IsRunning && !mount.Stop())
+                throw new UnsafeOperationException("The clip drive did not stop; it may still be in use.");
+            if (mount.IsRunning)
+                throw new UnsafeOperationException("The clip drive is still running after shutdown.");
             store.Update(r => Ownership.AbortStart(r, Me, session, reason, clock.Now), options.LockTimeout);
             return "";
         }
         catch (Exception cleanup)
         {
-            return $" The session could not be given back yet ({cleanup.Message}); opening Medal again on this PC retries it.";
+            return $" The session and cache stay on this PC ({cleanup.Message}); open Medal Library on this PC to retry cleanup.";
         }
     }
 

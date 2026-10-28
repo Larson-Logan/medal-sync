@@ -126,6 +126,9 @@ sidecars, clear cache, reset the journal or automatically accept removals.
 Removal approval must match the exact reviewed session and snapshot. An
 unknown upload state is never success. Device settings and logins stay local.
 
+If startup cannot verify that its clip drive stopped, ownership stays on this
+PC. Open Medal Library here again to retry cleanup before switching PCs.
+
 Windows shutdown gives the existing finish worker up to 25 seconds. Incomplete
 work remains owned and resumes on the next launch. An automatic update check
 never installs during shutdown or interrupts this recovery path.
