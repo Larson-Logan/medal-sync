@@ -108,6 +108,12 @@ public sealed class SessionTests : IDisposable
 
         public Action? OnStop { get; set; }
 
+        public bool StopResult { get; set; } = true;
+
+        public bool RemainRunningOnStop { get; set; }
+
+        public bool StopThrows { get; set; }
+
         public void Start(string session, bool forRecording)
         {
             OnStart?.Invoke();
@@ -126,9 +132,10 @@ public sealed class SessionTests : IDisposable
 
         public bool Stop()
         {
-            IsRunning = false;
+            if (StopThrows) throw new IOException("Synthetic mount stop failure.");
+            IsRunning = RemainRunningOnStop;
             OnStop?.Invoke();
-            return true;
+            return StopResult;
         }
 
         public void Forget(string session) => Forgotten.Add(session);
@@ -651,6 +658,46 @@ public sealed class SessionTests : IDisposable
         Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
         Assert.False(pc.Mount.IsRunning);
         Assert.Equal(0, pc.Medal.Launches);
+    }
+
+    [Theory]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    public void FailedStartupRetainsOwnershipUntilMountCleanupIsVerified(bool stopResult, bool stillRunning, bool stopThrows)
+    {
+        var pc = Computer(FirstPc, "first");
+        pc.Mount.HealthResult = new MountHealth(false, "Synthetic unhealthy mount.");
+        pc.Mount.StopResult = stopResult;
+        pc.Mount.RemainRunningOnStop = stillRunning;
+        pc.Mount.StopThrows = stopThrows;
+
+        var blocked = pc.Coordinator.Launch();
+        var retained = _store.ReadJournal();
+
+        Assert.Equal(LaunchStatus.Blocked, blocked.Status);
+        Assert.Contains("retry", blocked.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(OwnershipState.Starting, retained.State);
+        Assert.Equal(FirstPc, retained.Owner);
+        Assert.Equal(pc.Mount.Starts.Single(), retained.SessionId);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.Equal(0, pc.Medal.Launches);
+        var other = Computer(SecondPc, "second");
+        Assert.Equal(LaunchStatus.Waiting, other.Coordinator.Launch().Status);
+        Assert.Equal(retained, _store.ReadJournal());
+
+        // Recover the same STARTING journal, as after a companion restart.
+        Assert.Equal(LaunchStatus.Blocked, pc.Coordinator.Launch().Status);
+        Assert.Equal(retained, _store.ReadJournal());
+        pc.Mount.StopResult = true;
+        pc.Mount.RemainRunningOnStop = false;
+        pc.Mount.StopThrows = false;
+        pc.Mount.HealthResult = new MountHealth(true, "ok");
+        AssertStarted(pc.Coordinator.Launch());
+        Assert.NotEqual(retained.SessionId, _store.ReadJournal().SessionId);
+        pc.Medal.Running = false;
+        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Finish(_store.ReadJournal().SessionId!).Status);
+        AssertStarted(other.Coordinator.Launch());
     }
 
     [Fact]
