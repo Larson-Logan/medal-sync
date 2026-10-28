@@ -66,11 +66,11 @@ action and NuGet updates, grouping minor and patch versions while keeping major
 upgrades separate. See [maintainer triage](triage.md) for review and labels.
 
 Update the version and changelog, merge validated changes to main, then tag
-that commit and push the exact version tag. For version 0.3.0:
+that commit and push the exact version tag. For version 1.0.0:
 
 ```powershell
-git tag -a v0.3.0 -m 'Medal Sync 0.3.0'
-git push origin v0.3.0
+git tag -a v1.0.0 -m 'Medal Sync 1.0.0'
+git push origin v1.0.0
 ```
 
 The release workflow checks tag/version equality and main ancestry, runs tests,

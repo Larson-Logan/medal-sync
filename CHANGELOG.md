@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0 — 2026-10-28
+
 - Fresh Medal build/schema checks before launch and publication, with automatic
   update warnings during sessions and a configuration-independent
   `compatibility --json` report. Incompatible updates retain ownership and cache
