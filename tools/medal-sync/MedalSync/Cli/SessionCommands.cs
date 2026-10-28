@@ -42,6 +42,21 @@ internal static class SessionCommands
         return 0;
     }
 
+    public static int Compatibility(Arguments args, TextWriter output)
+    {
+        bool json = args.Flag("--json");
+        args.RequireAllUsed();
+        return WriteCompatibility(MedalEnvironment.Locate(), json, output);
+    }
+
+    internal static int WriteCompatibility(MedalInstall install, bool json, TextWriter output)
+    {
+        var report = MedalCompatibility.Check(install);
+        output.WriteLine(json ? JsonSerializer.Serialize(report, Json.Options) : report.Summary
+            + (report.Compatible ? "" : " Keep unfinished sessions and caches on this PC; check for a Medal Sync update."));
+        return report.Compatible ? 0 : 1;
+    }
+
     public static int Status(Arguments args, TextWriter output)
     {
         bool json = args.Flag("--json");
@@ -327,7 +342,7 @@ internal static class SessionCommands
                 shutdown?.RequireTime();
                 if (new MedalProcess(context.Install).IsRunning())
                     throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
-            })), store, mount);
+            }), new MedalCompatibilityGuard(context.Install)), store, mount);
     }
 
     internal static string SaveReviewedChanges(string backupDirectory, LibraryChangeReview review)

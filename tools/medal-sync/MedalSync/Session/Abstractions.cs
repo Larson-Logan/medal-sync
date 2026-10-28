@@ -15,6 +15,14 @@ internal interface IMedalProcess
     void Launch();
 }
 
+/// <summary>Read-only update checks; never stop Medal or discard session data.</summary>
+internal interface ISessionCompatibility
+{
+    void RequireLaunch();
+    MedalVersions RequirePublish();
+    string? CheckForUpdate();
+}
+
 /// <summary>This PC's own Medal library database.</summary>
 internal interface ILocalLibrary
 {

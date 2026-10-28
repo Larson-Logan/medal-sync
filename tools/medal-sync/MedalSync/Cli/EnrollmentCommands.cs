@@ -90,7 +90,8 @@ internal static class EnrollmentCommands
             var journal = store.ReadJournal();
             if (journal.State != OwnershipState.Clean) throw new UnsafeOperationException("Both PCs must be Ready before enrollment. The existing owner must finish first.");
             var shared = store.Generations.Read(journal.CommittedGeneration);
-            if (shared.Manifest.Medal != install.Versions) throw new IncompatibleLibraryException("Both PCs must run the same tested Medal and recorder versions for enrollment.");
+            NativeBackupBuilds.RequireCompatible(shared.Manifest.Medal, install.Versions);
+            new MedalCompatibilityGuard(install).RequireLaunch();
             var local = LibraryDatabase.ReadSnapshot(install.DatabasePath, install.AccountId);
             string sourceText;
             using (var connection = LibraryDatabase.OpenReadOnly(install.DatabasePath))

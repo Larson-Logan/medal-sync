@@ -45,7 +45,8 @@ internal sealed class SessionCoordinator(
     Action? prepareNativeBackup = null,
     Func<LibraryChangeReview, bool>? reviewLibraryChanges = null,
     SessionShutdown? shutdown = null,
-    IStorageReplication? replication = null)
+    IStorageReplication? replication = null,
+    ISessionCompatibility? compatibility = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
 
@@ -114,6 +115,13 @@ internal sealed class SessionCoordinator(
 
     private LaunchOutcome StartSession()
     {
+        // Refuse an incompatible update before acquiring ownership, restoring
+        // a database or starting storage. Interrupted sessions finish above.
+        try { compatibility?.RequireLaunch(); }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            return new LaunchOutcome(LaunchStatus.Blocked, ex.Message);
+        }
         string session = NewId();
         OwnershipRecord journal;
         try
@@ -151,7 +159,9 @@ internal sealed class SessionCoordinator(
             }
             // Medal can otherwise replace the restored library and this PC's
             // settings with its unrelated full-database capture-folder backup.
+            compatibility?.RequireLaunch();
             prepareNativeBackup?.Invoke();
+            compatibility?.RequireLaunch();
             if (shutdown?.SuppressUi == true) throw new UnsafeOperationException("Windows is shutting down; Medal was not started.");
         }
         catch (Exception ex)
@@ -264,6 +274,9 @@ internal sealed class SessionCoordinator(
             if (drained is not null) return drained with { Generation = journal.CommittedGeneration };
         }
         if (Reopened(session) is { } reopened) return reopened;
+        // Uploads are allowed to drain even after an incompatible update, but
+        // never publish that build's library or release its recovery cache.
+        var publishVersions = compatibility?.RequirePublish() ?? options.Medal;
         // Without this, an unreachable server would make every file look
         // deleted on purpose and hide the damage the audit looks for.
         shutdown?.RequireTime();
@@ -322,6 +335,8 @@ internal sealed class SessionCoordinator(
         // Once more after the drive stopped: the snapshot above must still be
         // the library Medal left behind when it is published.
         if (Reopened(session) is { } late) return late;
+        if (compatibility is not null && compatibility.RequirePublish() != publishVersions)
+            throw new IncompatibleLibraryException("Medal updated while the handoff was being verified. Retry finish on this PC; ownership and cache are retained.");
         shutdown?.RequireTime();
         journal = store.Update(r =>
         {
@@ -338,7 +353,7 @@ internal sealed class SessionCoordinator(
             }, options.LockTimeout);
             return new FinishOutcome(FinishStatus.Unchanged, "Ready to switch: the library did not change." + Forget(session), journal.CommittedGeneration);
         }
-        return Publish(journal, session, snapshot, onServer);
+        return Publish(journal, session, snapshot, onServer, publishVersions);
     }
 
     /// <summary>
@@ -361,7 +376,7 @@ internal sealed class SessionCoordinator(
                 $"Medal was opened while the switch was finishing. {QuitFromTray}, then run 'medal-sync finish'.", journal.CommittedGeneration);
     }
 
-    private FinishOutcome Publish(OwnershipRecord journal, string session, LibrarySnapshot snapshot, AssetReport onServer)
+    private FinishOutcome Publish(OwnershipRecord journal, string session, LibrarySnapshot snapshot, AssetReport onServer, MedalVersions versions)
     {
         long committed = journal.CommittedGeneration;
         string digest = snapshot.Digest();
@@ -369,11 +384,11 @@ internal sealed class SessionCoordinator(
         // publish from before a crash (reused) or left by an abandoned session
         // (skipped: never committed, never read).
         var later = store.Generations.Numbered().Where(g => g > committed).ToList();
-        long generation = later.FirstOrDefault(g => IsThisAttempt(g, committed, session, digest), -1L);
+        long generation = later.FirstOrDefault(g => IsThisAttempt(g, committed, session, digest, versions), -1L);
         if (generation < 0)
         {
             generation = later.Count > 0 ? later.Max() + 1 : committed + 1;
-            store.Generations.Publish(generation, committed, session, Me, snapshot, AssetManifest.From(onServer), options.Medal, clock.Now);
+            store.Generations.Publish(generation, committed, session, Me, snapshot, AssetManifest.From(onServer), versions, clock.Now);
         }
         shutdown?.RequireTime();
         store.Update(r =>
@@ -384,12 +399,12 @@ internal sealed class SessionCoordinator(
         return new FinishOutcome(FinishStatus.Published, $"Ready to switch: generation {generation} published." + Forget(session), generation);
     }
 
-    private bool IsThisAttempt(long generation, long parent, string session, string digest)
+    private bool IsThisAttempt(long generation, long parent, string session, string digest, MedalVersions versions)
     {
         try
         {
             var manifest = store.Generations.Read(generation).Manifest;
-            return manifest.SessionId == session && manifest.ParentGeneration == parent && manifest.SnapshotDigest == digest;
+            return manifest.SessionId == session && manifest.ParentGeneration == parent && manifest.SnapshotDigest == digest && manifest.Medal == versions;
         }
         catch (InvalidDataException)
         {
@@ -471,6 +486,7 @@ internal sealed class SessionCoordinator(
     {
         var told = new HashSet<string>(StringComparer.Ordinal);
         int consecutiveStatusFailures = 0;
+        var nextCompatibilityCheck = clock.Now;
         void Once(string message)
         {
             if (told.Add(message)) notify(message);
@@ -486,6 +502,18 @@ internal sealed class SessionCoordinator(
             }
             else
             {
+                if (compatibility is not null && clock.Now >= nextCompatibilityCheck)
+                {
+                    nextCompatibilityCheck = clock.Now + TimeSpan.FromMinutes(1);
+                    try
+                    {
+                        if (compatibility.CheckForUpdate() is { } warning) Once(warning);
+                    }
+                    catch (Exception ex) when (IsExpected(ex))
+                    {
+                        Once($"Medal compatibility could not be checked: {ex.Message} Keep this PC's session and cache; retry 'medal-sync compatibility --json'.");
+                    }
+                }
                 try
                 {
                     foreach (var request in store.PendingRequests())

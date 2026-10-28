@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fresh Medal build/schema checks before launch and publication, with automatic
+  update warnings during sessions and a configuration-independent
+  `compatibility --json` report. Incompatible updates retain ownership and cache
+  while uploads drain. Reviewed updates publish their current build versions.
+- Enrollment permits different reviewed compatible Medal app builds with the
+  pinned recorder and an identical supported schema. Version files are read
+  independently, and changed counter columns report unsupported schemas.
 - Native update shortcut checks stable releases before configuration and offers
   a cancelable setup download with size and SHA-256 verification.
 - Setup explains install, repair and upgrade actions, repairs damaged CLI files

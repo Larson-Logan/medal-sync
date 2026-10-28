@@ -55,6 +55,35 @@ public sealed class SessionTests : IDisposable
         }
     }
 
+    private sealed class FakeCompatibility : ISessionCompatibility
+    {
+        public bool Supported { get; set; } = true;
+        public MedalVersions CurrentVersions { get; set; } = Versions;
+        public int Checks { get; private set; }
+        public int PublishChecks { get; private set; }
+        public string? Warning { get; set; }
+        public bool CheckFails { get; set; }
+
+        public void RequireLaunch()
+        {
+            if (!Supported) throw new IncompatibleLibraryException("Synthetic incompatible Medal update.");
+        }
+
+        public MedalVersions RequirePublish()
+        {
+            PublishChecks++;
+            RequireLaunch();
+            return CurrentVersions;
+        }
+
+        public string? CheckForUpdate()
+        {
+            Checks++;
+            if (CheckFails) throw new IOException("Synthetic metadata read failure.");
+            return Warning;
+        }
+    }
+
     private sealed class FakeMount : IClipMount
     {
         public bool IsRunning { get; private set; }
@@ -142,7 +171,8 @@ public sealed class SessionTests : IDisposable
     private readonly FakeAssets _assets = new() { OnServerFiles = { @"M:\Clips\Clips\one.mp4" } };
 
     private Pc Computer(DeviceIdentity device, string machine, bool acceptChanges = false, bool replaceLocal = false, string? database = null, Action? prepareNativeBackup = null,
-        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null)
+        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null,
+        ISessionCompatibility? compatibility = null)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
@@ -150,7 +180,134 @@ public sealed class SessionTests : IDisposable
         var options = new SessionOptions(device, WindowsPath.Parse(@"M:\Clips"), Versions,
             TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal);
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
-        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication));
+        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility));
+    }
+
+    [Fact]
+    public void IncompatibleUpdateBlocksBeforeAcquisitionRestoreOrMount()
+    {
+        var compatibility = new FakeCompatibility { Supported = false };
+        var pc = Computer(FirstPc, "first", compatibility: compatibility);
+        string before = LibraryDatabase.ReadSnapshot(pc.Database, MedalFixture.AccountId).Digest();
+        var journal = _store.ReadJournal();
+
+        var outcome = pc.Coordinator.Launch();
+
+        Assert.Equal(LaunchStatus.Blocked, outcome.Status);
+        Assert.Contains("incompatible Medal update", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal(journal, _store.ReadJournal());
+        Assert.Equal(before, LibraryDatabase.ReadSnapshot(pc.Database, MedalFixture.AccountId).Digest());
+        Assert.Empty(pc.Mount.Starts);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.Equal(0, pc.Medal.Launches);
+    }
+
+    [Fact]
+    public void UpdateDuringMountPreparationIsRecheckedBeforeNativeBackupOrLaunch()
+    {
+        var compatibility = new FakeCompatibility();
+        var pc = Computer(FirstPc, "first", compatibility: compatibility,
+            prepareNativeBackup: () => Assert.Fail("An incompatible build must not prepare native backups."));
+        pc.Mount.OnStart = () => compatibility.Supported = false;
+
+        Assert.Equal(LaunchStatus.Blocked, pc.Coordinator.Launch().Status);
+
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
+        Assert.False(pc.Medal.Running);
+        Assert.False(pc.Mount.IsRunning);
+        Assert.Empty(pc.Mount.Forgotten);
+    }
+
+    [Fact]
+    public void UpdateDuringNativeBackupPreparationAlsoBlocksMedal()
+    {
+        var compatibility = new FakeCompatibility();
+        var pc = Computer(FirstPc, "first", compatibility: compatibility,
+            prepareNativeBackup: () => compatibility.Supported = false);
+
+        Assert.Equal(LaunchStatus.Blocked, pc.Coordinator.Launch().Status);
+
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal(0, pc.Medal.Launches);
+        Assert.Empty(pc.Mount.Forgotten);
+    }
+
+    [Fact]
+    public void IncompatibleUpdateStillDrainsButRetainsOwnershipAndCacheUntilRetry()
+    {
+        var compatibility = new FakeCompatibility();
+        var pc = Computer(FirstPc, "first", compatibility: compatibility);
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        Record(pc, "after-update");
+        pc.Medal.Running = false;
+        compatibility.Supported = false;
+        int drains = 0;
+        pc.Mount.OnDrain = () => drains++;
+
+        var blocked = pc.Coordinator.Finish(session);
+
+        Assert.Equal(FinishStatus.Blocked, blocked.Status);
+        Assert.Equal(1, drains);
+        Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
+        Assert.Equal(FirstPc, _store.ReadJournal().Owner);
+        Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
+        Assert.True(pc.Mount.IsRunning);
+        Assert.Empty(pc.Mount.Forgotten);
+
+        compatibility.Supported = true;
+        compatibility.CurrentVersions = Versions with { App = "2644.591.1" };
+        Assert.Equal(FinishStatus.Published, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(compatibility.CurrentVersions, _store.Generations.Read(1).Manifest.Medal);
+        Assert.Contains(session, pc.Mount.Forgotten);
+    }
+
+    [Fact]
+    public void UpdateDuringFinalVerificationRetainsSessionAndCanRetryWithCurrentVersions()
+    {
+        var compatibility = new FakeCompatibility();
+        var pc = Computer(FirstPc, "first", compatibility: compatibility);
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        Record(pc, "after-update");
+        pc.Medal.Running = false;
+        _assets.OnServerCheck = () => compatibility.CurrentVersions = Versions with { App = "2644.591.1" };
+
+        var blocked = pc.Coordinator.Finish(session);
+
+        Assert.Equal(FinishStatus.Blocked, blocked.Status);
+        Assert.Contains("updated while the handoff", blocked.Message, StringComparison.Ordinal);
+        Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
+        Assert.Equal(FinishStatus.Published, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(compatibility.CurrentVersions, _store.Generations.Read(1).Manifest.Medal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SupervisionChecksUpdatesOnceAMinuteAndWarnsOnceWithoutStoppingMedal(bool checkFails)
+    {
+        var compatibility = new FakeCompatibility { Warning = "Synthetic Medal update detected", CheckFails = checkFails };
+        var pc = Computer(FirstPc, "first", compatibility: compatibility);
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        using var cancel = new CancellationTokenSource();
+        int polls = 0;
+        _clock.OnSleep = () => { if (++polls == 14) cancel.Cancel(); };
+        var messages = new List<string>();
+
+        var result = pc.Coordinator.Supervise(session, messages.Add, cancel.Token);
+
+        Assert.Equal(FinishStatus.Pending, result.Status);
+        Assert.Equal(3, compatibility.Checks);
+        Assert.Single(messages);
+        Assert.True(pc.Medal.Running);
+        Assert.True(pc.Mount.IsRunning);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
     }
 
     [Fact]

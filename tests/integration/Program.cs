@@ -19,7 +19,8 @@ namespace MedalSync.Integration;
 internal static class Program
 {
     private static int _checks;
-    private static readonly MedalVersions Versions = new("synthetic", "synthetic");
+    // Synthetic installation manifests model an explicitly reviewed build.
+    private static readonly MedalVersions Versions = new("2643.583.1", "2643.3040.1");
 
     public static int Main(string[] args)
     {
@@ -234,11 +235,27 @@ internal static class Program
                 string db = fixture.CreateLibrary(pc == 0 ? "first" : "second");
                 using (var connection = MedalFixture.Open(db)) MedalFixture.SetSetting(connection, "ClipFolder", JsonSerializer.Serialize(config.Capture.Display));
                 var medal = new SyntheticMedal();
+                string installDirectory = fixture.PathFor("synthetic-install-" + pc);
+                Directory.CreateDirectory(Path.Combine(installDirectory, "current"));
+                File.WriteAllText(Path.Combine(installDirectory, "current", "Medal.exe"), "synthetic; never executed");
+                void AppVersion(string version) => File.WriteAllText(Path.Combine(installDirectory, "current", "sq.version"),
+                    $"<package><metadata><version>{version}</version></metadata></package>");
+                AppVersion(Versions.App!);
+                File.WriteAllText(Path.Combine(installDirectory, "version.json"), JsonSerializer.Serialize(new { RecorderHandler2Version = Versions.Recorder }));
+                var compatibility = new MedalCompatibilityGuard(MedalEnvironment.Locate(installDirectory, Path.GetDirectoryName(db)!));
                 mount = new RcloneClipMount(config, state, .01, clock);
                 var coordinator = new SessionCoordinator(store, new SqliteLocalLibrary(db, config.AccountId, state.BackupDirectory, clock),
                     mount, medal, new ShareAssetChecker(config.Capture, config.ServerCapture, config.LibraryId, new FileSystemProbe()), clock,
                     new SessionOptions(state.Device(), config.Capture, Versions, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30), TimeSpan.FromMilliseconds(250)),
-                    replication: new StorageReplication(config, state, () => { if (medal.Running) throw new IOException("Synthetic Medal reopened."); }));
+                    replication: new StorageReplication(config, state, () => { if (medal.Running) throw new IOException("Synthetic Medal reopened."); }),
+                    compatibility: compatibility);
+                if (pc == 0)
+                {
+                    AppVersion("9999.1.1");
+                    Check(coordinator.Launch().Status == LaunchStatus.Blocked && !mount.IsRunning && store.ReadJournal().State == OwnershipState.Clean,
+                        "an unknown synthetic Medal update refuses startup before acquiring ownership or mounting storage");
+                    AppVersion(Versions.App!);
+                }
                 var launch = coordinator.Launch();
                 Check(launch.Status == LaunchStatus.Started, "PC " + (pc + 1) + " mounts real WinFsp storage and restores the committed synthetic library: " + launch.Message);
                 Check(File.ReadAllBytes(config.Capture.Append("#clip [test].mp4").Display).SequenceEqual(Encoding.UTF8.GetBytes("synthetic media bytes")), "PC " + (pc + 1) + " reads committed media through the real mount");
@@ -249,8 +266,27 @@ internal static class Program
                 }
                 else Check(File.ReadAllText(config.Capture.Append("new.mp4").Display) == "new synthetic recording", "second PC hydrates and reads the first PC's published recording");
                 medal.Running = false;
+                if (pc == 0)
+                {
+                    AppVersion("9999.1.1");
+                    Check(compatibility.CheckForUpdate()?.Contains("handoff is blocked", StringComparison.Ordinal) == true,
+                        "fresh synthetic update metadata warns that handoff is blocked");
+                    var blocked = coordinator.Finish(launch.Session!);
+                    Check(blocked.Status == FinishStatus.Blocked && mount.Drain().State == DrainState.Drained,
+                        "incompatible Medal update still drains real rclone uploads before blocking publication");
+                    var retained = store.ReadJournal();
+                    Check(retained.State == OwnershipState.Draining && retained.Owner == state.Device() && retained.CommittedGeneration == 0,
+                        "incompatible update retains exact ownership and the committed generation");
+                    Check(mount.IsRunning && Directory.Exists(config.SessionCacheDirectory(launch.Session!)),
+                        "incompatible update retains the real WinFsp mount and session cache");
+                    Check(File.ReadAllText(config.MountedCapture.Append("new.mp4").Display) == "new synthetic recording",
+                        "the drained synthetic recording remains intact in the mount's backing storage while publication is blocked");
+                    AppVersion("2644.591.1");
+                }
                 var finish = coordinator.Finish(launch.Session!);
                 Check(finish.Status == (pc == 0 ? FinishStatus.Published : FinishStatus.Unchanged), "PC " + (pc + 1) + " completes verified handoff: " + finish.Message);
+                if (pc == 0) Check(store.Generations.Read(1).Manifest.Medal == Versions with { App = "2644.591.1" },
+                    "retry after a reviewed update publishes its freshly detected build versions");
                 Check(store.ReadJournal().State == OwnershipState.Clean, "PC " + (pc + 1) + " releases ownership only after verified copies");
                 Check(!Directory.Exists(config.SessionCacheDirectory(launch.Session!)), "PC " + (pc + 1) + " clears only its finished session cache");
                 Check(File.Exists(config.MountedCapture.Append("new.mp4").Display), "PC " + (pc + 1) + " retains the persistent local collection");
