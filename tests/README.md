@@ -13,6 +13,9 @@ global.json, PowerShell 7, Node 24 and Python 3.11+.
 - Source hygiene and local Markdown links are checked too. Synthetic Git tests
   verify that ignored agent settings are allowed locally, forced tracking is
   refused and deleting a committed instruction file does not erase its history.
+  The history audit also covers replaced credentials, runtime files, private
+  deployment references, commit/tag metadata and pull-request-only refs in a
+  bare mirror. A shallow clone cannot claim a complete history audit.
 - Windows CI also installs the native setup into a disposable per-user folder,
   verifies registration and shortcuts, tests upgrade and active-session refusal,
   then uninstalls and checks that an unowned file was preserved. This test refuses
