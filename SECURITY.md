@@ -3,8 +3,8 @@
 Only the latest stable release receives fixes. Medal Sync is experimental;
 maintain an independent media backup and inspect release notes before updating.
 
-Use this repository's **Security → Report a vulnerability** form when private
-reporting is enabled. If unavailable, open an issue asking for a private
+Use [private vulnerability reporting](https://github.com/Larson-Logan/medal-sync/security/advisories/new)
+to report vulnerabilities. If unavailable, open an issue asking for a private
 reporting channel, without exploit details or private data. Do not publish
 credentials, databases, recordings or runtime logs.
 
@@ -15,6 +15,8 @@ Windows binaries are currently unsigned. Launch checks send no configuration,
 account information or credentials; GitHub receives the ordinary network
 request and its source IP address.
 
-Maintainers should enable private vulnerability reporting, secret scanning and
-push protection before public launch. Require Windows validation on main and
-restrict release tags to maintainers.
+Maintainers keep private vulnerability reporting, secret scanning, push protection
+and Dependabot security updates enabled. Require pull requests and Windows
+validation on main, restrict release tags to maintainers and review dependency
+updates before merging. See [security maintenance](docs/security-maintenance.md)
+for repository settings, scanning and emergency handling.

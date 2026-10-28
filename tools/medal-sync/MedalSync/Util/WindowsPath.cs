@@ -62,6 +62,11 @@ internal sealed class WindowsPath : IEquatable<WindowsPath>
                 problem = "a UNC path needs a server and a share";
                 return false;
             }
+            if (SegmentProblem(unc[0]) is not null || SegmentProblem(unc[1]) is not null)
+            {
+                problem = "the UNC server or share is not an acceptable path segment";
+                return false;
+            }
             root = $@"\\{unc[0]}\{unc[1]}\";
             rest = string.Join('\\', unc.Skip(2));
         }
@@ -132,8 +137,15 @@ internal sealed class WindowsPath : IEquatable<WindowsPath>
         if (segment.Length == 0) return "empty path segment";
         if (segment is "." or "..") return "relative segments are not accepted";
         if (segment.EndsWith('.') || segment.EndsWith(' ')) return "a segment ends with a dot or space";
-        if (segment.IndexOfAny(['<', '>', ':', '"', '|', '?', '*']) >= 0) return "a segment contains a reserved character";
+        if (segment.IndexOfAny(['<', '>', ':', '"', '|', '?', '*', '/', '\\']) >= 0) return "a segment contains a reserved character";
         if (segment.Any(char.IsControl)) return "a segment contains a control character";
+        // Win32 recognizes DOS device names even with an extension (NUL.mp4),
+        // spaces before the extension, or the superscript port digits.
+        string stem = segment.Split('.')[0].TrimEnd(' ').ToUpperInvariant();
+        if (stem is "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$"
+            || (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal) || stem.StartsWith("LPT", StringComparison.Ordinal))
+                && "123456789¹²³".Contains(stem[3])))
+            return "Windows device names are not accepted";
         return null;
     }
 }

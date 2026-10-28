@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Refuse Windows device names, malformed UNC roots and separators inside appended
+  path segments before accessing or replicating media.
+- Keep authenticated rclone control requests on reviewed loopback endpoints,
+  refuse redirects and bound status responses; failures retain unknown state.
+- Audit direct and transitive NuGet dependencies during restore and fail builds
+  for reported vulnerabilities at every severity.
+
 ## 1.0.0 — 2026-10-28
 
 - Fresh Medal build/schema checks before launch and publication, with automatic
