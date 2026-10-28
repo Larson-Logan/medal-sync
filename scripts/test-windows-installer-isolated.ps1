@@ -53,6 +53,15 @@ try {
     Assert-Check (Test-Path -LiteralPath $key) 'unique Installed apps registration exists'
     Assert-Check (Test-Path -LiteralPath (Join-Path $shortcutGroup 'Medal Sync.lnk')) 'native application shortcut exists'
     Assert-Check (Test-Path -LiteralPath (Join-Path $shortcutGroup 'Medal Sync Setup Guide.lnk')) 'offline guide shortcut exists'
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $updateShortcut = $shell.CreateShortcut((Join-Path $shortcutGroup 'Check for Medal Sync updates.lnk'))
+        Assert-Check ($updateShortcut.TargetPath -eq (Join-Path $app 'bin/medal-sync-launch.exe') -and $updateShortcut.Arguments -eq '--check-updates') 'native update shortcut uses the configuration-independent update entrypoint'
+        $uninstallShortcut = $shell.CreateShortcut((Join-Path $shortcutGroup 'Uninstall Medal Sync.lnk'))
+        Assert-Check ($uninstallShortcut.TargetPath -eq (Join-Path $app 'unins000.exe')) 'uninstall shortcut targets the bundled native uninstaller EXE'
+    } finally { [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null }
+    Assert-Check ((Test-Path -LiteralPath (Join-Path $app 'unins000.exe')) -and (Test-Path -LiteralPath (Join-Path $app 'unins000.dat'))) 'installer deploys the generated uninstaller executable and its installation log'
+    Assert-Check ((Get-ItemProperty -LiteralPath $key).UninstallString -like ('*' + (Join-Path $app 'unins000.exe') + '*')) 'Installed apps invokes the bundled uninstaller'
     foreach ($name in @('medal-sync.exe','medal-sync-launch.exe')) {
         Assert-Check ((Get-FileHash -LiteralPath (Join-Path $app "bin/$name")).Hash -eq (Get-FileHash -LiteralPath (Join-Path $payload $name)).Hash) "installed $name matches the verified release payload"
     }
@@ -69,7 +78,21 @@ try {
     Assert-Check ($LASTEXITCODE -eq 0) 'installed CLI validates the isolated candidate without accessing a live library'
     $sentinel = Join-Path $app 'unowned-user-file.txt'
     'preserve me' | Set-Content -LiteralPath $sentinel
-    Assert-Check ((Run-Setup) -eq 0) 'native in-place repair succeeds'
+    Set-Content -LiteralPath (Join-Path $app 'bin/medal-sync.exe') -Value 'synthetic damaged executable'
+    Assert-Check ((Run-Setup) -eq 0) 'native in-place repair recovers a damaged CLI using the registered version'
+    Assert-Check ((Get-FileHash -LiteralPath (Join-Path $app 'bin/medal-sync.exe')).Hash -eq (Get-FileHash -LiteralPath (Join-Path $payload 'medal-sync.exe')).Hash) 'repair restores the verified CLI bytes'
+    Remove-Item -LiteralPath (Join-Path $app 'bin/medal-sync.exe')
+    Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value '99.0.0'
+    try { Assert-Check ((Run-Setup) -ne 0) 'native setup refuses a registered downgrade even when the CLI is missing' }
+    finally { Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value $version }
+    Assert-Check ((Run-Setup) -eq 0) 'native repair restores a missing CLI without losing registration'
+    $binConfig = Join-Path $app 'bin/config.json'
+    Set-Content -LiteralPath $binConfig -Value 'synthetic user configuration'
+    Assert-Check ((Run-Setup) -ne 0) 'native setup refuses user configuration in the program bin directory'
+    Assert-Check ((Get-Content -LiteralPath $binConfig -Raw).Trim() -eq 'synthetic user configuration') 'refused setup retains misplaced configuration'
+    Remove-Item -LiteralPath $binConfig
+    $relocated = Start-Process -FilePath $setup -ArgumentList ($arguments + ('/DIR="{0}"' -f (Join-Path $scratch 'other-programs'))) -WindowStyle Hidden -Wait -PassThru
+    Assert-Check ($relocated.ExitCode -ne 0) 'native upgrade refuses leaving an existing registered installation in another folder'
     $pending = Join-Path $state 'sessions'
     New-Item -ItemType Directory -Path $pending | Out-Null
     Set-Content -LiteralPath (Join-Path $pending 'synthetic.json') -Value '{}'
@@ -85,6 +108,12 @@ try {
         $busy = Start-Process -FilePath (Join-Path $app 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -WindowStyle Hidden -Wait -PassThru
         Assert-Check ($busy.ExitCode -ne 0) 'native uninstall refuses concurrent setup'
     } finally { $setupMutex.Dispose() }
+    $secondCheck = Join-Path $state 'refuse-second-check'
+    Set-Content -LiteralPath $secondCheck -Value 'synthetic readiness change'
+    $changed = Start-Process -FilePath (Join-Path $app 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -WindowStyle Hidden -Wait -PassThru
+    Assert-Check ($changed.ExitCode -ne 0 -and (Test-Path -LiteralPath $key) -and (Test-Path -LiteralPath (Join-Path $app 'bin/medal-sync.exe'))) 'uninstaller rechecks readiness before removal and preserves programs when it changes'
+    Remove-Item -LiteralPath $secondCheck
+    Remove-Item -LiteralPath (Join-Path $state 'first-check-seen')
     $uninstall = Start-Process -FilePath (Join-Path $app 'unins000.exe') -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -WindowStyle Hidden -Wait -PassThru
     Assert-Check ($uninstall.ExitCode -eq 0) 'isolated native uninstall succeeds'
     Assert-Check (-not (Test-Path -LiteralPath $key)) 'uninstall removes only its unique registration'

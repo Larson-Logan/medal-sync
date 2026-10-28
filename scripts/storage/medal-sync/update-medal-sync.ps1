@@ -24,12 +24,17 @@ Import-Module (Join-Path $PSScriptRoot 'MedalSync.Update.psm1') -Force
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('medal-sync-update-' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $scratch
 $mutex = $null
+$maintenance = $null
 $locked = $false
 try {
     if ($Apply) {
         if (-not $IsWindows) { throw 'Installation is supported on Windows only.' }
         $root = Assert-MedalLocalPath $StateRoot
         if ([IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\') -ieq (Join-Path $root 'bin')) { throw 'Run a copy of the updater, module and startup helper from outside bin.' }
+        # Native setup also holds this object open; its existence blocks new library operations.
+        $created = $false
+        $maintenance = [Threading.Mutex]::new($false, 'Global\LarsonServer.MedalSync.Setup', [ref]$created)
+        if (-not $created) { throw 'Medal Sync setup, uninstall or another updater is open. Close it before continuing.' }
         $mutex = [Threading.Mutex]::new($false, 'Local\LarsonServer.MedalSync')
         try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
         if (-not $locked) { throw 'A Medal Sync session or another installer is running.' }
@@ -69,6 +74,7 @@ try {
 } finally {
     if ($locked) { $mutex.ReleaseMutex() }
     if ($mutex) { $mutex.Dispose() }
+    if ($maintenance) { $maintenance.Dispose() }
     # This exact directory was created above with a random name in the temp root.
     if ([IO.Path]::GetDirectoryName($scratch) -ne [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetTempPath())) { throw 'Unexpected scratch path.' }
     Remove-Item -LiteralPath $scratch -Recurse -Force

@@ -35,6 +35,12 @@ optional all-users driver installation. `scripts/setup-storage-toolchain.ps1`
 downloads and verifies those dependencies into an ignored build cache without
 installing them.
 
+Setup deploys `unins000.exe` together with its `unins000.dat` installation log;
+the uninstaller is embedded in setup rather than distributed as an unrelated EXE.
+Installed apps and the Start menu target that executable. The Start menu also
+includes a native update check and verified setup downloader, available before
+configuration. Installation of a downloaded update remains explicit.
+
 Move an existing portable archive aside before packaging again; ZIPs are not
 silently overwritten. `scripts/package-windows-installer.ps1 -SkipPackage`
 recompiles setup from an already verified matching ZIP.

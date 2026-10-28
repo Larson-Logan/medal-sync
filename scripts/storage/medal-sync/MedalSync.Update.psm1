@@ -43,7 +43,10 @@ function Read-MedalReleasePackage([string]$PackagePath, [string]$ExpectedSha256,
 }
 
 function Get-MedalRelease([string]$Tag = 'latest') {
-    if ($Tag -ne 'latest') { $null = Assert-MedalVersion ($Tag -creplace '^v', '') }
+    if ($Tag -ne 'latest') {
+        $version = (Assert-MedalVersion ($Tag -creplace '^v', '')).ToString()
+        $Tag = "v$version"
+    }
     $endpoint = if ($Tag -eq 'latest') { 'latest' } else { "tags/$Tag" }
     # No caller-selected host/repository or token: never send private credentials.
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/Larson-Logan/medal-sync/releases/$endpoint" `
@@ -72,6 +75,7 @@ function Assert-MedalLocalPath([string]$StateRoot) {
         $path = Join-Path $root $name
         if ((Test-Path -LiteralPath $path) -and ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Installation directories must not be links.' }
     }
+    if (Test-Path -LiteralPath (Join-Path $root 'bin/setup-layout.json')) { throw 'This is a native Windows installation. Use Windows setup or Installed apps to update or uninstall it.' }
     return $root
 }
 

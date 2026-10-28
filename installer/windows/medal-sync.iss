@@ -73,6 +73,9 @@ Uninstallable=yes
 UninstallLogMode=append
 VersionInfoVersion={#AppVersion}
 
+[Messages]
+ConfirmUninstall=Remove %1 and its program shortcuts?%n%nYour settings, device identity, recordings, cache and backups will be kept. WinFsp and existing portable installations will also be kept.
+
 [Tasks]
 Name: desktopicon; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 Name: winfsp; Description: "Install the pinned WinFsp clip-drive driver if it is missing (all-users setup)"; GroupDescription: "Storage dependencies:"; Check: ShouldOfferWinFsp
@@ -99,6 +102,7 @@ Source: "{#PayloadDir}\medal-sync.exe"; DestName: "medal-sync-check.exe"; Flags:
 [Icons]
 Name: "{group}\Medal Sync Setup Guide"; Filename: "{app}\setup.html"
 Name: "{group}\Medal Sync"; Filename: "{app}\bin\medal-sync-launch.exe"; WorkingDir: "{app}\bin"
+Name: "{group}\Check for Medal Sync updates"; Filename: "{app}\bin\medal-sync-launch.exe"; Parameters: "--check-updates"; WorkingDir: "{app}\bin"
 Name: "{group}\Uninstall Medal Sync"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Medal Sync"; Filename: "{app}\bin\medal-sync-launch.exe"; WorkingDir: "{app}\bin"; Tasks: desktopicon
 
@@ -110,6 +114,19 @@ Filename: "{app}\bin\medal-sync-launch.exe"; Description: "Open Medal Sync"; Fla
 var
   CheckNumber: Integer;
   StoragePage: TOutputMsgWizardPage;
+
+function RegisteredInstallation(var Directory, Version: String): Boolean;
+var
+  Key: String;
+begin
+#ifdef IsolatedTestId
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#IsolatedTestId}_is1';
+#else
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{168562DF-1041-441D-96D0-2244EA744E18}_is1';
+#endif
+  Result := RegQueryStringValue(HKA, Key, 'InstallLocation', Directory) and
+    RegQueryStringValue(HKA, Key, 'DisplayVersion', Version);
+end;
 
 function WinFspInstalled(): Boolean;
 var
@@ -166,22 +183,43 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Installed, Target: Int64;
+  Installed, FileVersion, Target: Int64;
   ResultCode: Integer;
-  ProgramPath: String;
+  ProgramPath, RegisteredDir, RegisteredVersion: String;
+  HasRegisteredVersion: Boolean;
 begin
   Result := '';
-  if FileExists(ExpandConstant('{app}\config.json')) or FileExists(ExpandConstant('{app}\device.json')) then begin
+  if FileExists(ExpandConstant('{app}\config.json')) or FileExists(ExpandConstant('{app}\device.json')) or
+     FileExists(ExpandConstant('{app}\bin\config.json')) or FileExists(ExpandConstant('{app}\bin\device.json')) then begin
     Result := 'Choose a separate program folder. This location contains user configuration that must stay separate from the installed programs.';
     exit;
   end;
+  HasRegisteredVersion := RegisteredInstallation(RegisteredDir, RegisteredVersion);
+  if HasRegisteredVersion then begin
+    if CompareText(RemoveBackslashUnlessRoot(RegisteredDir), RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) <> 0 then begin
+      Result := 'Medal Sync is already installed at ' + RegisteredDir + '. Select that folder to upgrade or repair it. Uninstall first if you want to move the programs.';
+      exit;
+    end;
+    if not StrToVersion(RegisteredVersion + '.0', Installed) then begin
+      Result := 'Cannot identify the registered Medal Sync version. Recover the existing installation before continuing.';
+      exit;
+    end;
+  end;
   ProgramPath := ExpandConstant('{app}\bin\medal-sync.exe');
-  if FileExists(ProgramPath) then begin
-    if not FileExists(ExpandConstant('{app}\bin\setup-layout.json')) then begin
+  if FileExists(ProgramPath) or FileExists(ExpandConstant('{app}\bin\medal-sync-launch.exe')) then begin
+    if (not HasRegisteredVersion) and (not FileExists(ExpandConstant('{app}\bin\setup-layout.json'))) then begin
       Result := 'This folder contains a portable installation. Choose a new program folder; existing user settings will be reused.';
       exit;
     end;
-    if (not GetPackedVersion(ProgramPath, Installed)) or (not StrToVersion('{#AppVersion}.0', Target)) then begin
+    if GetPackedVersion(ProgramPath, FileVersion) then begin
+      if (not HasRegisteredVersion) or (ComparePackedVersion(FileVersion, Installed) > 0) then Installed := FileVersion;
+    end else if not HasRegisteredVersion then begin
+      Result := 'Cannot identify the installed version. Recover the existing installation before continuing.';
+      exit;
+    end;
+  end;
+  if HasRegisteredVersion or FileExists(ProgramPath) then begin
+    if not StrToVersion('{#AppVersion}.0', Target) then begin
       Result := 'Cannot identify the installed version. Repair the existing installation before continuing.';
       exit;
     end;
@@ -206,6 +244,30 @@ begin
   end;
 end;
 
+function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo,
+  MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+var
+  InstalledVersion, RegisteredDir, Operation: String;
+  Installed, Target: Int64;
+begin
+  Operation := 'Install Medal Sync {#AppVersion}';
+  if RegisteredInstallation(RegisteredDir, InstalledVersion) and
+     (CompareText(RemoveBackslashUnlessRoot(RegisteredDir), RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) = 0) and
+     StrToVersion(InstalledVersion + '.0', Installed) and
+     StrToVersion('{#AppVersion}.0', Target) then begin
+    if ComparePackedVersion(Installed, Target) = 0 then
+      Operation := 'Repair Medal Sync {#AppVersion}'
+    else
+      Operation := 'Upgrade Medal Sync ' + InstalledVersion + ' to {#AppVersion}';
+  end;
+  Result := Operation + NewLine + NewLine + MemoDirInfo + NewLine + NewLine;
+  if MemoGroupInfo <> '' then Result := Result + MemoGroupInfo + NewLine + NewLine;
+  if MemoTasksInfo <> '' then Result := Result + MemoTasksInfo + NewLine + NewLine;
+  Result := Result + 'Your settings, identity, recordings, cache and backups will be kept.' + NewLine +
+    'Setup includes the Windows uninstaller and a Check for Medal Sync updates shortcut.' + NewLine +
+    'Quit Medal normally and wait for Ready. Setup checks this before changing programs.';
+end;
+
 function InitializeUninstall(): Boolean;
 var
   Error: String;
@@ -227,6 +289,21 @@ begin
   Error := CheckReady(True);
   Result := Error = '';
   if not Result then SuppressibleMsgBox(Error, mbError, MB_OK, IDOK);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Error: String;
+begin
+  { The initial check precedes the confirmation dialog. Recheck after the user confirms. }
+  if CurUninstallStep = usUninstall then begin
+    Error := CheckReady(True);
+    if Error <> '' then begin
+      Log('Uninstall refused before program removal: ' + Error);
+      SuppressibleMsgBox(Error, mbError, MB_OK, IDOK);
+      Abort;
+    end;
+  end;
 end;
 
 procedure InitializeWizard();
