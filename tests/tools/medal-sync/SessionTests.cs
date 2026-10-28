@@ -700,6 +700,42 @@ public sealed class SessionTests : IDisposable
         AssertStarted(other.Coordinator.Launch());
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void FinalVerificationMutationRetainsOwnershipAndCacheUntilRetry(bool changedBeforeFinish, bool duringStop)
+    {
+        var pc = Computer(FirstPc, "first");
+        string session = pc.Coordinator.Launch().Session!;
+        if (changedBeforeFinish) Record(pc, "early");
+        pc.Medal.Running = false;
+        Action mutate = () => Record(pc, "late");
+        if (duringStop) pc.Mount.OnStop = mutate;
+        else _assets.OnServerCheck = mutate;
+
+        var blocked = pc.Coordinator.Finish(session);
+
+        Assert.Equal(FinishStatus.Blocked, blocked.Status);
+        Assert.Contains("library changed", blocked.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
+        Assert.Equal(session, _store.ReadJournal().SessionId);
+        Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.False(pc.Mount.IsRunning);
+        Assert.Single(_store.Generations.Numbered());
+        Assert.Equal(LaunchStatus.Waiting, Computer(SecondPc, "second").Coordinator.Launch().Status);
+
+        pc.Mount.OnStop = null;
+        _assets.OnServerCheck = null;
+        var retried = pc.Coordinator.Finish(session);
+        Assert.Equal(FinishStatus.Published, retried.Status);
+        Assert.Equal(changedBeforeFinish ? 3 : 2, _store.Generations.Read(retried.Generation).Snapshot.RowCount("contents"));
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Contains(session, pc.Mount.Forgotten);
+    }
+
     [Fact]
     public void Launch_NeverStartsMedalWhenFilesAreMissingBehindTheMount()
     {

@@ -365,9 +365,9 @@ internal static class SessionCommands
         output.WriteLine(message);
     }
 
-    private static InstanceLock SingleInstance()
+    internal static IDisposable SingleInstance(string mutexName = InstanceMutex)
     {
-        var mutex = new Mutex(initiallyOwned: false, InstanceMutex);
+        var mutex = new Mutex(initiallyOwned: false, mutexName);
         try
         {
             if (mutex.WaitOne(TimeSpan.Zero)) return new InstanceLock(mutex);
