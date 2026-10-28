@@ -7,6 +7,8 @@
 - Recheck the library after final server verification and mount shutdown before
   publishing or releasing ownership; serialize live repair and relocation with
   the session supervisor.
+- Hand off intentional empty-library generations to PCs with older committed
+  entries, retaining backups and refusing unshared local changes without review.
 - Refuse Windows device names, malformed UNC roots and separators inside appended
   path segments before accessing or replicating media.
 - Keep authenticated rclone control requests on reviewed loopback endpoints,

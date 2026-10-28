@@ -737,6 +737,66 @@ public sealed class SessionTests : IDisposable
     }
 
     [Fact]
+    public void DeletingTheLastClipHandsOffAnEmptyGenerationWithBackupAndDeviceSettings()
+    {
+        var first = Computer(FirstPc, "first");
+        var second = Computer(SecondPc, "second");
+        AssertStarted(second.Coordinator.Launch());
+        second.Medal.Running = false;
+        Assert.Equal(FinishStatus.Unchanged, second.Coordinator.Finish(_store.ReadJournal().SessionId!).Status);
+        string secondSettings = MedalFixture.Settings(second.Database);
+        var old = LibraryDatabase.ReadSnapshot(second.Database, MedalFixture.AccountId);
+        string[] earlierBackups = Directory.GetFiles(_fixture.PathFor("second", "backups"), "*.db");
+
+        AssertStarted(first.Coordinator.Launch());
+        MedalFixture.DeleteContent(first.Database, "clip-1");
+        first.Medal.Running = false;
+        Assert.Equal(FinishStatus.Published, first.Coordinator.Finish(_store.ReadJournal().SessionId!).Status);
+        var empty = _store.Generations.Read(1).Snapshot;
+        Assert.Equal(0, empty.RowCount("contents"));
+        Assert.Equal(1, empty.RowCount("deleted_contents"));
+
+        var launched = second.Coordinator.Launch();
+        AssertStarted(launched);
+        Assert.Contains("backed up", launched.Message, StringComparison.Ordinal);
+        Assert.Equal(empty.Digest(), LibraryDatabase.ReadSnapshot(second.Database, MedalFixture.AccountId).Digest());
+        Assert.Equal(secondSettings, MedalFixture.Settings(second.Database));
+        string backup = Directory.GetFiles(_fixture.PathFor("second", "backups"), "*.db").Except(earlierBackups).Single();
+        Assert.Equal(old.Digest(), LibraryDatabase.ReadSnapshot(backup, MedalFixture.AccountId).Digest());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EmptyGenerationStillRequiresReviewToReplaceUnsharedWork(bool replaceLocal)
+    {
+        var first = Computer(FirstPc, "first");
+        AssertStarted(first.Coordinator.Launch());
+        MedalFixture.DeleteContent(first.Database, "clip-1");
+        first.Medal.Running = false;
+        Assert.Equal(FinishStatus.Published, first.Coordinator.Finish(_store.ReadJournal().SessionId!).Status);
+        var second = Computer(SecondPc, "second", replaceLocal: replaceLocal);
+        Record(second, "unshared");
+        string before = LibraryDatabase.ReadSnapshot(second.Database, MedalFixture.AccountId).Digest();
+
+        var launched = second.Coordinator.Launch();
+
+        if (replaceLocal)
+        {
+            AssertStarted(launched);
+            Assert.Contains("backed up", launched.Message, StringComparison.Ordinal);
+            Assert.Equal(_store.Generations.Read(1).Snapshot.Digest(), LibraryDatabase.ReadSnapshot(second.Database, MedalFixture.AccountId).Digest());
+        }
+        else
+        {
+            Assert.Equal(LaunchStatus.Blocked, launched.Status);
+            Assert.Contains("never shared", launched.Message, StringComparison.Ordinal);
+            Assert.Equal(before, LibraryDatabase.ReadSnapshot(second.Database, MedalFixture.AccountId).Digest());
+            Assert.Empty(second.Mount.Starts);
+        }
+    }
+
+    [Fact]
     public void Launch_NeverStartsMedalWhenFilesAreMissingBehindTheMount()
     {
         var pc = Computer(FirstPc, "first");
