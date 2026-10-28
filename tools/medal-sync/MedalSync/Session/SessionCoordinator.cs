@@ -331,7 +331,7 @@ internal sealed class SessionCoordinator(
                 $"{missing.Count} file(s) the library needs are not on the server, for example {missing[0].Reference.Path} ({missing[0].Problem}).",
                 journal.CommittedGeneration);
         }
-        if (mount.IsRunning && !mount.Stop())
+        if ((mount.IsRunning && !mount.Stop()) || mount.IsRunning)
         {
             return new FinishOutcome(FinishStatus.Blocked, "The clip drive did not stop; it may still be in use.", journal.CommittedGeneration);
         }
@@ -341,6 +341,9 @@ internal sealed class SessionCoordinator(
         if (compatibility is not null && compatibility.RequirePublish() != publishVersions)
             throw new IncompatibleLibraryException("Medal updated while the handoff was being verified. Retry finish on this PC; ownership and cache are retained.");
         shutdown?.RequireTime();
+        if (library.Read().Digest() != snapshot.Digest())
+            return new FinishOutcome(FinishStatus.Blocked,
+                "The library changed during final verification; ownership and cache are retained. Retry finish on this PC.", journal.CommittedGeneration);
         journal = store.Update(r =>
         {
             shutdown?.RequireTime();

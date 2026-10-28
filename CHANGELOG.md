@@ -4,6 +4,9 @@
 
 - Retain ownership when an aborted startup cannot verify that its mount stopped,
   and retry cleanup on the owning PC.
+- Recheck the library after final server verification and mount shutdown before
+  publishing or releasing ownership; serialize live repair and relocation with
+  the session supervisor.
 - Refuse Windows device names, malformed UNC roots and separators inside appended
   path segments before accessing or replicating media.
 - Keep authenticated rclone control requests on reviewed loopback endpoints,

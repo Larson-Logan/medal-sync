@@ -98,6 +98,27 @@ public sealed class CliAndConfigTests : IDisposable
         Assert.Equal(1, MedalFixture.Count(db, "favorites"));
     }
 
+    [Fact]
+    public void LibraryWritersShareTheSupervisorsInstanceLock()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string mutexName = @"Local\MedalSync-Test-" + Guid.NewGuid().ToString("N");
+        using (SessionCommands.SingleInstance(mutexName))
+        {
+            Exception? refusal = null;
+            var contender = new Thread(() =>
+            {
+                if (!OperatingSystem.IsWindows()) return;
+                try { using var competing = SessionCommands.SingleInstance(mutexName); }
+                catch (Exception ex) { refusal = ex; }
+            });
+            contender.Start();
+            Assert.True(contender.Join(TimeSpan.FromSeconds(5)));
+            Assert.Contains("already running", Assert.IsType<UnsafeOperationException>(refusal).Message, StringComparison.Ordinal);
+        }
+        using var recovered = SessionCommands.SingleInstance(mutexName);
+    }
+
     [Theory]
     [InlineData(new[] { "snapshot", "export" }, 2)]
     [InlineData(new[] { "snapshot", "export", "--out" }, 2)]

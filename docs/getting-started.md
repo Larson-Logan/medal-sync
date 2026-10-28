@@ -129,6 +129,12 @@ unknown upload state is never success. Device settings and logins stay local.
 If startup cannot verify that its clip drive stopped, ownership stays on this
 PC. Open Medal Library here again to retry cleanup before switching PCs.
 
+Finish rechecks the library after server verification and drive shutdown; a
+change retains the session and cache until a successful retry. Live
+`repair --apply` and `relocate --apply` need exclusive access: if the companion
+is still supervising a session, they refuse. Wait for its result, then retry
+with Medal quit and any recovery mount/cache retained.
+
 Windows shutdown gives the existing finish worker up to 25 seconds. Incomplete
 work remains owned and resumes on the next launch. An automatic update check
 never installs during shutdown or interrupts this recovery path.

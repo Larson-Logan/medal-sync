@@ -131,6 +131,10 @@ internal static class LibraryCommands
         string checkpointFile = args.Required("--checkpoint");
         bool apply = args.Flag("--apply");
         args.RequireAllUsed();
+        // Acquire before reading/planning: a supervisor must not publish a
+        // snapshot while repair rewrites the same live library.
+        bool live = args.Value("--db") is null || IsLiveLibrary(path);
+        using var instance = apply && live && OperatingSystem.IsWindows() ? SessionCommands.SingleInstance() : null;
         var checkpoint = LibrarySnapshot.FromCanonicalJson(File.ReadAllBytes(checkpointFile));
         var current = LibraryDatabase.ReadSnapshot(path, account);
         var repaired = MissingMediaAudit.ProposeRepair(checkpoint, current, File.Exists, out var applied);
@@ -143,7 +147,6 @@ internal static class LibraryCommands
         }
         // --db can name the live library too; the restore's own exclusive-open
         // check backs this up for any other program holding it.
-        bool live = args.Value("--db") is null || IsLiveLibrary(path);
         if (live && OperatingSystem.IsWindows() && new MedalProcess(MedalEnvironment.Locate()).IsRunning())
         {
             throw new UnsafeOperationException("Quit Medal from its tray icon before repairing its library.");
@@ -175,6 +178,7 @@ internal static class LibraryCommands
         if (!WindowsPath.TryParse(fromText, out WindowsPath? from, out string? problem)) throw new UsageException($"--from: {problem}");
         var state = Config.LocalState.ForCurrentUser();
         var config = Config.MedalSyncConfig.Load(configPath ?? state.ConfigPath);
+        using var instance = apply ? SessionCommands.SingleInstance() : null;
         var install = MedalEnvironment.Locate();
         if (install.AccountId != config.AccountId)
         {
