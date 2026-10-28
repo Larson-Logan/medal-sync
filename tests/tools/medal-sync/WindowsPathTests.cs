@@ -26,8 +26,38 @@ public sealed class WindowsPathTests
     [InlineData(@"\\?\M:\Clips")]
     [InlineData(@"\\.\PhysicalDrive0")]
     [InlineData(@"\\server")]
+    [InlineData(@"\\server\..\Clips")]
+    [InlineData(@"\\server\share \Clips")]
+    [InlineData(@"\\bad:server\share\Clips")]
+    [InlineData(@"\\server\share:hidden\Clips")]
+    [InlineData(@"M:\Clips\NUL.mp4")]
+    [InlineData(@"M:\Clips\con.txt")]
+    [InlineData(@"M:\Clips\AUX .mp4")]
+    [InlineData(@"M:\Clips\PRN")]
+    [InlineData(@"M:\Clips\COM1.mp4")]
+    [InlineData(@"M:\Clips\lpt9.txt")]
+    [InlineData(@"M:\Clips\COM¹.mp4")]
+    [InlineData(@"M:\Clips\LPT².txt")]
+    [InlineData(@"M:\Clips\CONIN$")]
     public void Parse_RefusesAmbiguousPaths(string input) =>
         Assert.False(WindowsPath.TryParse(input, out _, out _));
+
+    [Theory]
+    [InlineData(@"..\outside.mp4")]
+    [InlineData("../outside.mp4")]
+    [InlineData(@"Game\clip.mp4")]
+    [InlineData("Game/clip.mp4")]
+    [InlineData("NUL.mp4")]
+    public void Append_RefusesTraversalAndDeviceAliases(string segment) =>
+        Assert.Throws<ArgumentException>(() => WindowsPath.Parse(@"M:\Clips").Append(segment));
+
+    [Theory]
+    [InlineData("COM10.mp4")]
+    [InlineData("console.mp4")]
+    [InlineData("auxiliary.mp4")]
+    [InlineData(".hidden.mp4")]
+    public void Append_PreservesOrdinaryFilenames(string segment) =>
+        Assert.Equal(@"M:\Clips\" + segment, WindowsPath.Parse(@"M:\Clips").Append(segment).Display);
 
     [Fact]
     public void IsWithin_IsCaseInsensitiveAndSegmentAware()
