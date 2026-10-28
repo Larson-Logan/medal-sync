@@ -9,6 +9,8 @@
   the session supervisor.
 - Hand off intentional empty-library generations to PCs with older committed
   entries, retaining backups and refusing unshared local changes without review.
+- Refuse audit and repair checkpoints from another account or an incompatible
+  schema before planning changes.
 - Refuse Windows device names, malformed UNC roots and separators inside appended
   path segments before accessing or replicating media.
 - Keep authenticated rclone control requests on reviewed loopback endpoints,

@@ -39,6 +39,7 @@ internal static class MissingMediaAudit
 
     public static MediaAudit Compare(LibrarySnapshot checkpoint, LibrarySnapshot current)
     {
+        RequireComparable(checkpoint, current);
         var before = Rows(checkpoint);
         var after = Rows(current);
         var deleted = DeletedIds(current);
@@ -61,6 +62,33 @@ internal static class MissingMediaAudit
             }
         }
         return new MediaAudit(changes);
+    }
+
+    /// <summary>Do not reinterpret another account's rows or a different schema as local media damage.</summary>
+    private static void RequireComparable(LibrarySnapshot checkpoint, LibrarySnapshot current)
+    {
+        if (checkpoint.AccountId != current.AccountId)
+            throw new IncompatibleLibraryException(
+                $"The checkpoint belongs to Medal account {checkpoint.AccountId}, but this library is account {current.AccountId}. Nothing was changed.");
+        if (checkpoint.SchemaVersion != current.SchemaVersion
+            || checkpoint.SchemaVersion != MedalSchema.SupportedUserVersion
+            || checkpoint.SchemaFingerprint != current.SchemaFingerprint
+            || !MedalSchema.SupportedFingerprints.Contains(checkpoint.SchemaFingerprint))
+            throw new IncompatibleLibraryException("The checkpoint and library must have the same supported Medal schema. Nothing was changed.");
+        foreach (string name in MedalSchema.LibraryTables)
+        {
+            if (!checkpoint.Table(name).Columns.SequenceEqual(current.Table(name).Columns))
+                throw new IncompatibleLibraryException($"The checkpoint's {name} columns do not match this library. Nothing was changed.");
+        }
+        foreach (var snapshot in new[] { checkpoint, current })
+        {
+            var counts = snapshot.Table("content_counts");
+            int key = counts.ColumnIndex("key");
+            int count = counts.ColumnIndex("count");
+            var definitions = counts.Rows.SingleOrDefault(r => TableSnapshot.Text(r[key]) == MedalSchema.DefinitionsVersionKey);
+            if (definitions?[count] is not IntegerCell { Value: MedalSchema.SupportedDefinitionsVersion })
+                throw new IncompatibleLibraryException("The checkpoint and library must have supported counter definitions. Nothing was changed.");
+        }
     }
 
     /// <summary>
