@@ -43,10 +43,13 @@ public sealed class SessionTests : IDisposable
 
         public int Launches { get; private set; }
 
+        public Action? OnLaunch { get; set; }
+
         public bool IsRunning() => Running;
 
         public void Launch()
         {
+            OnLaunch?.Invoke();
             Launches++;
             Running = true;
         }
@@ -148,6 +151,27 @@ public sealed class SessionTests : IDisposable
             TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal);
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
         return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication));
+    }
+
+    [Fact]
+    public void FailedWindowsStartRetainsSessionAndRetryRecoversIt()
+    {
+        var pc = Computer(FirstPc, "first");
+        pc.Medal.OnLaunch = () => throw new UnsafeOperationException("Synthetic Windows start failure.");
+        Assert.Throws<UnsafeOperationException>(() => pc.Coordinator.Launch());
+        var retained = _store.ReadJournal();
+        Assert.Equal(OwnershipState.Active, retained.State);
+        Assert.Equal(FirstPc, retained.Owner);
+        Assert.True(pc.Mount.IsRunning);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.False(pc.Medal.Running);
+
+        pc.Medal.OnLaunch = null;
+        var retried = pc.Coordinator.Launch();
+        Assert.Equal(LaunchStatus.Started, retried.Status);
+        Assert.NotEqual(retained.SessionId, retried.Session);
+        Assert.Contains(retained.SessionId!, pc.Mount.Forgotten);
+        Assert.True(pc.Medal.Running);
     }
 
     [Fact]

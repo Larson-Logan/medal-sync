@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Unconfigured desktop launches show the expected configuration location and
+  setup guidance before probing Medal. Sign-in launches exit quietly until setup.
+- Reopening an already supervised Medal window no longer waits for a release
+  check. Busy-session messages explain that upload and verification must finish.
+- First-launch Medal links travel through the guarded startup, replacing delayed
+  background forwarding. Repeated sign-in launches do not reopen Medal or display
+  busy-session dialogs.
+- Windows process-start failures explain how to retry while retaining the session
+  and cache. Invalid sync exclusion entries and oversized cache durations report
+  configuration errors instead of crashing.
 - Expanded GitHub issue forms for bugs, features, setup questions and documentation.
 - Public support, contribution and moderation guidance, with maintainer triage
   labels and a pull request template that records validation and recovery behavior.

@@ -9,7 +9,7 @@ namespace MedalSync.Platform;
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsLauncherUi : ILauncherUi
 {
-    private const string Title = "Medal (medal-sync)";
+    private const string Title = "Medal Sync";
     private const uint IconWarning = 0x30;
     private const uint IconInformation = 0x40;
     private const uint SetForeground = 0x10000;

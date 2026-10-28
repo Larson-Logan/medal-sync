@@ -14,7 +14,7 @@ internal static class CommandRunner
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config",
-        "--from", "--wait-for-server", "--state-root",
+        "--from", "--wait-for-server", "--state-root", "--medal-link",
         "--local-copy-root", "--cloud-remote", "--rclone-config",
         "--storage-mode",
         "--replica-conflicts",
@@ -48,7 +48,7 @@ internal static class CommandRunner
                         [--replica-conflicts stop|version]  Preserve earlier destination files when updating
                                                  Preview/create a config; never overwrite an existing file
           init [--apply]                         Create the shared library from this PC (generation 0)
-          launch [--replace-local-library] [--wait-for-server SECONDS]
+          launch [--replace-local-library] [--wait-for-server SECONDS] [--medal-link URL]
                                                  Start Medal through medal-sync and hand off on exit
           finish [--accept-library-changes]      Finish this PC's interrupted session
           repair --checkpoint FILE [--apply] [--db DB]   Put back clips Medal dropped (Medal quit)

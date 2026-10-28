@@ -125,7 +125,9 @@ public sealed class LauncherAndRelocationTests : IDisposable
     public void Launcher_WaitsLongerForTheServerAtSignIn()
     {
         Assert.Equal(["launch", "--wait-for-server", "120"], Launcher.LaunchArguments(new LauncherRequest(true, null)));
-        Assert.Equal(["launch", "--wait-for-server", "20"], Launcher.LaunchArguments(new LauncherRequest(false, "medal://x")));
+        Assert.Equal(["launch", "--wait-for-server", "20"], Launcher.LaunchArguments(new LauncherRequest(false, null)));
+        Assert.Equal(["launch", "--wait-for-server", "20", "--medal-link", "medal://x"],
+            Launcher.LaunchArguments(new LauncherRequest(false, "medal://x")));
     }
 
     [Fact]

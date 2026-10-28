@@ -46,10 +46,9 @@ internal static partial class Launcher
 {
     public const int SignInWaitSeconds = 120;
     public const int ManualWaitSeconds = 20;
-    private static readonly TimeSpan LinkStartTimeout = TimeSpan.FromSeconds(60);
 
     public const string BusyMessage =
-        "medal-sync is still finishing the last Medal session (uploading clips). Open Medal again in a minute.";
+        "Medal Sync is still uploading or verifying the last session. Wait for Ready before reopening Medal or switching PCs.";
 
     public static LauncherRequest Parse(IReadOnlyList<string> args) => args switch
     {
@@ -62,8 +61,32 @@ internal static partial class Launcher
     public static LauncherStep Decide(bool medalRunning, bool supervisorRunning) =>
         !supervisorRunning ? LauncherStep.Launch : medalRunning ? LauncherStep.Forward : LauncherStep.Busy;
 
-    public static string[] LaunchArguments(LauncherRequest request) =>
-        ["launch", "--wait-for-server", (request.AtSignIn ? SignInWaitSeconds : ManualWaitSeconds).ToString(CultureInfo.InvariantCulture)];
+    public static string[] LaunchArguments(LauncherRequest request)
+    {
+        string[] arguments = ["launch", "--wait-for-server", (request.AtSignIn ? SignInWaitSeconds : ManualWaitSeconds).ToString(CultureInfo.InvariantCulture)];
+        return request.Link is null ? arguments : [.. arguments, "--medal-link", MedalLink.Require(request.Link)];
+    }
+
+    /// <summary>Repeated sign-in launches never take focus from an existing session.</summary>
+    internal static int? HandleExistingSession(LauncherRequest request, bool medalRunning, bool supervisorRunning,
+        Action<string?> openMedal, ILauncherUi ui)
+    {
+        switch (Decide(medalRunning, supervisorRunning))
+        {
+            case LauncherStep.Forward:
+                if (!request.AtSignIn)
+                {
+                    try { openMedal(request.Link); }
+                    catch (MedalSyncException ex) { ui.Show(ex.Message); return 1; }
+                }
+                return 0;
+            case LauncherStep.Busy:
+                if (!request.AtSignIn) ui.Show(BusyMessage);
+                return 3;
+            default:
+                return null;
+        }
+    }
 
     /// <summary>The message for the user after <c>launch</c> returned, or null when there is nothing to say.</summary>
     public static string? Outcome(int exitCode, string output, string error)
@@ -81,6 +104,15 @@ internal static partial class Launcher
     [GeneratedRegex("^(launch|finish): [A-Za-z]+: ")]
     private static partial Regex StatusPrefix();
 
+    /// <summary>Explain missing setup before probing Medal; never create state or interrupt sign-in.</summary>
+    internal static int? CheckConfiguration(LauncherRequest request, LocalState state, ILauncherUi ui)
+    {
+        if (File.Exists(state.ConfigPath)) return null;
+        if (request.AtSignIn) return 1;
+        ui.Show($"Medal Sync needs to be configured before it can open Medal.\n\nOpen Medal Sync Setup Guide from the Start menu for the setup steps. If this PC was configured before, recover its original configuration.\n\nConfiguration location:\n{state.ConfigPath}");
+        return 1;
+    }
+
     [SupportedOSPlatform("windows")]
     public static int Run(string[] args, ILauncherUi ui)
     {
@@ -89,8 +121,8 @@ internal static partial class Launcher
         try
         {
             request = Parse(args);
+            if (CheckConfiguration(request, LocalState.ForCurrentUser(), ui) is { } setupResult) return setupResult;
             SetupMaintenance.RequireNotRunning();
-            ReleaseUpdate.NotifyAtLaunch(ui.Notify);
             medal = new MedalProcess(MedalEnvironment.Locate());
         }
         catch (Exception ex) when (ex is UsageException or MedalSyncException)
@@ -102,17 +134,10 @@ internal static partial class Launcher
         // Record entry before loading the share: this distinguishes a failed
         // sign-in attempt from Windows never invoking the startup entry.
         log.Write(request.AtSignIn ? "launcher: invoked at sign-in" : "launcher: invoked manually");
-        switch (Decide(medal.IsRunning(), SessionCommands.AnotherInstanceRunning()))
-        {
-            case LauncherStep.Forward:
-                medal.Open(request.Link);
-                return 0;
-            case LauncherStep.Busy:
-                ui.Show(BusyMessage);
-                return 3;
-        }
+        if (HandleExistingSession(request, medal.IsRunning(), SessionCommands.AnotherInstanceRunning(), medal.Open, ui) is { } existingResult)
+            return existingResult;
+        ReleaseUpdate.NotifyAtLaunch(ui.Notify);
         var shutdown = new SessionShutdown(new SystemClock());
-        if (request.Link is not null) ForwardWhenStarted(medal, request.Link, shutdown);
         var output = new StringWriter(CultureInfo.InvariantCulture);
         var error = new StringWriter(CultureInfo.InvariantCulture);
         bool reviewDeclined = false;
@@ -128,34 +153,5 @@ internal static partial class Launcher
         if (reviewDeclined) return 3;
         if (Outcome(code, output.ToString(), error.ToString()) is { } message) ui.Show(message);
         return code;
-    }
-
-    /// <summary>Passes a link on once Medal is up; Medal's single instance receives it.</summary>
-    [SupportedOSPlatform("windows")]
-    private static void ForwardWhenStarted(MedalProcess medal, string link, SessionShutdown shutdown)
-    {
-        var thread = new Thread(() =>
-        {
-            var deadline = DateTime.UtcNow + LinkStartTimeout;
-            while (DateTime.UtcNow < deadline && !shutdown.SuppressUi)
-            {
-                if (medal.IsRunning())
-                {
-                    Thread.Sleep(TimeSpan.FromSeconds(3));
-                    try
-                    {
-                        shutdown.TryLaunch(() => medal.Open(link));
-                    }
-                    catch (Exception ex) when (ex is MedalSyncException or System.ComponentModel.Win32Exception)
-                    {
-                        // The link is a convenience; the session itself is unaffected.
-                    }
-                    return;
-                }
-                Thread.Sleep(TimeSpan.FromSeconds(1));
-            }
-        })
-        { IsBackground = true, Name = "medal-link" };
-        thread.Start();
     }
 }

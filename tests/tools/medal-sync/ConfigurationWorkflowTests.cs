@@ -1,6 +1,7 @@
 using MedalSync.Cli;
 using MedalSync.Config;
 using MedalSync.Tests.Fixtures;
+using MedalSync.Util;
 
 namespace MedalSync.Tests;
 
@@ -81,6 +82,58 @@ public sealed class ConfigurationWorkflowTests : IDisposable
     {
         Assert.Equal(1, Run([.. Options(), "--new-library", "--cloud-remote", "onedrive:MedalSync", "--apply"]).Code);
         Assert.False(File.Exists(_fixture.PathFor("config.json")));
+    }
+
+    [Theory]
+    [InlineData(int.MinValue)]
+    [InlineData(0)]
+    [InlineData(int.MaxValue)]
+    public void OutOfRangeMountDurationIsAConfigurationErrorInsteadOfACrash(int hours)
+    {
+        string path = _fixture.PathFor("config.json");
+        Assert.Equal(0, Run([.. Options(), "--new-library", "--apply"]).Code);
+        var config = MedalSyncConfig.Load(path);
+        byte[] invalid = Json.Serialize(config with { Mount = config.Mount with { DirCacheHours = hours } });
+        File.WriteAllBytes(path, invalid);
+        var result = Run("config", "validate", "--config", path);
+        Assert.Equal(1, result.Code);
+        Assert.Contains("mount.dirCacheHours", result.Error, StringComparison.Ordinal);
+        Assert.Equal(invalid, File.ReadAllBytes(path));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("/")]
+    [InlineData("Videos/Clips")]
+    [InlineData("/Videos/*")]
+    [InlineData("/Videos/../Clips")]
+    [InlineData("/Videos//Clips")]
+    [InlineData("/Videos/Clips/")]
+    public void InvalidSyncExclusionsAreRefusedBeforeStartupChecks(string? pattern)
+    {
+        string path = _fixture.PathFor("config.json");
+        Assert.Equal(0, Run([.. Options(), "--new-library", "--apply"]).Code);
+        var config = MedalSyncConfig.Load(path);
+        File.WriteAllBytes(path, Json.Serialize(config with { SyncExclusions = [new SyncExclusion("media", pattern!)] }));
+        var result = Run("config", "validate", "--config", path);
+        Assert.Equal(1, result.Code);
+        Assert.Contains("rooted folder pattern", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NullExclusionsAndMissingFolderIdsAreReportedWithoutNullReferenceFailures()
+    {
+        string path = _fixture.PathFor("config.json");
+        Assert.Equal(0, Run([.. Options(), "--new-library", "--apply"]).Code);
+        var config = MedalSyncConfig.Load(path);
+        foreach (var exclusions in new IReadOnlyList<SyncExclusion>[] { [null!], [new SyncExclusion("", "/Videos/Clips")] })
+        {
+            File.WriteAllBytes(path, Json.Serialize(config with { SyncExclusions = exclusions }));
+            var result = Run("config", "validate", "--config", path);
+            Assert.Equal(1, result.Code);
+            Assert.Contains(exclusions[0] is null ? "syncExclusions" : "folderId", result.Error, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
