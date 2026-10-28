@@ -46,7 +46,8 @@ internal sealed record InventoryReport(
     IReadOnlyList<ExclusionStatus> SyncExclusions,
     IReadOnlyDictionary<string, string> Dependencies,
     IReadOnlyDictionary<string, string> Server,
-    string? StateRoot = null);
+    string? StateRoot = null,
+    MedalCompatibilityReport? Compatibility = null);
 
 /// <summary>
 /// The read-only Phase 0 inventory (plan Gate A). Reads the live library inside
@@ -86,7 +87,8 @@ internal static class Inventory
         return new InventoryReport(now, Environment.MachineName, Environment.UserName, RuntimeInformation.OSDescription,
             install?.Versions.App, install?.Versions.Recorder, install is not null && new MedalProcess(install).IsRunning(),
             library, libraryError, tree, Drives(), proposed, !Directory.Exists(proposed), capacity, StartupEntries(),
-            folders, SyncthingCheck.Check(folders, exclusions), Dependencies(config), Server(config), state.Root);
+            folders, SyncthingCheck.Check(folders, exclusions), Dependencies(config), Server(config), state.Root,
+            install is null ? null : MedalCompatibility.Check(install));
     }
 
     private static (LibrarySummary, TreeSummary?) Library(MedalInstall install)

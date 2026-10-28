@@ -28,6 +28,7 @@ internal static class CommandRunner
           setup check [--state-root DIR] [--out FILE]  Verify readiness for Windows setup; no library changes
           config validate --config FILE          Validate a candidate config without reading Medal or the share
           inspect [--json]                       Phase 0 inventory of this PC (Gate A evidence)
+          compatibility [--json]                 Check installed Medal builds and schema without configuration
           snapshot export --out FILE [--db DB]   Write the library tables to a new private file
           snapshot verify --in FILE              Check a snapshot file and its schema
           dry-run-restore [--in FILE] [--db DB]  Restore into a disposable copy and verify it
@@ -119,6 +120,7 @@ internal static class CommandRunner
         {
             "setup check" => SetupCommands.Check(args, output),
             "inspect" => SessionCommands.Inspect(args, output),
+            "compatibility" => SessionCommands.Compatibility(args, output),
             "status" => SessionCommands.Status(args, output),
             "mount-plan" => SessionCommands.MountPlanCommand(args, output),
             "init" => SessionCommands.Init(args, output),

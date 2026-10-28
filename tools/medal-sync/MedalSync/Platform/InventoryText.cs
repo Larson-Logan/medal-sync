@@ -14,6 +14,11 @@ internal static class InventoryText
         var beforeClipsMove = new List<string>();
         text.AppendLine($"medal-sync inventory {r.At:yyyy-MM-dd HH:mm} UTC on {r.Computer} ({r.User}), {r.Os}");
         text.AppendLine($"Medal {r.MedalApp ?? "?"}, recorder {r.MedalRecorder ?? "?"}, running: {(r.MedalRunning ? "yes" : "no")}");
+        if (r.Compatibility is { } compatibility)
+        {
+            text.AppendLine("Compatibility: " + compatibility.Summary);
+            blockers.AddRange(compatibility.Blockers);
+        }
         if (r.Library is { } l)
         {
             text.AppendLine($"Library {l.DatabasePath}: account {l.AccountId}, schema {l.SchemaVersion} {(l.SchemaSupported ? "supported" : "UNSUPPORTED")}");

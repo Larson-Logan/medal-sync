@@ -86,7 +86,7 @@ internal static partial class MedalSchema
             columns[table] = names;
         }
         long? definitions = null;
-        if (columns["content_counts"].Count > 0)
+        if (columns["content_counts"].Contains("key") && columns["content_counts"].Contains("count"))
         {
             using var command = Command(connection, transaction,
                 "SELECT count FROM content_counts WHERE key = $key");

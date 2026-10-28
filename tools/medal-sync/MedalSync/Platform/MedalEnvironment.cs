@@ -39,30 +39,45 @@ internal static partial class MedalEnvironment
 
     internal static MedalVersions ReadVersions(string installDirectory)
     {
-        string? app = null;
-        string? recorder = null;
+        // The updater replaces these files independently. A malformed app
+        // manifest must not hide an otherwise readable recorder version.
+        return new MedalVersions(ReadAppVersion(installDirectory), ReadRecorderVersion(installDirectory));
+    }
+
+    private static string? ReadAppVersion(string installDirectory)
+    {
         try
         {
             string nuspec = Path.Combine(installDirectory, "current", "sq.version");
             if (File.Exists(nuspec))
             {
-                app = XDocument.Load(nuspec).Descendants().FirstOrDefault(e => e.Name.LocalName == "version")?.Value;
+                return XDocument.Load(nuspec).Descendants().FirstOrDefault(e => e.Name.LocalName == "version")?.Value.Trim();
             }
+        }
+        catch (Exception ex) when (ex is IOException or System.Xml.XmlException or UnauthorizedAccessException) { }
+        return null;
+    }
+
+    private static string? ReadRecorderVersion(string installDirectory)
+    {
+        try
+        {
             string versionJson = Path.Combine(installDirectory, "version.json");
             if (File.Exists(versionJson))
             {
                 using var document = JsonDocument.Parse(File.ReadAllText(versionJson));
-                if (document.RootElement.TryGetProperty("RecorderHandler2Version", out var value) && value.ValueKind == JsonValueKind.String)
+                if (document.RootElement.ValueKind == JsonValueKind.Object
+                    && document.RootElement.TryGetProperty("RecorderHandler2Version", out var value) && value.ValueKind == JsonValueKind.String)
                 {
-                    recorder = value.GetString();
+                    return value.GetString()?.Trim();
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or JsonException or System.Xml.XmlException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
             // Versions are evidence for the manifest; missing ones are recorded as null.
         }
-        return new MedalVersions(app, recorder);
+        return null;
     }
 
     [GeneratedRegex("^medal-([0-9]+)\\.db$", RegexOptions.IgnoreCase)]

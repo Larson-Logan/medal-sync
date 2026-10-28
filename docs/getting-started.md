@@ -16,7 +16,11 @@ Each PC keeps its own Medal database, login, audio/encoder settings and identity
 - An independent media backup. A shared library and cache are not a backup.
 
 Published executables include .NET. The pinned SDK is needed only to build
-from source. The supported schema is reported by `medal-sync.exe version`;
+from source. Run `medal-sync.exe compatibility` (or add `--json`) to check the
+installed Medal app, recorder and database schema, even before configuring
+Medal Sync. Exit 0 means those compatibility checks pass; exit 1 means a check
+failed or could not be completed. This does not test storage or recording.
+The supported schema is also reported by `medal-sync.exe version`;
 unknown Medal builds or schemas refuse operations. This remains experimental:
 real playback, cross-PC handoff and physical reboot need desktop acceptance.
 
@@ -102,6 +106,17 @@ storage checks. A first launch opens the link as part of starting Medal; an
 already supervised session receives it immediately. An unmanaged Medal process
 must pass recovery checks before receiving the link. Advanced CLI launches can
 use `launch --medal-link 'medal://...'` too.
+
+Medal Sync checks compatibility before starting a new session, once a minute
+while Medal runs, and before publishing a handoff. It warns about changed
+versions and unsupported schemas without stopping Medal or the clip drive.
+After a warning, quit Medal normally. Uploads can drain, but an incompatible
+build keeps ownership and cache on this PC. Run `compatibility --json`, check
+for a Medal Sync update, then retry `finish` after compatibility passes.
+Matching database schemas alone do not verify Medal's native backup behavior;
+unknown app/recorder builds remain blocked. Enrollment allows the two reviewed
+app builds 2643.583.1 and 2644.591.1 with recorder 2643.3040.1 to differ between
+PCs when their supported schemas match.
 
 ## Recovery rules
 
