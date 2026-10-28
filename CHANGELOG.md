@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Expanded GitHub issue forms for bugs, features, setup questions and documentation.
+- Public support, contribution and moderation guidance, with maintainer triage
+  labels and a pull request template that records validation and recovery behavior.
+- Grouped monthly minor/patch dependency updates, integration-project coverage
+  and label-based generated release notes.
+
 ## 0.4.0 — 2026-10-27
 
 - Verified native-backup compatibility for Medal 2644.591.1 with recorder

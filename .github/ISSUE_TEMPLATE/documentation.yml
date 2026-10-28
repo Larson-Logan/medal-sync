@@ -1,0 +1,23 @@
+name: Documentation improvement
+description: Report missing, unclear or incorrect instructions.
+labels: [documentation, needs triage]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Documentation page or section
+      description: Link the page or name the setup guide section.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing or unclear?
+      description: Explain what you expected to learn and where the instructions broke down. Use synthetic examples with no private data.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement
+      description: A proposed correction or example is welcome; you do not need to write the full documentation.

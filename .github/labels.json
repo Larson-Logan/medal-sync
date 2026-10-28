@@ -1,0 +1,15 @@
+[
+  { "name": "bug", "color": "d73a4a", "description": "Something is not working as intended" },
+  { "name": "enhancement", "color": "a2eeef", "description": "A new feature or improvement" },
+  { "name": "documentation", "color": "0075ca", "description": "Public documentation or contributor guidance" },
+  { "name": "question", "color": "d876e3", "description": "Setup, usage or recovery question" },
+  { "name": "dependencies", "color": "0366d6", "description": "Dependency updates requiring validation" },
+  { "name": "github_actions", "color": "000000", "description": "GitHub Actions dependencies or workflows" },
+  { "name": ".NET", "color": "7121c6", "description": ".NET source or NuGet dependencies" },
+  { "name": "needs triage", "color": "fbca04", "description": "Needs maintainer assessment and a next step" },
+  { "name": "blocked", "color": "b60205", "description": "Cannot proceed until a documented dependency is resolved" },
+  { "name": "area: storage", "color": "1d76db", "description": "Local media, server copies, cloud replicas or handoff" },
+  { "name": "area: setup", "color": "1d76db", "description": "Windows installation, configuration, updates or removal" },
+  { "name": "area: library", "color": "1d76db", "description": "Medal schema, library restore or reconciliation" },
+  { "name": "area: ci", "color": "1d76db", "description": "Validation, packaging or contributor CI" }
+]

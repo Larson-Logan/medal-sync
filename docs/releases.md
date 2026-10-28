@@ -56,7 +56,8 @@ and named local remotes, without provider accounts.
 
 Actions are pinned to SHAs and checkout does not retain credentials. Ordinary
 validation has read-only repository permissions. Dependabot proposes monthly
-action and NuGet updates.
+action and NuGet updates, grouping minor and patch versions while keeping major
+upgrades separate. See [maintainer triage](triage.md) for review and labels.
 
 Update the version and changelog, merge validated changes to main, then tag
 that commit and push the exact version tag. For version 0.3.0:
@@ -71,6 +72,10 @@ builds both packages, verifies native installation and creates a **draft** GitHu
 release with setup EXE, portable ZIP, checksums and generated notes. Only this
 job has contents-write permission. Existing releases cause failure rather than
 replacement.
+
+Generated notes use [.github/release.yml](../.github/release.yml) to group PRs
+by their type labels. Label merged work accurately; notes include a catch-all
+for uncategorized changes and still require maintainer review.
 
 Review assets, versions, hashes and release notes before publishing the draft.
 Drafts and prereleases are invisible to automatic update checks. A published
