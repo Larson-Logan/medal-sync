@@ -1,13 +1,32 @@
 name: Feature request
 description: Describe a workflow Medal Sync should support.
+labels: [enhancement, needs triage]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing requests first. Describe the workflow with synthetic examples and no private files or account details.
   - type: textarea
     id: problem
     attributes:
       label: What problem would this solve?
+      description: Describe who encounters the problem and how the current workflow falls short.
     validations:
       required: true
   - type: textarea
     id: behavior
     attributes:
-      label: Proposed behavior and recovery expectations
+      label: Proposed behavior
+      description: Explain the result a user should see and how you would know it works.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: What have you tried, and why is it insufficient?
+  - type: textarea
+    id: recovery
+    attributes:
+      label: Failure and recovery expectations
+      description: If this affects storage or handoff, what should happen when a copy fails, a PC goes offline or Medal is still running?

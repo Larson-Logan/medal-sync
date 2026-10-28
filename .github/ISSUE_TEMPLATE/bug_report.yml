@@ -1,26 +1,84 @@
 name: Bug report
-description: Report a reproducible problem using synthetic details.
+description: Report a reproducible problem with setup, storage, launch or handoff.
+labels: [bug, needs triage]
 body:
   - type: markdown
     attributes:
-      value: Do not attach real databases, media, configs, device identities or raw logs.
+      value: |
+        Read the [support guide](https://github.com/Larson-Logan/medal-sync/blob/main/SUPPORT.md) and search existing issues first.
+        Use synthetic examples. Never upload real databases, recordings, configuration files, device identities or raw logs.
+        Report vulnerabilities through the [security policy](https://github.com/Larson-Logan/medal-sync/security/policy).
   - type: input
     id: version
     attributes:
-      label: Medal Sync and Windows versions
+      label: Medal Sync version
+      description: Use the installed version or the commit SHA for a source build.
+      placeholder: "0.4.0, or a commit SHA"
     validations:
       required: true
-  - type: textarea
+  - type: input
+    id: windows
+    attributes:
+      label: Windows and Medal versions
+      description: Include the Windows build and Medal app/recorder versions if available. Do not attach an About screenshot containing account details.
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - Windows setup - per user
+        - Windows setup - all users
+        - Portable ZIP
+        - Source build
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
     id: storage
     attributes:
-      label: Storage configuration
-      description: State whether you use server cache, persistent local storage, and which cloud provider names. Do not include credentials, remote account IDs or private paths.
+      label: Storage mode
+      options:
+        - Server with SSD cache
+        - Persistent local copy with server
+        - Local storage without SMB
+        - Not sure
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
-      label: Steps, expected behavior and actual behavior
-      description: Include the command and a redacted error with personal paths removed.
+      label: Steps to reproduce
+      description: List the smallest steps and any cloud provider names involved. Replace paths, hostnames, account names and remote IDs with synthetic values; remove credentials from commands.
+      placeholder: |
+        1. Start with a synthetic library using ...
+        2. Run ...
+        3. Observe ...
     validations:
       required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include only the relevant error text, rewritten with synthetic values. State whether this started after an update.
+    validations:
+      required: true
+  - type: textarea
+    id: session
+    attributes:
+      label: Session state and recovery attempts
+      description: If relevant, state Ready, ACTIVE, finishing or unknown, and whether writes may be pending. Describe previous recovery attempts; do not repeat a failing operation just to fill this in.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before submitting
+      options:
+        - label: This report contains no real databases, recordings, configuration files, device identities, credentials or raw runtime logs.
+          required: true

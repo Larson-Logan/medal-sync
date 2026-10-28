@@ -1,0 +1,29 @@
+name: Setup or usage question
+description: Ask about configuration, installation, updates or recovery.
+labels: [question, needs triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the [support guide](https://github.com/Larson-Logan/medal-sync/blob/main/SUPPORT.md).
+        Use synthetic examples; do not attach databases, recordings, configuration files, device identities, credentials or raw logs.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: Include your Medal Sync version, installation method, storage mode and cloud provider names if relevant. Remove personal paths and account details.
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried or read?
+      description: Link the relevant documentation and explain where you got stuck. For recovery, describe the last known session state and previous attempts.
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like clarified?
+    validations:
+      required: true

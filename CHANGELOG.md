@@ -12,6 +12,11 @@
 - Windows process-start failures explain how to retry while retaining the session
   and cache. Invalid sync exclusion entries and oversized cache durations report
   configuration errors instead of crashing.
+- Expanded GitHub issue forms for bugs, features, setup questions and documentation.
+- Public support, contribution and moderation guidance, with maintainer triage
+  labels and a pull request template that records validation and recovery behavior.
+- Grouped monthly minor/patch dependency updates, integration-project coverage
+  and label-based generated release notes.
 
 ## 0.4.0 — 2026-10-27
 
