@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using MedalSync.Config;
@@ -26,6 +27,7 @@ internal static class Program
         // This separate test executable is used only by a uniquely identified native test installer.
         // The production binaries have no flag or environment variable that bypasses readiness.
         if (args is ["setup", "check", ..]) return ProbeSetup(args);
+        if (args is ["--update-progress"]) return ProbeUpdateProgress();
         try
         {
             string rclone = args[Array.IndexOf(args, "--rclone") + 1];
@@ -43,13 +45,45 @@ internal static class Program
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }
 
+    private static int ProbeUpdateProgress()
+    {
+        using var fixture = new MedalFixture();
+        byte[] bytes = Encoding.UTF8.GetBytes("Synthetic update payload; never executed.");
+        var asset = new ReleaseAsset("0.5.0", "medal-sync-0.5.0-setup-win-x64.exe",
+            "https://github.com/Larson-Logan/medal-sync/releases/download/v0.5.0/medal-sync-0.5.0-setup-win-x64.exe",
+            Convert.ToHexString(SHA256.HashData(bytes)), bytes.Length);
+        using var client = new HttpClient(new UpdateHandler(bytes));
+        string path = WindowsReleaseUpdate.Download(asset, fixture.PathFor("download"), client);
+        Check(File.ReadAllBytes(path).SequenceEqual(bytes), "native Shell update progress completes with a verified synthetic download");
+        return 0;
+    }
+
+    private sealed class UpdateHandler(byte[] bytes) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(500, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+        }
+    }
+
     private static int ProbeSetup(string[] args)
     {
         string root = args[Array.IndexOf(args, "--state-root") + 1];
         string report = args[Array.IndexOf(args, "--out") + 1];
         string message = "Ready for isolated native setup.";
         int result = 0;
-        try { SetupMaintenance.RequireReady(root, File.Exists(Path.Combine(root, "application-running")), File.Exists(Path.Combine(root, "supervisor-running"))); }
+        try
+        {
+            SetupMaintenance.RequireReady(root, File.Exists(Path.Combine(root, "application-running")), File.Exists(Path.Combine(root, "supervisor-running")));
+            // Model a state change while the uninstall confirmation is open.
+            if (File.Exists(Path.Combine(root, "refuse-second-check")))
+            {
+                string first = Path.Combine(root, "first-check-seen");
+                if (File.Exists(first)) throw new UnsafeOperationException("Synthetic library became busy after the first readiness check.");
+                File.WriteAllText(first, "ready");
+            }
+        }
         catch (Exception ex) when (ex is IOException or InvalidDataException or MedalSyncException or UnauthorizedAccessException)
         { result = 1; message = ex.Message; }
         using var stream = new FileStream(report, FileMode.CreateNew, FileAccess.Write, FileShare.Read);

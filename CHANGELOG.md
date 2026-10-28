@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Native update shortcut checks stable releases before configuration and offers
+  a cancelable setup download with size and SHA-256 verification.
+- Setup explains install, repair and upgrade actions, repairs damaged CLI files
+  using the registered version, and guards against accidental program relocation.
+- The bundled uninstaller explains retained data and rechecks readiness after
+  confirmation. Native integration checks its EXE, log and Windows registration.
+- Portable changes block native setup and library startup, refuse native program
+  layouts, and accept stable release tags with or without the `v` prefix.
 - Unconfigured desktop launches show the expected configuration location and
   setup guidance before probing Medal. Sign-in launches exit quietly until setup.
 - Reopening an already supervised Medal window no longer waits for a release

@@ -51,7 +51,10 @@ an explicit advanced migration performed as the owning Windows user.
 Run a newer setup EXE and select the same program folder. It upgrades the
 existing installation with the same Installed apps identity and retains data.
 Running the same setup again repairs its managed program files. Older versions
-are refused. A destination containing a portable installation or user configuration
+are refused, including when the installed CLI is damaged or missing. Repair uses
+the registered version and can restore a damaged CLI. Reuse the registered program
+folder; uninstall before moving the programs to another folder.
+A destination containing a portable installation or user configuration
 is refused so that program and data locations remain separate.
 
 Each desktop launch checks the public GitHub endpoint for a newer stable release
@@ -60,11 +63,27 @@ limits and missing or malformed releases continue normal launch. When an update
 is available, download and run its setup EXE after returning the library to Ready.
 There is no automatic background installation.
 
+Use **Check for Medal Sync updates** in the Start menu for an explicit check,
+including before configuration or enrollment. It reports unavailable checks
+separately from an up-to-date version. When a newer stable Windows setup is
+available, you can download it with a native progress window and Cancel button.
+The updater checks the expected repository URL, download size and GitHub SHA-256
+before saving a runnable EXE. Failed or canceled downloads remove their partial
+file. Downloads stay under `%LOCALAPPDATA%\MedalSync\Downloads` in separate folders;
+earlier downloads are never overwritten. After verification, the folder opens.
+Quit Medal normally, wait for Ready, and run that setup EXE to install the update.
+
 ## Uninstall
 
 Open Windows **Settings → Apps → Installed apps → Medal Sync → Uninstall**,
 or use **Uninstall Medal Sync** from the Start menu. The native uninstaller
+EXE is already bundled in every setup package: installation creates
+`unins000.exe` and `unins000.dat` in the chosen program folder. Keep both together;
+the EXE uses its installation log to remove only managed files. It can also be
+run directly from that folder.
+The native uninstaller
 requires the programs to be stopped and checks readiness for its Windows user.
+It checks again after confirmation, immediately before removing programs.
 If you supplied credentials for a different administrator account, quit all
 sessions and verify the original user's Ready status before uninstalling.
 
@@ -97,6 +116,9 @@ that installation's bin directory. It supports verified download, preview,
 explicit `-Install -Apply`, update `-Apply`, and `-Uninstall -Apply`, with an
 explicit `-StateRoot` and trusted package digest. It keeps transactional backups
 and receipts under the state root's `updates` directory.
+Applying a portable change also blocks native setup and new library operations
+for the duration of the transaction. Bare release versions such as `0.4.0` and
+full tags such as `v0.4.0` both resolve to the exact stable release tag.
 
 Use the native setup and Windows uninstaller for Program Files installations;
-the portable script does not manage the native installer registration.
+the portable script refuses a native installation layout.

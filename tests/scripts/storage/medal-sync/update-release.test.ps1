@@ -49,6 +49,29 @@ try {
     }
     $package = New-Package
     $zip = Zip-Package $package 'valid'
+    Test-Case 'Normalize bare release versions to exact stable GitHub tags' {
+        & $module {
+            function script:Invoke-RestMethod {
+                param($Uri, $Headers, $TimeoutSec)
+                if ($Uri -cne 'https://api.github.com/repos/Larson-Logan/medal-sync/releases/tags/v0.2.0') { throw 'Unexpected release endpoint.' }
+                return @{ draft=$false; prerelease=$false; tag_name='v0.2.0'; assets=@(@{
+                    name='medal-sync-0.2.0-win-x64.zip'; digest=('sha256:' + ('a' * 64)); size=1024
+                    browser_download_url='https://github.com/Larson-Logan/medal-sync/releases/download/v0.2.0/medal-sync-0.2.0-win-x64.zip'
+                }) }
+            }
+        }
+        try {
+            foreach ($tag in @('0.2.0','v0.2.0')) { Assert-True ((Get-MedalRelease $tag).Version -eq '0.2.0') 'Wrong release version.' }
+        } finally { & $module { Remove-Item Function:script:Invoke-RestMethod } }
+    }
+    Test-Case 'Portable lifecycle refuses a native Windows layout before changing programs' {
+        $root = New-Install 'native-layout'
+        '{}' | Set-Content -LiteralPath (Join-Path $root 'bin/setup-layout.json')
+        Refuses { Install-MedalRelease $root $package.path $package.manifest } '*native Windows installation*'
+        Refuses { Install-MedalFresh $root $package.path $package.manifest } '*native Windows installation*'
+        Refuses { Uninstall-MedalRelease $root } '*native Windows installation*'
+        Assert-True ((Get-Content -LiteralPath (Join-Path $root 'bin/medal-sync.exe') -Raw) -eq '0.1.0') 'Changed a native program.'
+    }
     Test-Case 'Accept verified package' {
         $read = Read-MedalReleasePackage $zip.path $zip.hash (Join-Path $scratch 'extracted')
         Assert-True ($read.version -eq '0.2.0') 'Wrong version.'

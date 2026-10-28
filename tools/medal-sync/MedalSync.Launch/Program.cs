@@ -7,6 +7,7 @@ if (!OperatingSystem.IsWindows()) return 2;
 var ui = new WindowsLauncherUi();
 try
 {
+    if (args is ["--check-updates"]) return WindowsReleaseUpdate.Run(ui);
     return Launcher.Run(args, ui);
 }
 catch (Exception ex)

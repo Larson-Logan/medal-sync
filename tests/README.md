@@ -33,6 +33,12 @@ its own registration, group, mutexes and synthetic readiness probe. Production
 payloads remain unchanged; no production flag bypasses readiness. Logs and a
 verification receipt stay under the ignored `.validation/` directory.
 
+These checks include the bundled uninstaller EXE/log, update shortcut, damaged
+CLI repair, program-folder guards and a readiness change before uninstall removal.
+The .NET release tests cover setup download verification, cancellation and cleanup.
+`dotnet run --project tests/integration -- --update-progress` exercises the native
+Shell progress dialog with an in-memory synthetic download and no network request.
+
 No test needs a real Medal account, database, recording or server. Real provider
 account behavior, playback in Medal, physical PCs and reboot acceptance remain
 separate from these reproducible integration checks.
