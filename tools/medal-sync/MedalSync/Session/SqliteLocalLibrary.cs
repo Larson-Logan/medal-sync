@@ -10,8 +10,8 @@ internal sealed class SqliteLocalLibrary(string databasePath, string accountId, 
 
     public LibrarySnapshot Read() => LibraryDatabase.ReadSnapshot(databasePath, AccountId);
 
-    public RestoreResult Restore(LibrarySnapshot snapshot) =>
-        LibraryRestorer.Restore(databasePath, snapshot, new RestoreOptions(AccountId, backupDirectory), clock.Now);
+    public RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false) =>
+        LibraryRestorer.Restore(databasePath, snapshot, new RestoreOptions(AccountId, backupDirectory, AllowEmptyReplacement: allowEmptyReplacement), clock.Now);
 
     public string? CaptureFolder()
     {

@@ -135,6 +135,11 @@ change retains the session and cache until a successful retry. Live
 is still supervising a session, they refuse. Wait for its result, then retry
 with Medal quit and any recovery mount/cache retained.
 
+Deleting the last clip can publish an empty shared library. Another PC may apply
+that generation over its known older committed library, keeping a rollback backup
+and its own device settings. Unshared local changes still require explicit review
+before replacement.
+
 Windows shutdown gives the existing finish worker up to 25 seconds. Incomplete
 work remains owned and resumes on the next launch. An automatic update check
 never installs during shutdown or interrupts this recovery path.

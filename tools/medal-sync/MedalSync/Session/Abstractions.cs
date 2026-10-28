@@ -30,7 +30,8 @@ internal interface ILocalLibrary
 
     LibrarySnapshot Read();
 
-    RestoreResult Restore(LibrarySnapshot snapshot);
+    /// <summary>Empty replacement requires a checked committed history or explicit replacement review.</summary>
+    RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false);
 
     /// <summary>Medal's configured capture root (<c>ClipFolder</c>), or null when unset.</summary>
     string? CaptureFolder();

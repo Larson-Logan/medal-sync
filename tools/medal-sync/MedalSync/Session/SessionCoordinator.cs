@@ -143,7 +143,10 @@ internal sealed class SessionCoordinator(
                     $"Medal was opened while the shared library was being prepared. {QuitFromTray}, then open Medal again from the medal-sync shortcut.");
             }
             RequireNoUnsharedChanges(generation);
-            restored = library.Restore(generation.Snapshot);
+            // The verified committed generation may intentionally contain no
+            // clips. The history check above (or explicit replacement review)
+            // authorizes replacing this PC's old entries, with a backup.
+            restored = library.Restore(generation.Snapshot, allowEmptyReplacement: true);
             RequireCaptureFolder();
             replication?.Prepare(generation.Snapshot);
             mount.Start(session, forRecording: true);
