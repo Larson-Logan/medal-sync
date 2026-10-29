@@ -10,7 +10,7 @@ namespace MedalSync.Cli;
 /// </summary>
 internal static class CommandRunner
 {
-    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--accept-library-changes", "--replace-local-library", "--help", "--new-library", "--spike" };
+    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--help", "--new-library", "--spike" };
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config",
@@ -52,6 +52,8 @@ internal static class CommandRunner
           launch [--replace-local-library] [--wait-for-server SECONDS] [--medal-link URL]
                                                  Start Medal through medal-sync and hand off on exit
           finish [--accept-library-changes]      Finish this PC's interrupted session
+          refresh-media --out FILE               Review conflicts in persistent local media (Medal quit)
+          refresh-media --in FILE --apply [--accept-unknown-media]  Apply the exact review, retaining previous bytes
           repair --checkpoint FILE [--apply] [--db DB]   Put back clips Medal dropped (Medal quit)
           relocate --from DIR [--config FILE] [--apply]  Move library files left outside the clip folder (Medal quit)
           promote --spike-config FILE --config FILE --server-ignore FILE [--apply]
@@ -128,6 +130,7 @@ internal static class CommandRunner
             "enroll recover" => EnrollmentCommands.Recover(args, output),
             "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown),
             "finish" => SessionCommands.Finish(args, output),
+            "refresh-media" => MediaRefreshCommands.Run(args, output),
             "abandon" => SessionCommands.Abandon(args, output),
             "relocate" => LibraryCommands.Relocate(args, output),
             "promote" => PromotionCommands.Run(args, output),

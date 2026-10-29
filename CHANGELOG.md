@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an exact preview/apply workflow for stale persistent local media. Show
+  matches to retained server history separately from unknown local changes,
+  preserve replaced bytes, and retain ownership until interrupted refreshes
+  resume and verify the whole reviewed file set.
 - Add a native configuration wizard with local/SMB storage, optional persistent
   copies and cloud replicas, exact configuration review and explicit saving.
   Existing setups retain their identity and require Ready; changes receive a
