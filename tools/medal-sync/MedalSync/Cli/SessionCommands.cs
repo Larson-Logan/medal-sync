@@ -99,11 +99,28 @@ internal static class SessionCommands
     public static int MountPlanCommand(Arguments args, TextWriter output)
     {
         args.RequireAllUsed();
-        var state = LocalState.ForCurrentUser();
+        return WriteMountPlan(LocalState.ForCurrentUser(), output);
+    }
+
+    /// <summary>
+    /// Plans with a valid sample session ID so the cache and log paths pass the
+    /// normal validation, then shows a readable placeholder. Read-only: no
+    /// device identity, session login, mount or share access.
+    /// </summary>
+    internal static int WriteMountPlan(LocalState state, TextWriter output)
+    {
+        const string placeholder = "<session>";
         var config = MedalSyncConfig.Load(state.ConfigPath);
+        string sample = new('0', 32);
+        var settings = config.MountSettings(sample, Path.Combine(state.LogDirectory, $"rclone-{sample}.log"));
+        var shown = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [settings.CacheDirectory] = settings.CacheDirectory[..^sample.Length] + placeholder,
+            [settings.LogFile] = Path.Combine(state.LogDirectory, $"rclone-{placeholder}.log"),
+        };
         output.WriteLine("Control login comes from RCLONE_RC_USER / RCLONE_RC_PASS, never the command line:");
-        output.WriteLine(string.Join(' ', MountPlan.Arguments(config.MountSettings("<session>", Path.Combine(state.LogDirectory, "rclone-<session>.log")))
-            .Select(a => a.Contains(' ', StringComparison.Ordinal) ? $"\"{a}\"" : a).Prepend(config.ExpandedRclonePath)));
+        output.WriteLine(string.Join(' ', MountPlan.Arguments(settings).Select(a => shown.GetValueOrDefault(a, a)).Prepend(config.ExpandedRclonePath)
+            .Select(a => a.Contains(' ', StringComparison.Ordinal) ? $"\"{a}\"" : a)));
         return 0;
     }
 

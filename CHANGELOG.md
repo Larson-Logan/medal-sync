@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix `mount-plan` refusing its own `<session>` placeholder. The plan is
+  validated with a sample session ID, then shown with the placeholder and a
+  quoted rclone path when it contains spaces.
 - Add a native tray status panel with supervisor progress, available upload
   counts, required replica, confirmation time and safe finish retry. Stale or
   unreachable status is explicit; closing the view leaves supervision intact.

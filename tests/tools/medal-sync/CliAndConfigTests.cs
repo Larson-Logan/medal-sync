@@ -247,6 +247,28 @@ public sealed class CliAndConfigTests : IDisposable
     }
 
     [Fact]
+    public void MountPlan_ShowsAValidatedCommandWithASessionPlaceholder()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var state = new LocalState(_fixture.PathFor("state"));
+        Directory.CreateDirectory(state.Root);
+        File.WriteAllBytes(state.ConfigPath, Json.Serialize(Config() with { RclonePath = @"C:\Program Files\rclone\rclone.exe" }));
+        var output = new StringWriter();
+
+        Assert.Equal(0, SessionCommands.WriteMountPlan(state, output));
+
+        string plan = output.ToString();
+        string log = Path.Combine(state.LogDirectory, "rclone-<session>.log");
+        Assert.Contains("\"C:\\Program Files\\rclone\\rclone.exe\" mount ", plan, StringComparison.Ordinal);
+        Assert.Contains(@" --cache-dir E:\MedalCache\0123456789abcdef0123456789abcdef\<session> ", plan, StringComparison.Ordinal);
+        Assert.Contains(" --log-file " + (log.Contains(' ', StringComparison.Ordinal) ? $"\"{log}\"" : log) + " ", plan, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('0', 32), plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("--rc-pass", plan, StringComparison.Ordinal);
+        // Read-only: no device identity, session login or log directory is created.
+        Assert.Equal(["config.json"], Directory.GetFileSystemEntries(state.Root).Select(Path.GetFileName));
+    }
+
+    [Fact]
     public void LocalState_KeepsAStableDeviceIdAndPrivateSessionLogins()
     {
         var state = new LocalState(_fixture.PathFor("state"));
