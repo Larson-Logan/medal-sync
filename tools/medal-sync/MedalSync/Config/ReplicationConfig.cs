@@ -4,7 +4,11 @@ using MedalSync.Util;
 namespace MedalSync.Config;
 
 /// <summary>A named rclone remote; credentials live only in the user's separate rclone config.</summary>
-internal sealed record ReplicaTarget(string Name, string Remote);
+internal sealed record ReplicaTarget(string Name, string Remote)
+{
+    /// <summary>Required targets block handoff until verified; others are retried later when offline or failing.</summary>
+    public bool Required { get; init; }
+}
 
 internal enum ReplicaConflictPolicy { Stop, Version }
 
@@ -34,7 +38,7 @@ internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneCo
                         yield return "localCopyRoot must not overlap the cache, coordination folder or server storage";
             }
         }
-        if (Targets.Count > 0)
+        if (Targets.Count > 0 || config.PrimaryIsRclone)
         {
             if (RcloneConfigPath is null || !WindowsPath.TryParse(Environment.ExpandEnvironmentVariables(RcloneConfigPath), out var credentials, out _)
                 || credentials.Root.StartsWith(@"\\", StringComparison.Ordinal) || credentials.Root == capture?.Root)
@@ -46,6 +50,7 @@ internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneCo
         }
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var destinations = new List<string>();
+        string? primary = config.PrimaryIsRclone ? config.Remote.TrimEnd('/') : null;
         foreach (var target in Targets)
         {
             if (target is null) { yield return "replication targets cannot contain null"; continue; }
@@ -58,6 +63,9 @@ internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneCo
                 if (destinations.Any(d => destination.Equals(d, StringComparison.OrdinalIgnoreCase)
                     || destination.StartsWith(d + "/", StringComparison.OrdinalIgnoreCase) || d.StartsWith(destination + "/", StringComparison.OrdinalIgnoreCase)))
                     yield return "replica destinations must not overlap";
+                else if (primary is not null && (destination.Equals(primary, StringComparison.OrdinalIgnoreCase)
+                    || destination.StartsWith(primary + "/", StringComparison.OrdinalIgnoreCase) || primary.StartsWith(destination + "/", StringComparison.OrdinalIgnoreCase)))
+                    yield return "replica destinations must not overlap primary storage";
                 destinations.Add(destination);
             }
         }

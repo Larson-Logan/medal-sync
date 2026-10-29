@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Allow primary media storage on a named rclone remote (OneDrive, Google Drive,
+  Dropbox, S3-compatible, or a personal server over SFTP/WebDAV) as well as an
+  SMB share. An rclone primary records to `localCopyRoot`; the ownership
+  journal stays on the server. `storage init-primary` prepares an empty primary
+  so primaries can be switched.
+- Hydrate only clips the primary holds; clips held only by this PC upload and
+  verify at finish. Launch starts offline when every clip is already local.
+- Make cloud replicas best-effort by default: an offline or failing replica is
+  recorded in `replication/pending.json` and retried on the next finish while
+  handoff continues. Set `"required": true` on a target to keep it blocking.
+- Report storage outages as a calm "Waiting for storage" state with backoff
+  retries instead of an unknown or error state. Ownership and media stay on the PC.
+
 - Add a native tray status panel with supervisor progress, available upload
   counts, required replica, confirmation time and safe finish retry. Stale or
   unreachable status is explicit; closing the view leaves supervision intact.

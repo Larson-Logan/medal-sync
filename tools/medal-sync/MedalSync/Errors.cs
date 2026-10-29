@@ -15,3 +15,12 @@ internal class UnsafeOperationException(string message) : MedalSyncException(mes
 
 /// <summary>Another PC holds the journal's writer lock for a moment; retrying shortly is safe.</summary>
 internal sealed class StorageBusyException(string message) : UnsafeOperationException(message);
+
+/// <summary>Primary storage or its journal cannot be reached right now. Media and ownership stay on this PC; retrying later is safe.</summary>
+internal sealed class StorageOfflineException(string message, Exception? inner = null) : IOException(message, inner);
+
+/// <summary>An rclone transfer, check or listing did not succeed. Never proof of success.</summary>
+internal sealed class RcloneFailedException(string message, int? exitCode = null, Exception? inner = null) : IOException(message, inner)
+{
+    public int? ExitCode { get; } = exitCode;
+}

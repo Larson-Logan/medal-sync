@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using MedalSync.Config;
 using MedalSync.Library;
 using MedalSync.Session;
@@ -7,56 +6,155 @@ using MedalSync.Util;
 
 namespace MedalSync.Platform;
 
-/// <summary>Required copies finish and pass byte verification before the coordinator releases ownership.</summary>
+/// <summary>
+/// Primary storage and required replicas pass byte verification before the coordinator releases ownership.
+/// Optional replicas that are offline or failing are recorded as pending and retried on a later finish.
+/// </summary>
 internal sealed class StorageReplication(MedalSyncConfig config, LocalState state, Action requireIdle,
-    Action<IReadOnlyList<string>>? execute = null, Action<SessionProgress>? progress = null) : IStorageReplication
+    Action<IReadOnlyList<string>>? execute = null, Action<SessionProgress>? progress = null, IAssetChecker? primary = null) : IStorageReplication
 {
     private readonly IFileProbe _probe = new FileSystemProbe();
+    private readonly IAssetChecker _primary = primary ?? PrimaryStorage.Checker(config, state);
 
     public void Prepare(LibrarySnapshot snapshot)
     {
         if (config.Replication?.LocalCopyRoot is null) return;
         requireIdle();
-        RequireMarker(config.ServerCapture);
-        string marker = config.MountedCapture.Append(MedalSyncConfig.StorageMarker).Display;
+        var local = config.MountedCapture;
         // Claim a dedicated folder only; never adopt an unrelated tree or another library.
-        if (Directory.Exists(config.MountedCapture.Display) && Directory.EnumerateFileSystemEntries(config.MountedCapture.Display).Any())
-            RequireMarker(config.MountedCapture);
-        RequireOrdinaryDirectory(config.MountedCapture);
-        var files = ReplicationPlan.Files(snapshot, config.Capture, config.ServerCapture, _probe);
-        Directory.CreateDirectory(config.MountedCapture.Display);
-        if (!File.Exists(marker)) AtomicFile.CreateNew(marker, System.Text.Encoding.UTF8.GetBytes(config.LibraryId + "\n"));
-        CopyAndCheck(config.ServerCapture.Display, config.MountedCapture.Display, files, cloud: false, replica: "Persistent local media");
+        if (Directory.Exists(local.Display) && Directory.EnumerateFileSystemEntries(local.Display).Any())
+            RequireMarker(local);
+        RequireOrdinaryDirectory(local);
+        var media = ReplicationPlan.Media(snapshot, config.Capture);
+        var missing = media.Where(m => !PresentLocally(m.Relative)).ToList();
+        try
+        {
+            RequirePrimary();
+        }
+        catch (StorageOfflineException ex)
+        {
+            if (missing.Any(m => m.Required))
+                throw new StorageOfflineException($"{missing.Count(m => m.Required)} clip file(s) must be downloaded from primary storage first, but it is offline. "
+                    + "Open Medal again once storage is reachable; nothing was changed.", ex);
+            // Every required file is already here. Record locally; primary storage is verified before handoff.
+            ClaimLocal();
+            Report(SessionPhase.Starting, "Primary storage is offline. Recording to this PC's local copy; clips upload when storage returns.", "Persistent local media");
+            return;
+        }
+        var onPrimary = media.Where(m => _primary.ExistsOnServer(CapturePath(m.Relative))).Select(m => m.Relative).ToList();
+        var nowhere = missing.Where(m => m.Required && !onPrimary.Contains(m.Relative, StringComparer.OrdinalIgnoreCase)).ToList();
+        if (nowhere.Count > 0)
+            throw new IOException($"Referenced media is missing on this PC and on primary storage, for example {nowhere[0].Relative}; replication was refused.");
+        ClaimLocal();
+        // Files only this PC holds (for example after switching primaries) are uploaded and verified at finish.
+        CopyAndCheck(config.PrimaryCapture, local.Display, onPrimary, credentials: config.PrimaryIsRclone, replica: "Persistent local media");
     }
 
-    public void Publish(LibrarySnapshot snapshot)
+    public ReplicationResult Publish(LibrarySnapshot snapshot)
     {
-        if (config.Replication is not { } replication) return;
+        if (config.Replication is not { } replication) return ReplicationResult.None;
         requireIdle();
-        RequireMarker(config.ServerCapture);
+        RequirePrimary();
         var source = config.MountedCapture;
         RequireMarker(source);
         RequireOrdinaryDirectory(source);
         var files = ReplicationPlan.Files(snapshot, config.Capture, source, _probe);
+        bool version = replication.ConflictPolicy == ReplicaConflictPolicy.Version;
         if (replication.LocalCopyRoot is not null)
-            CopyAndCheck(source.Display, config.ServerCapture.Display, files, cloud: false, versionConflicts: replication.ConflictPolicy == ReplicaConflictPolicy.Version, replica: "Primary storage");
+        {
+            try
+            {
+                CopyAndCheck(source.Display, config.PrimaryCapture, files, credentials: config.PrimaryIsRclone, versionConflicts: version, replica: "Primary storage");
+            }
+            catch (RcloneFailedException)
+            {
+                RequirePrimary(); // An outage becomes StorageOfflineException; anything else keeps the transfer failure.
+                throw;
+            }
+        }
+        List<string> verified = [], deferred = [];
         foreach (var target in replication.Targets)
         {
             requireIdle();
-            CopyAndCheck(source.Display, ReplicationPlan.Destination(target, config.LibraryId), files, cloud: true, versionConflicts: replication.ConflictPolicy == ReplicaConflictPolicy.Version, replica: target.Name);
+            try
+            {
+                CopyAndCheck(source.Display, ReplicationPlan.Destination(target, config.LibraryId), files, credentials: true, versionConflicts: version, replica: target.Name);
+                verified.Add(target.Name);
+            }
+            catch (RcloneFailedException) when (!target.Required)
+            {
+                // Primary storage already holds a verified copy. An optional provider outage never holds the library.
+                deferred.Add(target.Name);
+                Report(SessionPhase.Verifying, $"Cloud copy '{target.Name}' is unavailable; it will be retried on the next finish.", target.Name);
+            }
         }
         requireIdle();
         RequireMarker(source);
-        RequireMarker(config.ServerCapture);
+        RequirePrimary();
         Directory.CreateDirectory(Path.Combine(state.Root, "replication"));
         AtomicFile.Replace(Path.Combine(state.Root, "replication", "last-verified.json"), Json.Serialize(new
         {
             format = 1, config.LibraryId, snapshotDigest = snapshot.Digest(), verifiedAt = DateTimeOffset.UtcNow,
-            files = files.Count, localCopy = replication.LocalCopyRoot is not null, targets = replication.Targets.Select(t => t.Name).ToArray(),
+            files = files.Count, localCopy = replication.LocalCopyRoot is not null, primary = config.PrimaryCapture,
+            targets = verified.ToArray(), deferred = deferred.ToArray(),
         }));
+        RecordPending(deferred, DateTimeOffset.UtcNow);
+        return new ReplicationResult(deferred);
     }
 
-    private void CopyAndCheck(string source, string target, IReadOnlyList<string> files, bool cloud, bool versionConflicts = false, string? replica = null)
+    /// <summary>Optional replicas waiting for a retry; empty when every copy is verified.</summary>
+    internal static IReadOnlyList<PendingReplica> Pending(LocalState state, string libraryId)
+    {
+        string path = PendingPath(state);
+        if (!File.Exists(path)) return [];
+        try
+        {
+            var pending = Json.ReadFile<PendingReplicas>(path, "pending replicas");
+            return pending.Format == 1 && pending.LibraryId == libraryId && pending.Targets is not null ? pending.Targets : [];
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { return []; }
+    }
+
+    private void RecordPending(IReadOnlyList<string> deferred, DateTimeOffset now)
+    {
+        var previous = Pending(state, config.LibraryId).ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+        var targets = deferred.Select(name => new PendingReplica(name, previous.TryGetValue(name, out var old) ? old.Since : now, now)).ToArray();
+        string path = PendingPath(state);
+        if (targets.Length == 0) { File.Delete(path); return; }
+        AtomicFile.Replace(path, Json.Serialize(new PendingReplicas(1, config.LibraryId, targets)));
+    }
+
+    private static string PendingPath(LocalState state) => Path.Combine(state.Root, "replication", "pending.json");
+
+    private void RequirePrimary()
+    {
+        _primary.RequireServer();
+        if (!config.PrimaryIsRclone) RequireMarker(config.ServerCapture);
+    }
+
+    private void ClaimLocal()
+    {
+        Directory.CreateDirectory(config.MountedCapture.Display);
+        string marker = config.MountedCapture.Append(MedalSyncConfig.StorageMarker).Display;
+        if (!File.Exists(marker)) AtomicFile.CreateNew(marker, System.Text.Encoding.UTF8.GetBytes(config.LibraryId + "\n"));
+    }
+
+    private bool PresentLocally(string relative)
+    {
+        var found = _probe.Probe(config.MountedCapture.Append(relative.Split('/')), config.MountedCapture);
+        if (found.HasReparsePoint || found.IsDirectory) throw new IOException("Local media contains a link or directory in place of a clip; replication was refused.");
+        return found.Exists;
+    }
+
+    private string CapturePath(string relative) => config.Capture.Append(relative.Split('/')).Display;
+
+    private void Report(SessionPhase phase, string action, string replica)
+    {
+        try { progress?.Invoke(new(phase, action, Replica: replica)); }
+        catch (Exception) { /* UI telemetry cannot interrupt required copies. */ }
+    }
+
+    private void CopyAndCheck(string source, string target, IReadOnlyList<string> files, bool credentials, bool versionConflicts = false, string? replica = null)
     {
         requireIdle();
         if (files.Count == 0) return;
@@ -70,9 +168,9 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
                     throw new IOException("A replica destination contains a link or directory in place of media; copying was refused.");
             }
         }
-        string configFile = cloud ? Environment.ExpandEnvironmentVariables(config.Replication!.RcloneConfigPath!)
+        string configFile = credentials ? Environment.ExpandEnvironmentVariables(config.Replication!.RcloneConfigPath!)
             : Path.Combine(state.Root, "rclone-empty.conf");
-        if (cloud && !File.Exists(configFile)) throw new IOException("The configured rclone credential file is missing; configure the provider before retrying finish.");
+        if (credentials && !File.Exists(configFile)) throw new RcloneFailedException("The configured rclone credential file is missing; configure the provider before retrying finish.");
         Directory.CreateDirectory(state.Root);
         string list = Path.Combine(state.Root, "replication-" + Guid.NewGuid().ToString("N") + ".txt");
         try
@@ -87,46 +185,18 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             {
                 requireIdle();
                 try { progress?.Invoke(new(command == "copy" ? SessionPhase.Uploading : SessionPhase.Verifying,
-                    "Processing a required replica. Keep this PC on and wait for Ready.", Replica: replica)); }
+                    "Copying and verifying clips. Keep this PC on and wait for Ready.", Replica: replica)); }
                 catch (Exception) { /* UI telemetry cannot interrupt required copies. */ }
                 var arguments = ReplicationPlan.Arguments(command, source, target, list, configFile,
-                    cloud ? config.Replication?.BandwidthLimitMiB : null, versionDirectory);
+                    credentials ? config.Replication?.BandwidthLimitMiB : null, versionDirectory);
                 if (execute is not null) execute(arguments); else Execute(arguments);
             }
         }
         finally { File.Delete(list); }
     }
 
-    private void Execute(IReadOnlyList<string> arguments)
-    {
-        var start = new ProcessStartInfo(config.ExpandedRclonePath) { UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (string key in start.Environment.Keys.Where(k => k.StartsWith("RCLONE_", StringComparison.OrdinalIgnoreCase)).ToArray())
-            start.Environment.Remove(key);
-        foreach (string argument in arguments) start.ArgumentList.Add(argument);
-        Process? child;
-        try { child = Process.Start(start); }
-        catch (System.ComponentModel.Win32Exception ex) { throw new IOException("Cannot start rclone for replication. Check rclonePath and retry finish.", ex); }
-        using var process = child ?? throw new IOException("rclone replication did not start.");
-        // Drain output without retaining provider errors that could contain credentials or private filenames.
-        process.OutputDataReceived += (_, _) => { };
-        process.ErrorDataReceived += (_, _) => { };
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        var elapsed = Stopwatch.StartNew();
-        try
-        {
-            while (!process.WaitForExit(200))
-            {
-                requireIdle();
-                if (elapsed.Elapsed > TimeSpan.FromMinutes(config.Replication?.TimeoutMinutes ?? 240))
-                    throw new IOException("Replication timed out; ownership and local media are retained. Check timeoutMinutes and retry finish.");
-            }
-            requireIdle();
-            if (process.ExitCode != 0) throw new IOException($"rclone {arguments[0]} failed (exit {process.ExitCode}); check provider access, quota and conflicting files, then retry finish. Ownership and media are retained.");
-        }
-        finally { if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(); } }
-    }
+    private void Execute(IReadOnlyList<string> arguments) =>
+        new RcloneRunner(config.ExpandedRclonePath).Run(arguments, TimeSpan.FromMinutes(config.Replication?.TimeoutMinutes ?? 240), requireIdle);
 
     private void RequireMarker(WindowsPath folder)
     {

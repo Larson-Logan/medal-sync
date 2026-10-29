@@ -24,6 +24,7 @@ public sealed class DesktopStatusTests
     [InlineData((int)SessionPhase.Verifying)]
     [InlineData((int)SessionPhase.RecoveryNeeded)]
     [InlineData((int)SessionPhase.Unknown)]
+    [InlineData((int)SessionPhase.WaitingForStorage)]
     public void FakeSupervisorReportsDistinctStatesAndAvailableProgress(int value)
     {
         var phase = (SessionPhase)value;
@@ -33,6 +34,15 @@ public sealed class DesktopStatusTests
         Assert.Equal(4096, status.QueuedBytes);
         Assert.Equal("cloud-backup", status.Replica);
         Assert.Equal(Now, status.ConfirmedAt);
+        Assert.False(status.CanRetry);
+    }
+
+    [Fact]
+    public void StorageOutageIsACalmWaitNotAnError()
+    {
+        var status = DesktopStatus.StorageOffline(Now);
+        Assert.Equal(SessionPhase.WaitingForStorage, status.Phase);
+        Assert.Equal("Waiting for storage", status.Title);
         Assert.False(status.CanRetry);
     }
 
