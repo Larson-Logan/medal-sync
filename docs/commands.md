@@ -77,6 +77,7 @@ shows it too.
 | `config validate --config FILE` | Checks a configuration file's syntax and paths. It does not contact Medal or storage. |
 | `capacity --bitrate MBPS --hours H --free-gb GB [--reserve-gb GB]` | Works out whether a session of `H` hours at `MBPS` megabits per second fits in `GB` gigabytes of free space, keeping a reserve (default 20 GiB). Exit 1 means it does not fit. |
 | `mount-plan` | Prints the rclone mount command Medal Sync will use, without credentials. |
+| `storage check [--json]` | Checks every rclone remote in the configuration (an rclone primary and each cloud target): the credential file exists and opens without a prompt, and one short listing or marker read succeeds. Reports each as OK, offline, sign in again, configuration problem, folder missing, marker missing or another library, with the next step. Never writes to a destination. Exit 1 means one needs you; exit 3 means the only problem is an outage. See [check sign-in before recording](storage.md#check-sign-in-before-recording). |
 | `setup check [--state-root DIR] [--out FILE]` | Checks that programs can be installed or removed now: nothing running, no unfinished session and a Ready library. Setup runs this for you. |
 
 ## Check the library (read-only)

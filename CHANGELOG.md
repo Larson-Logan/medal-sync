@@ -11,6 +11,15 @@
   this PC's private values before it is shown. It works without configuration
   or storage, prints a preview, and saves the same summary to a new file only
   with `--out`. Nothing is uploaded.
+- Add read-only `storage check [--json]`, which checks each rclone remote's
+  sign-in before you record: the credential file opens without a prompt and
+  one short listing or marker read succeeds. Each remote is reported as OK,
+  offline, sign in again (naming the `rclone config reconnect` command),
+  configuration problem, folder missing, marker missing or another library.
+  Launch runs the same check before taking ownership; outages are ignored and
+  problems show as a notice in the status panel and `status`. Set the optional
+  `replication.credentialCheck` to `"REFUSE"` to keep Medal closed while an
+  rclone primary or required target needs attention (default `"WARN"`).
 - Limit the clip drive's upload speed with `mount.bandwidthLimitMiB` while
   Medal runs and `mount.finishBandwidthLimitMiB` after it exits (both optional,
   1 to 10000 MiB/s, unlimited by default), so uploads over a VPN do not compete
@@ -20,6 +29,11 @@
 - Releases no longer need a hand-made release or tag. Merging a version bump to
   main builds, verifies and attests that commit and creates one draft release
   targeting it. Publishing the draft creates the tag.
+- Each release has a milestone titled with its version. Merged pull requests
+  and the issues they close join the next release's milestone automatically,
+  and publishing a release closes it. A Medal Sync project board with Board,
+  Triage, Releases and Pull requests views tracks planned and active work; see
+  [maintainer triage](docs/triage.md#project-board).
 - New [command reference](docs/commands.md) and
   [configuration reference](docs/configuration.md) list every command, exit
   code, `config.json` field, default and limit in one place.
