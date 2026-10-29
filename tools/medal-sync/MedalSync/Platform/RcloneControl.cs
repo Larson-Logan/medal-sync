@@ -27,7 +27,7 @@ internal sealed class RcloneControl : IDisposable
     {
         // A caller must never turn the authenticated loopback client into an
         // arbitrary URL fetch or invoke an unrelated remote-control operation.
-        if (command is not ("core/version" or "core/quit" or "vfs/refresh" or "vfs/stats" or "vfs/queue")) return null;
+        if (command is not ("core/version" or "core/quit" or "core/bwlimit" or "vfs/refresh" or "vfs/stats" or "vfs/queue")) return null;
         try
         {
             using var cancel = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(10));

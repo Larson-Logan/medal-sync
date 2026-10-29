@@ -22,6 +22,7 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
     private Process? _process;
     private string? _session;
     private RcloneControl? _control;
+    private readonly MountUploadLimit _uploadLimit = new(config.Mount);
 
     private string DriveRoot => config.DriveRoot.Display;
 
@@ -48,7 +49,7 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
             RedirectStandardOutput = false,
             RedirectStandardError = false,
         };
-        foreach (string argument in MountPlan.Arguments(config.MountSettings(session, Path.Combine(state.LogDirectory, $"rclone-{session}.log"))))
+        foreach (string argument in MountPlan.Arguments(config.MountSettings(session, Path.Combine(state.LogDirectory, $"rclone-{session}.log"), forRecording)))
         {
             start.ArgumentList.Add(argument);
         }
@@ -64,6 +65,7 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
         start.Environment["RCLONE_CONFIG"] = Path.Combine(state.Root, "rclone-empty.conf");
         Attach(session);
         _process = Process.Start(start) ?? throw new UnsafeOperationException("rclone did not start.");
+        _uploadLimit.Started(forRecording);
         var deadline = clock.Now + StartTimeout;
         while (!(Directory.Exists(DriveRoot) && Control()?.Call("core/version") is not null))
         {
@@ -126,6 +128,8 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
         return VfsStatus.Evaluate(control.Call("vfs/stats"), control.Call("vfs/queue"), config.MountRemote);
     }
 
+    public string? UseUploadLimit(bool recording) => _uploadLimit.Apply(Control(), recording);
+
     public bool Stop()
     {
         Control()?.Call("core/quit");
@@ -180,6 +184,7 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
         _control?.Dispose();
         _control = null;
         _session = session;
+        _uploadLimit.Reset();
     }
 }
 

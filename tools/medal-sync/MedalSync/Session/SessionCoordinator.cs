@@ -556,6 +556,8 @@ internal sealed class SessionCoordinator(
             // the same cache folder resumes them.
             mount.Start(session, forRecording: false);
         }
+        // Medal has exited, so uploads no longer compete with the game. A failed switch only changes speed.
+        string limitNotice = mount.UseUploadLimit(recording: false) is { } problem ? " " + problem : "";
         var deadline = clock.Now + options.DrainTimeout;
         while (true)
         {
@@ -569,7 +571,7 @@ internal sealed class SessionCoordinator(
                 _ => SessionPhase.Uploading,
             }, verdict.State == DrainState.Unknown
                 ? "Upload status is unknown. Keep this PC on; ownership and cache are retained."
-                : "Finishing uploads to primary storage. Keep this PC on and wait for verification.", session,
+                : "Finishing uploads to primary storage. Keep this PC on and wait for verification." + limitNotice, session,
                 verdict.State == DrainState.Unknown ? null : verdict.QueuedFiles,
                 verdict.State == DrainState.Unknown ? null : verdict.QueuedBytes, "Primary storage");
             shutdown?.RequireTime();
@@ -693,6 +695,8 @@ internal sealed class SessionCoordinator(
                 if (health.Healthy)
                 {
                     consecutiveStatusFailures = 0;
+                    // Also restores the recording limit if Medal reopened while uploads were finishing.
+                    if (mount.UseUploadLimit(recording: true) is { } limitProblem) Once(limitProblem);
                     Report(SessionPhase.Active, ActiveMessage, session);
                 }
                 else

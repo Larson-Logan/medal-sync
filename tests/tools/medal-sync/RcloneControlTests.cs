@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using MedalSync.Config;
 using MedalSync.Platform;
 
 namespace MedalSync.Tests;
@@ -24,6 +25,7 @@ public sealed class RcloneControlTests
     [Theory]
     [InlineData("core/version")]
     [InlineData("core/quit")]
+    [InlineData("core/bwlimit")]
     [InlineData("vfs/refresh")]
     [InlineData("vfs/stats")]
     [InlineData("vfs/queue")]
@@ -98,6 +100,60 @@ public sealed class RcloneControlTests
     {
         using var control = new RcloneControl(53682, "synthetic", "synthetic", new Handler(_ => throw new HttpRequestException("synthetic offline")));
         Assert.Null(control.Call("vfs/stats"));
+    }
+
+    private static readonly MountConfig LimitedMount = new(5, 20, 20, 300, 30, 1000, 2, 53682) { BandwidthLimitMiB = 5 };
+
+    [Fact]
+    public void UploadLimitSwitchesOnlyWhenTheRateChanges()
+    {
+        var bodies = new List<string>();
+        using var control = new RcloneControl(53682, "synthetic", "synthetic", new Handler(request =>
+        {
+            Assert.Equal("http://127.0.0.1:53682/core/bwlimit", request.RequestUri!.AbsoluteUri);
+            bodies.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"rate\":\"ok\"}") };
+        }));
+        var limit = new MountUploadLimit(LimitedMount);
+        limit.Started(forRecording: true);
+
+        Assert.Null(limit.Apply(control, recording: true));
+        Assert.Empty(bodies);
+        Assert.Null(limit.Apply(control, recording: false));
+        Assert.Null(limit.Apply(control, recording: false));
+        Assert.Null(limit.Apply(control, recording: true));
+        Assert.Equal(["{\"rate\":\"off\"}", "{\"rate\":\"5Mi\"}"], bodies);
+
+        // Attaching to a drive started elsewhere: its rate is unknown, so it is set once.
+        limit.Reset();
+        Assert.Null(limit.Apply(control, recording: true));
+        Assert.Null(limit.Apply(control, recording: true));
+        Assert.Equal(3, bodies.Count);
+    }
+
+    [Fact]
+    public void FailedUploadLimitSwitchIsReportedAndRetriedNeverThrown()
+    {
+        int calls = 0;
+        bool fail = true;
+        using var control = new RcloneControl(53682, "synthetic", "synthetic", new Handler(_ =>
+        {
+            calls++;
+            return fail ? throw new HttpRequestException("Synthetic control failure.")
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+        }));
+        var limit = new MountUploadLimit(LimitedMount with { FinishBandwidthLimitMiB = 50 });
+        limit.Started(forRecording: true);
+
+        Assert.Contains("50 MiB/s for finishing", limit.Apply(control, recording: false), StringComparison.Ordinal);
+        Assert.Contains("could not be set", limit.Apply(null, recording: false), StringComparison.Ordinal);
+        fail = false;
+        Assert.Null(limit.Apply(control, recording: false));
+        Assert.Null(limit.Apply(control, recording: false));
+        Assert.Equal(2, calls);
+
+        fail = true;
+        Assert.Contains("5 MiB/s for recording", limit.Apply(control, recording: true), StringComparison.Ordinal);
     }
 
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

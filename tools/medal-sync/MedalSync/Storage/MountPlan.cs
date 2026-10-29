@@ -16,7 +16,11 @@ internal sealed record MountSettings(
     int Transfers,
     int ControlPort,
     string VolumeName,
-    string LogFile);
+    string LogFile)
+{
+    /// <summary>Upload limit in MiB/s, passed as <c>--bwlimit</c>. Null is unlimited.</summary>
+    public int? BandwidthLimitMiB { get; init; }
+}
 
 /// <summary>
 /// Builds the rclone mount command line. Credentials are never arguments:
@@ -28,13 +32,16 @@ internal static class MountPlan
     public const string ControlUserVariable = "RCLONE_RC_USER";
     public const string ControlPasswordVariable = "RCLONE_RC_PASS";
 
+    public const int MinimumBandwidthMiB = 1;
+    public const int MaximumBandwidthMiB = 10000;
+
     private const long MiB = 1024L * 1024;
     private const long GiB = 1024 * MiB;
 
     public static IReadOnlyList<string> Arguments(MountSettings settings)
     {
         Validate(settings);
-        return
+        List<string> arguments =
         [
             "mount", settings.Remote, $"{char.ToUpperInvariant(settings.DriveLetter)}:",
             "--vfs-cache-mode", "full",
@@ -52,7 +59,13 @@ internal static class MountPlan
             "--log-level", "INFO",
             "--no-console",
         ];
+        if (settings.BandwidthLimitMiB is not null) arguments.AddRange(["--bwlimit", Rate(settings.BandwidthLimitMiB)]);
+        return arguments;
     }
+
+    /// <summary>An upload limit as rclone reads it: whole MiB/s, or <c>off</c> for unlimited.</summary>
+    internal static string Rate(int? bandwidthMiB) =>
+        bandwidthMiB is { } limit ? limit.ToString(CultureInfo.InvariantCulture) + "Mi" : "off";
 
     public static void Validate(MountSettings settings)
     {
@@ -85,6 +98,8 @@ internal static class MountPlan
         }
         if (settings.CacheMaxBytes < GiB || settings.MinFreeBytes < GiB) problems.Add("cache size and free-space reserve must be at least 1 GiB");
         if (settings.Transfers is < 1 or > 8) problems.Add("transfers must be 1 to 8");
+        if (settings.BandwidthLimitMiB is < MinimumBandwidthMiB or > MaximumBandwidthMiB)
+            problems.Add("the upload limit must be 1 to 10000 MiB/s, or unlimited");
         if (settings.ControlPort is < 1024 or > 65535) problems.Add("the control port must be 1024 to 65535");
         if (settings.VolumeName.Length is < 1 or > 32 || !settings.VolumeName.All(c => char.IsAsciiLetterOrDigit(c) || c is ' ' or '-' or '_'))
         {

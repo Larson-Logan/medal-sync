@@ -55,6 +55,12 @@ internal interface IClipMount
 
     DrainVerdict Drain();
 
+    /// <summary>
+    /// Applies the configured upload limit for recording, or for finishing uploads after Medal exits.
+    /// Null when it is in place; otherwise a notice. Never throws: a limit only changes speed.
+    /// </summary>
+    string? UseUploadLimit(bool recording) => null;
+
     /// <summary>Stops gracefully. False when it is still running afterwards.</summary>
     bool Stop();
 
