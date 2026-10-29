@@ -10,16 +10,21 @@ namespace MedalSync.Platform;
 /// Primary storage and required replicas pass byte verification before the coordinator releases ownership.
 /// Optional replicas that are offline or failing are recorded as pending and retried on a later finish.
 /// </summary>
+/// <param name="volumes">Describes the volume behind a folder; replaced in tests.</param>
 internal sealed class StorageReplication(MedalSyncConfig config, LocalState state, Action requireIdle,
-    Action<IReadOnlyList<string>>? execute = null, Action<SessionProgress>? progress = null, IAssetChecker? primary = null) : IStorageReplication
+    Action<IReadOnlyList<string>>? execute = null, Action<SessionProgress>? progress = null, IAssetChecker? primary = null,
+    Func<string, VolumeInfo?>? volumes = null) : IStorageReplication
 {
     private readonly IFileProbe _probe = new FileSystemProbe();
     private readonly IAssetChecker _primary = primary ?? PrimaryStorage.Checker(config, state);
+    private readonly Func<string, VolumeInfo?> _volumes = volumes ?? StorageVolume.Describe;
 
     public void Prepare(LibrarySnapshot snapshot)
     {
-        if (config.Replication?.LocalCopyRoot is null) return;
+        if (config.Replication?.LocalCopyRoot is not { } localRoot) return;
         requireIdle();
+        // An unplugged disk is an outage to wait for, not a folder to create; an unsuitable one is refused before any download.
+        StorageVolume.RequireSuitable(StorageRole.Media, localRoot, StorageVolume.RequirePresent(localRoot, "persistent clip storage", _volumes));
         var local = config.MountedCapture;
         // Claim a dedicated folder only; never adopt an unrelated tree or another library.
         if (Directory.Exists(local.Display) && Directory.EnumerateFileSystemEntries(local.Display).Any())
@@ -46,6 +51,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         var nowhere = missing.Where(m => m.Required && !onPrimary.Contains(m.Relative, StringComparer.OrdinalIgnoreCase)).ToList();
         if (nowhere.Count > 0)
             throw new IOException($"Referenced media is missing on this PC and on primary storage, for example {nowhere[0].Relative}; replication was refused.");
+        RequireDownloadSpace(localRoot, onPrimary);
         ClaimLocal();
         // Files only this PC holds (for example after switching primaries) are uploaded and verified at finish.
         CopyAndCheck(config.PrimaryCapture, local.Display, onPrimary, credentials: config.PrimaryIsRclone, replica: "Persistent local media");
@@ -141,6 +147,25 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
     {
         _primary.RequireServer();
         if (!config.PrimaryIsRclone) RequireMarker(config.ServerCapture);
+    }
+
+    /// <summary>Refuses a download that would leave less than the configured free-space reserve, before any byte is copied.</summary>
+    private void RequireDownloadSpace(string localRoot, IReadOnlyList<string> downloads)
+    {
+        if (downloads.Count == 0) return;
+        long bytes = 0;
+        foreach (string relative in downloads)
+        {
+            long size = Math.Max(0, _primary.SizeOnServer(CapturePath(relative)) ?? 0);
+            bytes = bytes > long.MaxValue - size ? long.MaxValue : bytes + size;
+        }
+        if (bytes == 0) return; // Nothing measurable to budget.
+        var volume = StorageVolume.RequirePresent(config.MountedCapture.Display, "persistent clip storage", _volumes);
+        long reserve = (long)config.Mount.MinFreeGiB << 30;
+        if (bytes > volume.FreeBytes - reserve)
+            throw new UnsafeOperationException($"{downloads.Count} clip file(s) ({StorageVolume.Gb(bytes)}) must be downloaded to {localRoot}, "
+                + $"but {volume.MountPath} has {StorageVolume.Gb(volume.FreeBytes)} free and keeps a {StorageVolume.Gb(reserve)} reserve. "
+                + "Free space or choose a larger disk for localCopyRoot; nothing was downloaded.");
     }
 
     private void ClaimLocal()

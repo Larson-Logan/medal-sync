@@ -71,11 +71,19 @@ internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneCo
         }
     }
 
+    /// <summary>
+    /// A named rclone remote and a dedicated folder. Names follow rclone's own rules (letters in any
+    /// language, digits, '_', '-', '.', '+', '@' and inner spaces), but must start with a letter, digit
+    /// or '_' and have two or more characters, so a value is never read as a flag or a Windows drive
+    /// letter. The folder may start with '/' for an absolute path, as an SFTP or FTP server needs for
+    /// a folder outside the account's home directory.
+    /// </summary>
     internal static bool ValidRemote(string? remote)
     {
-        if (remote is null || !Regex.IsMatch(remote, @"\A[a-zA-Z0-9][a-zA-Z0-9_-]+:[^:]+\z") || remote.Any(char.IsControl)
+        if (remote is null || !Regex.IsMatch(remote, @"\A[\p{L}\p{N}_][\p{L}\p{N}_.+@ -]*[\p{L}\p{N}_.+@-]:[^:]+\z") || remote.Any(char.IsControl)
             || remote.Contains('\\') || remote.Contains('"')) return false;
-        string folder = remote[(remote.IndexOf(':') + 1)..];
-        return !folder.StartsWith('/') && folder.TrimEnd('/').Split('/').All(s => !string.IsNullOrWhiteSpace(s) && s is not "." and not "..");
+        string folder = remote[(remote.IndexOf(':') + 1)..].TrimEnd('/');
+        if (folder.StartsWith('/')) folder = folder[1..];
+        return folder.Length > 0 && folder.Split('/').All(s => !string.IsNullOrWhiteSpace(s) && s is not "." and not "..");
     }
 }

@@ -10,8 +10,10 @@ Each PC keeps its own Medal database, login, audio/encoder settings and identity
 ## Requirements and limits
 
 - Windows x64, PowerShell 7, Medal, rclone and WinFsp.
-- A local SSD with adequate cache and storage space. Server mode also needs an
-  SMB share reachable from each PC; local mode needs no SMB server.
+- A local SSD with adequate cache and storage space, formatted NTFS, ReFS or
+  exFAT (see [drives and file systems](storage.md#choose-drives-and-file-systems)).
+  Server mode also needs an SMB share reachable from each PC; local mode needs
+  no SMB server.
 - One Medal account and a compatible, explicitly supported database schema.
 - An independent media backup. A shared library and cache are not a backup.
 
@@ -95,7 +97,8 @@ command before running it, and ask me whenever a choice is mine.
    - SSD cache folder (for example E:\MedalCache) and, if used, the
      persistent local copy folder (for example E:\MedalLibrary). Both must
      be dedicated folders on a local SSD, outside OneDrive/Dropbox/Google
-     Drive/Syncthing folders. Offer to create them.
+     Drive/Syncthing folders, on NTFS, ReFS or exFAT (not FAT32, a RAM disk
+     or, for the cache, a network drive). Offer to create them.
    - Capture folder (default M:\Clips); confirm the drive letter is free.
    - Optional cloud copies. If I want them, have me run
      `rclone config --config "$HOME\.medal-sync\rclone.conf"` myself and
@@ -143,7 +146,9 @@ configuration file; authorize providers explicitly with `rclone config` first.
 
 Create the dedicated storage, coordination and cache folders before reviewing.
 The wizard checks path rules, Medal compatibility/account, folder availability,
-the rclone executable and the SSD free-space reserve. A new library ID must not
+the rclone executable, the provider credential file for cloud targets or an
+rclone primary, the file system and drive type of the cache and persistent
+copy, and the SSD free-space reserve on the disk that holds the cache. A new library ID must not
 already have a coordination directory. Joining checks the existing journal and
 committed generation and requires Ready. **Review** shows the resolved state
 location, identity, destinations, capture drive, cache limit/reserve, planned

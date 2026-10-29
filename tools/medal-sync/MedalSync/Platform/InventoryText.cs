@@ -42,6 +42,14 @@ internal static class InventoryText
         text.AppendLine($"Drives: {string.Join("; ", r.Drives.Select(d => $"{d.Letter} {d.Type} {d.Format} {d.FreeGb?.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) ?? "?"} GB free"))}");
         text.AppendLine($"Proposed drive {r.ProposedDrive}: {(r.ProposedDriveFree ? "free" : "IN USE")}");
         if (!r.ProposedDriveFree) blockers.Add($"{r.ProposedDrive} is already in use on this PC.");
+        foreach (var v in r.StorageVolumes ?? [])
+        {
+            text.AppendLine(v.Volume is null
+                ? $"Storage {v.Role} {v.Folder}: volume unavailable"
+                : $"Storage {v.Role} {v.Folder}: {v.FileSystem ?? "unknown file system"} {v.Kind} volume {v.Volume}, "
+                    + $"{v.FreeGb?.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) ?? "?"} GB free");
+            blockers.AddRange(v.Problems);
+        }
         if (r.Capacity is { } c)
         {
             text.AppendLine($"Cache capacity: {c.Summary}");

@@ -219,7 +219,9 @@ public sealed class ReplicationTests : IDisposable
             Assert.False(File.Exists(Path.Combine(state.Root, "replication", "last-verified.json")));
             if (arguments[0] == "copy" && arguments[1] == config.ServerCapture.Display)
                 File.Copy(Path.Combine(arguments[1], "clip.mp4"), Path.Combine(arguments[2], "clip.mp4"));
-        }, progress.Add);
+        }, progress.Add,
+            // The test machine's real free space is not under test here; StorageCompatibilityTests covers the download budget.
+            volumes: _ => new VolumeInfo(@"C:\", "NTFS:00000001", VolumeKind.Fixed, "NTFS", 1L << 40, 1L << 41));
         replication.Prepare(snapshot);
         Assert.Equal(config.LibraryId, File.ReadAllText(config.MountedCapture.Append(MedalSyncConfig.StorageMarker).Display).Trim());
         replication.Publish(snapshot);

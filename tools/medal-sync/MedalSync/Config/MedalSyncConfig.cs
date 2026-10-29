@@ -46,6 +46,10 @@ internal sealed record MedalSyncConfig(
 
     public string MountRemote => Replication?.LocalCopyRoot ?? Remote;
 
+    /// <summary>The persistent clip collection on this PC: <c>localCopyRoot</c>, or local mode's storage folder. Null when recordings only pass through the cache.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? PersistentMediaRoot => Replication?.LocalCopyRoot ?? (StorageMode == StorageMode.Local ? Remote : null);
+
     /// <summary>Server-mode primary media on a named rclone remote (cloud or personal server) instead of an SMB share.</summary>
     public bool PrimaryIsRclone => StorageMode == StorageMode.Server && ReplicationConfig.ValidRemote(Remote);
 

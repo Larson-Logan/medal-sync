@@ -81,21 +81,12 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
 
     private void Admit(string cache)
     {
-        var drive = new DriveInfo(Path.GetPathRoot(cache)!);
         long pending = Directory.Exists(cache)
             ? new DirectoryInfo(cache).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length)
             : 0;
-        var inputs = new CapacityInputs(drive.AvailableFreeSpace, (long)config.Mount.MinFreeGiB << 30,
-            bitrateMbps, TimeSpan.FromHours(config.MaxSessionHours), pending);
-        IReadOnlyList<CapacityVerdict> verdicts = [CapacityAdmission.Evaluate(inputs)];
-        string? persistent = config.Replication?.LocalCopyRoot ?? (config.StorageMode == StorageMode.Local ? config.Remote : null);
-        if (persistent is not null)
-        {
-            var local = new DriveInfo(Path.GetPathRoot(persistent)!);
-            verdicts = CapacityAdmission.WithPersistentCopy(inputs, local.AvailableFreeSpace,
-                string.Equals(local.Name, drive.Name, StringComparison.OrdinalIgnoreCase));
-        }
-        foreach (var verdict in verdicts)
+        // Measured on the volumes that really hold the folders: a drive letter can be a subst alias,
+        // and a disk can be mounted inside a folder on another drive.
+        foreach (var verdict in CapacityAdmission.ForRecording(config, cache, bitrateMbps, pending, StorageVolume.Describe))
             if (!verdict.Admitted) throw new UnsafeOperationException(verdict.Summary);
     }
 

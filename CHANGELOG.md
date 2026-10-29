@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Measure free space on the disk that actually holds the cache and persistent
+  copy, so disks mounted inside folders, `subst` letters and second letters for
+  one disk are budgeted correctly. Refuse a FAT/FAT32 cache or persistent copy
+  (files of 4 GiB or more do not fit), and a cache on a network drive, RAM disk
+  or optical drive, in the setup wizard and before recording; `inventory` lists
+  each storage disk, its file system and any problem.
+- Report an unplugged cache or persistent-copy disk as *Waiting for storage*
+  instead of an error, and refuse a first download that would leave less than
+  the minimum free space before copying anything.
+- Accept every rclone remote name rclone allows, including spaces, dots, `+`
+  and `@`, and absolute server folders such as `sftp-home:/srv/media/Medal`.
+  The setup wizard now accepts an rclone primary and checks its credential
+  file, and `inventory` no longer reports an rclone primary as unreachable.
+- Retry an atomic state-file replacement for about a second and a half when
+  an antivirus scanner, indexer or sync client briefly holds the file, on local
+  disks and SMB shares.
 - Add an optional copy-and-paste agent prompt to the setup guide. It lets a
   coding agent gather this PC's details, ask the remaining questions and
   prepare a validated `config.json`, stopping before library creation,
