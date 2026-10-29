@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `diagnostics [--out FILE]`, a privacy-safe summary to share when asking
+  for help. It reports versions, schema compatibility, installation and
+  storage mode, coarse free space, ownership state and refusal codes, built
+  only from allowlisted fields. Library IDs, PCs and cloud copies become
+  per-export tokens; paths, names, remotes, clips, configuration, credentials,
+  logs and error messages are left out, and every value is checked against
+  this PC's private values before it is shown. It works without configuration
+  or storage, prints a preview, and saves the same summary to a new file only
+  with `--out`. Nothing is uploaded.
 - Limit the clip drive's upload speed with `mount.bandwidthLimitMiB` while
   Medal runs and `mount.finishBandwidthLimitMiB` after it exits (both optional,
   1 to 10000 MiB/s, unlimited by default), so uploads over a VPN do not compete

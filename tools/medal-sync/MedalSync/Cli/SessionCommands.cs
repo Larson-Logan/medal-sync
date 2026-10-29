@@ -42,6 +42,18 @@ internal static class SessionCommands
         return 0;
     }
 
+    /// <summary>
+    /// <c>diagnostics [--out FILE]</c>: prints a privacy-safe summary for support. Only <c>--out</c> saves it, to a new
+    /// file, with exactly the bytes shown. Nothing is uploaded and no library, ownership or credential state changes.
+    /// </summary>
+    public static int Diagnostics(Arguments args, TextWriter output)
+    {
+        string? path = args.Value("--out");
+        args.RequireAllUsed();
+        string report = DiagnosticSummary.Build(DiagnosticCollector.Collect(LocalState.ForCurrentUser(), DateTimeOffset.UtcNow, AnotherInstanceRunning));
+        return DiagnosticSummary.Write(report, path, output);
+    }
+
     public static int Compatibility(Arguments args, TextWriter output)
     {
         bool json = args.Flag("--json");
