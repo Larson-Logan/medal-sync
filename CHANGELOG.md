@@ -6,6 +6,10 @@
   matches to retained server history separately from unknown local changes,
   preserve replaced bytes, and retain ownership until interrupted refreshes
   resume and verify the whole reviewed file set.
+- Add a native configuration wizard with local/SMB storage, optional persistent
+  copies and cloud replicas, exact configuration review and explicit saving.
+  Existing setups retain their identity and require Ready; changes receive a
+  verified backup and atomic replacement. Enrollment remains a separate review.
 - Fix `mount-plan` refusing its own `<session>` placeholder. The plan is
   validated with a sample session ID, then shown with the placeholder and a
   quoted rclone path when it contains spaces.

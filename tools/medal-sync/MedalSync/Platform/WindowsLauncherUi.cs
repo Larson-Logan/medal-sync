@@ -24,6 +24,8 @@ internal sealed class WindowsLauncherUi : ILauncherUi
     internal bool Confirm(string message) =>
         MessageBoxW(IntPtr.Zero, message, Title, IconInformation | YesNo | DefaultSecondButton | SetForeground) == Yes;
 
+    public bool OfferConfiguration(string message) => Confirm(message);
+
     public bool ConfirmLibraryChanges(LibraryChangeReview review)
     {
         var pages = review.Pages();

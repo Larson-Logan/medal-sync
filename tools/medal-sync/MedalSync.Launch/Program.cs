@@ -15,7 +15,8 @@ internal static class Program
         {
             if (args is ["--status"] or ["--tray"]) return WindowsTrayStatus.Run(args[0] == "--status");
             if (args is ["--check-updates"]) return WindowsReleaseUpdate.Run(ui);
-            return Launcher.Run(args, ui);
+            if (args is ["--configure"]) return WindowsConfigurationWizard.Run(LocalState.ForCurrentUser());
+            return Launcher.Run(args, ui, state => WindowsConfigurationWizard.Run(state));
         }
         catch (Exception ex)
         {

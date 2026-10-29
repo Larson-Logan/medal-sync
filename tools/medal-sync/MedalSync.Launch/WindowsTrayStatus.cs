@@ -98,6 +98,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add("&Open status", null, (_, _) => ShowPanel());
         menu.Items.Add("Setup &guide", null, (_, _) => OpenGuide());
+        menu.Items.Add("&Configure", null, (_, _) => StartLauncher("--configure"));
         menu.Items.Add("Check for &updates", null, (_, _) => StartLauncher("--check-updates"));
         menu.Items.Add("Exit status &view (supervision continues)", null, (_, _) => ExitThread());
         _icon = new NotifyIcon { Icon = SystemIcons.Application, Text = "Medal Sync: Unknown", Visible = true, ContextMenuStrip = menu };
