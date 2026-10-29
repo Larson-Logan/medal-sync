@@ -267,7 +267,7 @@ internal sealed class SessionCoordinator(
             FinishStatus.Published or FinishStatus.Unchanged => SessionPhase.Ready,
             FinishStatus.Pending => SessionPhase.Unknown,
             _ => SessionPhase.RecoveryNeeded,
-        }, outcome.Message, session);
+        }, outcome.Message, session, isOutcome: true);
         return outcome;
     }
 
@@ -619,10 +619,10 @@ internal sealed class SessionCoordinator(
     private static bool IsExpected(Exception ex) =>
         ex is MedalSyncException or IOException or InvalidDataException or UnauthorizedAccessException or DbException;
 
-    private void Report(SessionPhase phase, string action, string? session = null, int? files = null, long? bytes = null, string? replica = null)
+    private void Report(SessionPhase phase, string action, string? session = null, int? files = null, long? bytes = null, string? replica = null, bool isOutcome = false)
     {
         // A disconnected or failed view must never change ownership, uploads or recovery.
-        try { progress?.Invoke(new(phase, action, session, files, bytes, replica)); }
+        try { progress?.Invoke(new(phase, action, session, files, bytes, replica, isOutcome)); }
         catch (Exception) { /* Telemetry is advisory. */ }
     }
 

@@ -10,8 +10,31 @@ internal sealed record ProgressEnvelope(int Format, string LibraryId, string Acc
 
 internal sealed record DesktopNotice(string Message, DateTimeOffset At);
 
+internal sealed record FinishCommandResult(int ExitCode, string Output, string Error)
+{
+    public string? Failure => ExitCode == 0 ? null : !string.IsNullOrWhiteSpace(Error) ? Error.Trim()
+        : !string.IsNullOrWhiteSpace(Output) ? Output.Trim()
+        : $"Finish stopped with exit code {ExitCode}. Keep this PC's session and cache; check its logs before retrying.";
+
+    /// <summary>Drain the whole child stream while retaining at most 4096 characters of diagnostic text.</summary>
+    public static async Task<string> ReadTailAsync(TextReader reader)
+    {
+        const int limit = 4096;
+        var buffer = new char[1024];
+        string tail = "";
+        int count;
+        while ((count = await reader.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+        {
+            tail += new string(buffer, 0, count);
+            if (tail.Length > limit) tail = tail[^limit..];
+        }
+        return tail;
+    }
+}
+
 internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, DateTimeOffset? ConfirmedAt,
-    int? QueuedFiles = null, long? QueuedBytes = null, string? Replica = null, bool CanRetry = false, string? Notice = null)
+    int? QueuedFiles = null, long? QueuedBytes = null, string? Replica = null, bool CanRetry = false, string? Notice = null,
+    string? LastResult = null)
 {
     public string Title => Phase switch
     {
@@ -33,9 +56,9 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
     {
         if (!Enum.IsDefined(journal.State) || journal.State != OwnershipState.Clean
             && (journal.Owner is null || journal.SessionId is null)) return Unknown();
-        bool fresh = report is { Format: 1, Progress: not null } && report.LibraryId == journal.LibraryId
-            && report.AccountId == journal.AccountId && report.DeviceId == device.DeviceId
-            && report.ConfirmedAt <= now + TimeSpan.FromSeconds(5) && now - report.ConfirmedAt <= TimeSpan.FromSeconds(20);
+        bool matches = report is { Format: 1, Progress: not null } && report.LibraryId == journal.LibraryId
+            && report.AccountId == journal.AccountId && report.DeviceId == device.DeviceId;
+        bool fresh = matches && report!.ConfirmedAt <= now + TimeSpan.FromSeconds(5) && now - report.ConfirmedAt <= TimeSpan.FromSeconds(20);
         var progress = fresh ? report?.Progress : null;
         if (journal.Owner is { } owner && owner.DeviceId != device.DeviceId)
             return new(journal.State == OwnershipState.RecoveryRequired ? SessionPhase.RecoveryNeeded : SessionPhase.Waiting,
@@ -50,9 +73,19 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
             return new(SessionPhase.Ready, "Ready to switch PCs. You can open Medal on either PC.", now);
         }
         if (!supervisorRunning)
+        {
+            // A terminal refusal remains useful after its heartbeat expires. It is historical
+            // advice for this exact session, never live upload evidence or permission to release.
+            string? lastResult = matches && report?.Progress is { IsOutcome: true } outcome
+                && outcome.SessionId == journal.SessionId && outcome.Phase is SessionPhase.RecoveryNeeded or SessionPhase.Unknown
+                ? $"{report!.ConfirmedAt:yyyy-MM-dd HH:mm:ss} UTC: {outcome.NextAction}" : null;
             return journal.State == OwnershipState.Starting
                 ? new(SessionPhase.RecoveryNeeded, "Keep this PC's cache. Open Medal Sync on this PC to retry interrupted startup cleanup.", now)
-                : new(SessionPhase.RecoveryNeeded, "Keep this PC's cache. Quit Medal normally, then retry finish on this PC.", now, CanRetry: true);
+                : new(SessionPhase.RecoveryNeeded, lastResult is null
+                    ? "Keep this PC's cache. Quit Medal normally, then retry finish on this PC."
+                    : "Keep this PC's cache. Follow the last finish result below, then retry finish on this PC with Medal quit.", now,
+                    CanRetry: true, LastResult: lastResult);
+        }
         if (progress is null || report is null || progress.SessionId != journal.SessionId) return Unknown(report?.ConfirmedAt);
         if (!Enum.IsDefined(progress.Phase) || progress.Phase is SessionPhase.Ready or SessionPhase.Waiting) return Unknown(report.ConfirmedAt);
         return new(progress.Phase, progress.NextAction, report.ConfirmedAt, progress.QueuedFiles, progress.QueuedBytes, progress.Replica);

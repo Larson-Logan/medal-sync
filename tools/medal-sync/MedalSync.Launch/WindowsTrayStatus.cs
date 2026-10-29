@@ -21,6 +21,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private bool _finishing;
     private bool _ending;
     private readonly Func<DesktopStatus> _readStatus;
+    private readonly Func<Task<FinishCommandResult>> _runFinish;
+    private string? _finishFailure;
 
     public static int Run(bool show)
     {
@@ -48,9 +50,11 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         finally { singleton.ReleaseMutex(); }
     }
 
-    internal WindowsTrayStatus(bool show, Func<DesktopStatus>? readStatus = null, string eventName = OpenEventName)
+    internal WindowsTrayStatus(bool show, Func<DesktopStatus>? readStatus = null, string eventName = OpenEventName,
+        Func<Task<FinishCommandResult>>? runFinish = null)
     {
         _readStatus = readStatus ?? SessionCommands.ReadDesktopStatus;
+        _runFinish = runFinish ?? RunFinish;
         _open = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _panel = new StatusForm(() => _ending = true)
         {
@@ -117,6 +121,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         // At most one read: a hung SMB connection cannot accumulate workers or block the UI.
         _read ??= Task.Run(_readStatus);
         var status = _last.At(DateTimeOffset.UtcNow);
+        if (status.Phase is SessionPhase.Ready or SessionPhase.Active or SessionPhase.Waiting) _finishFailure = null;
+        string? lastResult = _finishFailure ?? status.LastResult;
         _retry.Enabled = !_finishing && status.CanRetry;
         _icon.Text = "Medal Sync: " + status.Title;
         _icon.Icon = status.Phase switch
@@ -130,6 +136,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
             + $"Queued bytes: {status.QueuedBytes?.ToString() ?? "unavailable"}\r\n"
             + $"Required replica: {status.Replica ?? "none currently reported"}\r\n"
             + $"Last confirmed: {status.ConfirmedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "never"}"
+            + (lastResult is null ? "" : $"\r\n\r\nLast finish result: {lastResult}")
             + (status.Notice is null ? "" : $"\r\n\r\nLatest notice: {status.Notice}");
         if (_status.Text != text) _status.Text = text;
     }
@@ -150,19 +157,27 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         _retry.Enabled = false;
         try
         {
-            var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "medal-sync.exe"))
-                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-            start.ArgumentList.Add("finish");
-            using var process = Process.Start(start) ?? throw new IOException("Finish did not start.");
-            // Preserve the existing single-instance and finish guards in the child. No acceptance flags.
-            await Task.WhenAll(process.StandardOutput.BaseStream.CopyToAsync(Stream.Null),
-                process.StandardError.BaseStream.CopyToAsync(Stream.Null), process.WaitForExitAsync());
+            var result = await _runFinish();
+            _finishFailure = result.Failure is { } failure ? $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}: {failure}" : null;
         }
         catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
         {
-            _last = DesktopStatus.Unknown(_last.ConfirmedAt) with { NextAction = "Could not start finish. Check the installation and retry on this PC." };
+            _finishFailure = "Could not start finish. Keep this PC's session and cache; check the installation and retry here.";
         }
         finally { _finishing = false; }
+    }
+
+    private static async Task<FinishCommandResult> RunFinish()
+    {
+        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "medal-sync.exe"))
+            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        start.ArgumentList.Add("finish");
+        using var process = Process.Start(start) ?? throw new IOException("Finish did not start.");
+        // Preserve the existing single-instance and finish guards in the child. No acceptance flags.
+        var output = FinishCommandResult.ReadTailAsync(process.StandardOutput);
+        var error = FinishCommandResult.ReadTailAsync(process.StandardError);
+        await Task.WhenAll(output, error, process.WaitForExitAsync());
+        return new(process.ExitCode, output.Result, error.Result);
     }
 
     private void OpenGuide()

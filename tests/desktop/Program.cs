@@ -22,6 +22,8 @@ internal static class Program
         DesktopStatus current = new(SessionPhase.Starting, "Synthetic startup", DateTimeOffset.UtcNow);
         bool disconnected = false;
         int reads = 0;
+        int finishes = 0;
+        FinishCommandResult finishResult = new(1, "finish: Blocked: Removed clips need review. Run audit and repair before retrying.", "");
         DesktopStatus Read()
         {
             lock (gate)
@@ -31,7 +33,8 @@ internal static class Program
                 return current;
             }
         }
-        using var view = new WindowsTrayStatus(true, Read, @"Local\MedalSync.DesktopTest." + Guid.NewGuid().ToString("N"));
+        using var view = new WindowsTrayStatus(true, Read, @"Local\MedalSync.DesktopTest." + Guid.NewGuid().ToString("N"),
+            () => { finishes++; return Task.FromResult(finishResult); });
         var panel = Field<Form>(view, "_panel");
         var status = Field<TextBox>(view, "_status");
         var retry = Field<Button>(view, "_retry");
@@ -49,6 +52,15 @@ internal static class Program
         Check(status.ReadOnly && status.TabStop && status.AccessibleName!.Contains("next action", StringComparison.Ordinal), "Status supports keyboard and accessibility APIs");
         Check(panel.CancelButton is Button, "Escape closes the panel");
         Check(icon.BalloonTipText.Length == 0, "Background status never shows a balloon");
+        lock (gate) current = new(SessionPhase.RecoveryNeeded, "Retry after recovery", DateTimeOffset.UtcNow, CanRetry: true);
+        Until(view, () => retry.Enabled);
+        retry.PerformClick();
+        Until(view, () => status.Text.Contains("Run audit and repair before retrying.", StringComparison.Ordinal) && retry.Enabled);
+        Check(finishes == 1, "A blocked finish exposes its diagnostic and required recovery action");
+        finishResult = new(0, "Ready", "");
+        retry.PerformClick();
+        Until(view, () => !status.Text.Contains("Last finish result:", StringComparison.Ordinal));
+        Check(finishes == 2, "A successful retry clears the previous refusal");
         lock (gate) disconnected = true;
         Until(view, () => status.Text.StartsWith("Unknown / unreachable", StringComparison.Ordinal) && !retry.Enabled);
         Check(status.Text.Contains("Last confirmed:", StringComparison.Ordinal), "Disconnect retains the last confirmation");

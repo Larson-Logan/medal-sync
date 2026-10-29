@@ -101,6 +101,36 @@ public sealed class DesktopStatusTests
     }
 
     [Fact]
+    public void BlockedFinishAdviceSurvivesReconnectWithoutBecomingLiveUploadEvidence()
+    {
+        var old = Report(SessionPhase.RecoveryNeeded) with
+        {
+            ConfirmedAt = Now.AddHours(-1),
+            Progress = new(SessionPhase.RecoveryNeeded, "Removed clips need review. Run audit and repair before switching.", Session, IsOutcome: true),
+        };
+        var status = DesktopStatus.Resolve(Journal, Me, old, false, Now);
+        Assert.Equal(SessionPhase.RecoveryNeeded, status.Phase);
+        Assert.Equal(Now, status.ConfirmedAt);
+        Assert.Contains("Run audit and repair", status.LastResult!, StringComparison.Ordinal);
+        Assert.Null(status.QueuedBytes);
+        Assert.Null(DesktopStatus.Resolve(Journal with { SessionId = new string('d', 32) }, Me, old, false, Now).LastResult);
+        Assert.Null(DesktopStatus.Resolve(Journal, Me, old with { AccountId = "54321" }, false, Now).LastResult);
+        Assert.Null(DesktopStatus.Resolve(Journal, Me, old with { Progress = old.Progress with { IsOutcome = false } }, false, Now).LastResult);
+    }
+
+    [Fact]
+    public async Task FinishDiagnosticsAreBoundedAndPreserveRefusalAndPendingRecoveryInstructions()
+    {
+        string tail = await FinishCommandResult.ReadTailAsync(new StringReader(new string('x', 10000) + "\nRun audit before retrying."));
+        Assert.Equal(4096, tail.Length);
+        Assert.EndsWith("Run audit before retrying.", tail, StringComparison.Ordinal);
+        Assert.Equal("Run audit and repair.", new FinishCommandResult(1, "earlier progress", " Run audit and repair. ").Failure);
+        Assert.Equal("Uploads unknown; keep this PC on.", new FinishCommandResult(3, "Uploads unknown; keep this PC on.", "").Failure);
+        Assert.Contains("exit code 2", new FinishCommandResult(2, "", "").Failure!, StringComparison.Ordinal);
+        Assert.Null(new FinishCommandResult(0, "Ready", "old warning").Failure);
+    }
+
+    [Fact]
     public void PublisherPreservesSessionAcrossReplicaReportsAndUsesOnlyPrivateTelemetry()
     {
         using var fixture = new MedalFixture();

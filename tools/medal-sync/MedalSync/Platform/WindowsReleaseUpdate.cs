@@ -81,7 +81,7 @@ internal static class WindowsReleaseUpdate
         }
     }
 
-    // Shell's native progress dialog owns its window and message pump. No UI framework or browser is bundled.
+    // Shell's native progress dialog owns its window and message pump independently of the tray view.
     [ComImport, Guid("EBBC7C04-315E-11D2-B62F-006097DF5BD4"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IProgressDialog
     {

@@ -7,7 +7,7 @@ using MedalSync.Util;
 
 namespace MedalSync.Platform;
 
-/// <summary>Plain Windows message boxes; no UI framework is bundled.</summary>
+/// <summary>Explicit Windows dialogs and passive notices for the independent status view.</summary>
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsLauncherUi : ILauncherUi
 {
