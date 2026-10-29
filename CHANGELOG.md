@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Report missing or null library IDs as invalid configuration, with a field
+  diagnostic and controlled refusal instead of an unhandled exception.
 - Fix `mount-plan` refusing its own `<session>` placeholder. The plan is
   validated with a sample session ID, then shown with the placeholder and a
   quoted rclone path when it contains spaces.
