@@ -54,7 +54,7 @@ PC to update before the next switch.
 
 | File | Contents |
 | --- | --- |
-| `config.json` | Storage, cache, replica and mount settings. See [getting started](getting-started.md) and the [storage guide](storage.md). |
+| `config.json` | Storage, cache, replica and mount settings. Every field is listed in the [configuration reference](configuration.md). |
 | `device.json` | This PC's identity and display name. Never shared. |
 | `replication/pending.json` | Optional cloud copies waiting for a retry. |
 | `desktop-status.json` | Progress the supervisor publishes for the tray. |

@@ -10,6 +10,7 @@ Switch between PCs while each keeps its own login and recording settings.
 
 [Download Windows setup](https://github.com/Larson-Logan/medal-sync/releases) ·
 [Getting started](docs/getting-started.md) · [Storage guide](docs/storage.md) ·
+[Commands](docs/commands.md) · [Configuration](docs/configuration.md) ·
 [Get help](SUPPORT.md) ·
 [Report an issue](https://github.com/Larson-Logan/medal-sync/issues/new/choose)
 
@@ -51,6 +52,8 @@ Persistent local media survives finished-session cache cleanup.
    a complete local collection; add `--cloud-remote` and `--rclone-config` for a
    provider authorized through rclone. Several providers can be configured in JSON.
    Use `--storage-mode local` for a local collection with cloud copies and no SMB.
+   The [command](docs/commands.md) and [configuration](docs/configuration.md)
+   references list every option and setting.
 4. Launch through Medal Sync. After quitting Medal, wait for **Ready** before
    switching PCs, updating or uninstalling.
 
@@ -91,8 +94,8 @@ its own registration, shortcuts and synthetic readiness probe.
 
 Builds and packages go into ignored `.medal-sync-dist/`. Windows CI validates
 pull requests and main, builds the installer, and checks native installation,
-repair and uninstall on an ephemeral runner. Release tags create drafts for
-maintainer review.
+repair and uninstall on an ephemeral runner. Merging a version bump to main
+creates a draft release for maintainer review.
 
 - [Contributing](CONTRIBUTING.md), [local development](docs/local-development.md),
   [tests](tests/README.md) and [changelog](CHANGELOG.md)
