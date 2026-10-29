@@ -35,7 +35,7 @@ internal static class CommandRunner
           audit --checkpoint FILE [--db DB]      Find clips Medal dropped since a checkpoint
           capacity --bitrate MBPS --hours H --free-gb GB [--reserve-gb GB]
           mount-plan                             Show the reviewed rclone command (no secrets)
-          status [--json]                        Who holds the shared library
+          status [--json]                        Who holds the shared library; --json is documented for scripts
           enroll --out DIRECTORY [--apply]       Preview/review a lossless union with this PC, then enroll it
           enroll recover --out DIRECTORY [--apply]  Recover an exact native-backup rollback after enrollment
 

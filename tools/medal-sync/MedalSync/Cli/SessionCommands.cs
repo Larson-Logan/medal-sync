@@ -61,16 +61,25 @@ internal static class SessionCommands
     {
         bool json = args.Flag("--json");
         args.RequireAllUsed();
-        var context = Load();
-        return WriteStatus(context.Config, context.State, context.Device, json, output);
+        // Read-only, like the tray: no Medal lookup, log file or device identity is created.
+        var state = LocalState.ForCurrentUser();
+        var config = MedalSyncConfig.Load(state.ConfigPath);
+        return WriteStatus(config, state, ExistingDeviceOrNull(state), json, output);
     }
 
+    /// <summary>A PC that never started a session has no identity yet, and so owns nothing. A damaged or copied identity still refuses.</summary>
+    private static DeviceIdentity? ExistingDeviceOrNull(LocalState state) =>
+        File.Exists(Path.Combine(state.Root, "device.json")) ? state.ExistingDevice() : null;
+
     /// <summary>
-    /// Exit 3 when the coordination root or journal cannot be reached, in both text and JSON,
+    /// Exit 3 when the coordination root or journal cannot be reached, in both text and JSON (with a JSON body),
     /// so scripts can tell an outage from a refusal. A different library or a damaged journal stays exit 1.
+    /// JSON is the versioned <see cref="StatusReport"/>; its phase follows the tray's rules.
     /// </summary>
-    internal static int WriteStatus(MedalSyncConfig config, LocalState state, DeviceIdentity device, bool json, TextWriter output)
+    internal static int WriteStatus(MedalSyncConfig config, LocalState state, DeviceIdentity? device, bool json, TextWriter output,
+        Func<bool>? supervisorRunning = null)
     {
+        var now = DateTimeOffset.UtcNow;
         CoordinationStore store;
         OwnershipRecord journal;
         try
@@ -82,16 +91,20 @@ internal static class SessionCommands
         catch (IOException)
         {
             const string waiting = "Waiting for storage: the shared library's server cannot be reached right now. Clips and any session stay on this PC.";
-            output.WriteLine(json ? JsonSerializer.Serialize(new { storage = "unreachable", message = waiting }, Json.Options) : waiting);
+            output.WriteLine(json
+                ? StatusReport.Offline(config.LibraryId, waiting, StorageReplication.Pending(state, config.LibraryId),
+                    StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now).ToJson()
+                : waiting);
             return 3;
         }
         if (json)
         {
-            output.WriteLine(JsonSerializer.Serialize(journal, Json.Options));
+            var desktop = DesktopStatus.Read(state, config.LibraryId, journal, device, (supervisorRunning ?? AnotherInstanceRunning)(), now);
+            output.WriteLine(StatusReport.Reached(config.LibraryId, journal, device, desktop, store.PendingRequests(now), store.StaleRequests(now),
+                StorageReplication.Pending(state, config.LibraryId), StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now).ToJson());
             return 0;
         }
-        output.WriteLine(StatusText.For(journal, device, Directory.Exists(config.DriveRoot.Display)));
-        var now = DateTimeOffset.UtcNow;
+        output.WriteLine(StatusText.For(journal, device ?? DesktopStatus.NoDevice, Directory.Exists(config.DriveRoot.Display)));
         foreach (var request in store.PendingRequests(now)) output.WriteLine($"Waiting to switch: {request.Device.DisplayName} since {request.RequestedAt:yyyy-MM-dd HH:mm} UTC.");
         foreach (var request in store.StaleRequests(now))
             output.WriteLine($"Old switch request from {request.Device.DisplayName} ({request.RequestedAt:yyyy-MM-dd HH:mm} UTC) is ignored; the next session removes it.");
@@ -110,19 +123,7 @@ internal static class SessionCommands
         var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
         var journal = store.ReadJournal();
         _ = store.Generations.ReadManifest(journal.CommittedGeneration);
-        ProgressEnvelope? report = null;
-        try { report = Json.ReadFile<ProgressEnvelope>(Path.Combine(state.Root, "desktop-status.json"), "Desktop progress"); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Explicit unknown below. */ }
-        var status = DesktopStatus.Resolve(journal, device, report, AnotherInstanceRunning(), DateTimeOffset.UtcNow);
-        try
-        {
-            var notice = Json.ReadFile<DesktopNotice>(Path.Combine(state.Root, "desktop-notice.json"), "Desktop notice");
-            if (DateTimeOffset.UtcNow - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
-        if (status.Notice is null && StorageReplication.Pending(state, config.LibraryId) is { Count: > 0 } pending)
-            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending and retries on the next finish." };
-        return status;
+        return DesktopStatus.Read(state, config.LibraryId, journal, device, AnotherInstanceRunning(), DateTimeOffset.UtcNow);
     }
 
     public static int MountPlanCommand(Arguments args, TextWriter output)

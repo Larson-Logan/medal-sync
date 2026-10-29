@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `status --json` now prints a documented, versioned status document (format 1)
+  instead of the raw ownership journal: the tray's phase and next step,
+  `safeToSwitch`, the journal without device IDs, switch requests with their
+  age, pending cloud copies and the last verification time. When storage is
+  unreachable it still prints this document, with exit code 3. `status` no
+  longer looks up Medal or creates this PC's identity.
 - A finish that fails at primary storage or a required replica is retried with
   backoff (30 seconds up to 10 minutes) instead of every few seconds, so a
   conflict or full quota no longer restarts copy and verification continuously.
