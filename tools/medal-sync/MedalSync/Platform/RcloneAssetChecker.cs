@@ -60,6 +60,11 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
         WindowsPath.TryParse(capturePath, out var path, out _) && path.IsWithin(config.Capture)
         && new ListingProbe(config.Capture, _listing ??= List()).Probe(path, config.Capture).Exists;
 
+    public long? SizeOnServer(string capturePath) =>
+        WindowsPath.TryParse(capturePath, out var path, out _) && path.IsWithin(config.Capture)
+        && (_listing ??= List()).TryGetValue(string.Join('/', path.Segments.Skip(config.Capture.Segments.Count)), out long bytes)
+            ? bytes : null;
+
     /// <summary>Creates the identity marker on an empty primary folder, or verifies an existing one.</summary>
     public void Initialize(bool allowExistingMedia)
     {

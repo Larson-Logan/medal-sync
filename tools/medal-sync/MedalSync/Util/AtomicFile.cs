@@ -14,13 +14,46 @@ internal static class AtomicFile
         try
         {
             WriteFlushed(temp, bytes, FileMode.CreateNew);
-            File.Move(temp, path, overwrite: true);
+            MoveOver(temp, path);
         }
         finally
         {
             TryDelete(temp);
         }
     }
+
+    /// <summary>
+    /// Renames <paramref name="source"/> over <paramref name="destination"/>. Antivirus scanners, search
+    /// indexers and backup or sync clients briefly open files on local disks and NAS shares alike, and
+    /// Windows then refuses the rename. That refusal is retried for about a second and a half; any
+    /// other failure, or one that persists, is reported unchanged.
+    /// </summary>
+    internal static void MoveOver(string source, string destination, int attempts = 8, Action<TimeSpan>? sleep = null)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(source, destination, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (attempt < attempts && IsTransientLock(ex) && File.Exists(source))
+            {
+                (sleep ?? Thread.Sleep)(TimeSpan.FromMilliseconds(50 * attempt));
+            }
+        }
+    }
+
+    /// <summary>
+    /// ERROR_ACCESS_DENIED (the destination is open without delete sharing), ERROR_SHARING_VIOLATION
+    /// or ERROR_LOCK_VIOLATION.
+    /// </summary>
+    internal static bool IsTransientLock(Exception ex) => ex switch
+    {
+        UnauthorizedAccessException => true,
+        IOException io => (io.HResult & 0xFFFF) is 32 or 33,
+        _ => false,
+    };
 
     /// <summary>Creates a new file; fails if <paramref name="path"/> already exists.</summary>
     public static void CreateNew(string path, ReadOnlySpan<byte> bytes) =>

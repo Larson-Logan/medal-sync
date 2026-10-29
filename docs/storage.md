@@ -20,6 +20,37 @@ dedicated storage root, for example `E:\MedalLibrary`; with capture folder
 either folder in a provider's desktop sync folder. Provider access uses rclone
 directly. Allow disk space for the collection, cache and new recordings.
 
+## Choose drives and file systems
+
+Free space is measured on the disk that actually holds each folder, not on its
+drive letter. A cache on a disk mounted inside a folder (for example
+`C:\Disks\Fast\MedalCache`) is measured on that disk. A `subst` letter or a
+second letter for the same disk is recognized as that disk, so a cache and
+persistent copy that share it must both fit in its free space.
+
+External USB disks work for the cache and the persistent copy. If the disk that
+holds either one is unplugged, launch reports *Waiting for storage* and changes
+nothing. Reconnect it and open Medal again.
+
+The setup wizard and launch refuse these, and `inventory` lists them as blockers:
+
+| Folder | Refused on | Why |
+| --- | --- | --- |
+| Cache | Network drive letters, RAM disks, optical drives | New recordings exist only in the cache until they upload. |
+| Persistent copy | RAM disks, optical drives | The collection must survive a restart. |
+| Cache or persistent copy | FAT or FAT32 | Files of 4 GiB or more do not fit, and long recordings can be larger. Use NTFS, ReFS or exFAT. |
+
+A persistent copy, or local mode's storage folder, may be on a mapped network
+drive, but recording then depends on that network. For a NAS, prefer server
+mode with a UNC share. Persistent copies and storage folders must not pass
+through a symbolic link, junction or folder-mounted disk; give them the disk's
+own drive letter.
+
+Before downloading clips into the persistent copy, the companion checks that
+its disk is connected and suitable and adds up the clips' size. If the download
+would leave less than the minimum free space (`mount.minFreeGiB`) on that disk,
+launch refuses and downloads nothing.
+
 ## Keep a local copy and upload to the server
 
 Add `--local-copy-root` to the configuration workflow in
@@ -69,6 +100,12 @@ folders cannot provide the ownership lock.
   --coordination-root '\\YOUR-SERVER\Data\AppData\MedalSync' `
   --out "$HOME/medal-sync-candidate.json"
 ```
+
+Remote names can be any name rclone accepts, such as `my nas` or
+`onedrive.work`. Quote a name that contains spaces on the command line. On an
+SFTP or FTP server, a folder without a leading `/` is relative to the account's
+home directory; start it with `/` for an absolute path, for example
+`sftp-home:/srv/media/Medal`.
 
 See the [cloud primary example](../tools/medal-sync/config/medal-sync.cloud.example.json).
 

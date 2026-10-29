@@ -1,3 +1,5 @@
+using MedalSync.Config;
+
 namespace MedalSync.Storage;
 
 internal sealed record CapacityInputs(long FreeBytes, long ReserveBytes, double BitrateMbps, TimeSpan MaxSession, long PendingUploadBytes);
@@ -11,6 +13,24 @@ internal sealed record CapacityVerdict(bool Admitted, long ProjectedCaptureBytes
 /// </summary>
 internal static class CapacityAdmission
 {
+    /// <summary>
+    /// Recording admission for a configuration. The cache, and any persistent clip folder, must be
+    /// connected, on a suitable volume and large enough. Volumes are compared by identity, so two
+    /// letters for one disk share one budget and a disk mounted inside a folder is measured itself.
+    /// </summary>
+    public static IReadOnlyList<CapacityVerdict> ForRecording(MedalSyncConfig config, string cacheFolder, double bitrateMbps,
+        long pendingUploadBytes, Func<string, VolumeInfo?> describe)
+    {
+        var cache = StorageVolume.RequirePresent(cacheFolder, "the SSD cache", describe);
+        StorageVolume.RequireSuitable(StorageRole.Cache, config.CacheRoot, cache);
+        var inputs = new CapacityInputs(cache.FreeBytes, (long)config.Mount.MinFreeGiB << 30, bitrateMbps,
+            TimeSpan.FromHours(config.MaxSessionHours), pendingUploadBytes);
+        if (config.PersistentMediaRoot is not { } persistent) return [Evaluate(inputs)];
+        var media = StorageVolume.RequirePresent(persistent, "persistent clip storage", describe);
+        StorageVolume.RequireSuitable(StorageRole.Media, persistent, media);
+        return WithPersistentCopy(inputs, media.FreeBytes, StorageVolume.SameVolume(cache, media));
+    }
+
     public static IReadOnlyList<CapacityVerdict> WithPersistentCopy(CapacityInputs cache, long persistentFreeBytes, bool sameVolume)
     {
         var cached = Evaluate(cache);

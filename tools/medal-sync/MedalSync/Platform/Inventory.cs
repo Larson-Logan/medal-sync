@@ -47,7 +47,8 @@ internal sealed record InventoryReport(
     IReadOnlyDictionary<string, string> Dependencies,
     IReadOnlyDictionary<string, string> Server,
     string? StateRoot = null,
-    MedalCompatibilityReport? Compatibility = null);
+    MedalCompatibilityReport? Compatibility = null,
+    IReadOnlyList<StorageVolumeSummary>? StorageVolumes = null);
 
 /// <summary>
 /// The read-only Phase 0 inventory (plan Gate A). Reads the live library inside
@@ -76,9 +77,13 @@ internal static class Inventory
         string proposed = config?.DriveRoot.Display ?? @"M:\";
         string cacheRoot = config?.CacheRoot ?? @"E:\MedalCache";
         CapacityVerdict? capacity = null;
-        if (library?.BitrateMbps is double bitrate && Path.GetPathRoot(cacheRoot) is { } cacheDrive && Directory.Exists(cacheDrive))
+        // The cache's own volume, which may be a disk mounted inside a folder rather than its drive letter.
+        VolumeInfo? cacheVolume;
+        try { cacheVolume = StorageVolume.Describe(cacheRoot); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { cacheVolume = null; }
+        if (library?.BitrateMbps is double bitrate && cacheVolume is not null)
         {
-            capacity = CapacityAdmission.Evaluate(new CapacityInputs(new DriveInfo(cacheDrive).AvailableFreeSpace,
+            capacity = CapacityAdmission.Evaluate(new CapacityInputs(cacheVolume.FreeBytes,
                 (long)(config?.Mount.MinFreeGiB ?? 20) << 30, bitrate, TimeSpan.FromHours(config?.MaxSessionHours ?? 4), 0));
         }
         string legacyProfiles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LarsonServer");
@@ -88,7 +93,7 @@ internal static class Inventory
             install?.Versions.App, install?.Versions.Recorder, install is not null && new MedalProcess(install).IsRunning(),
             library, libraryError, tree, Drives(), proposed, !Directory.Exists(proposed), capacity, StartupEntries(),
             folders, SyncthingCheck.Check(folders, exclusions), Dependencies(config), Server(config), state.Root,
-            install is null ? null : MedalCompatibility.Check(install));
+            install is null ? null : MedalCompatibility.Check(install), StorageVolume.Summaries(config));
     }
 
     private static (LibrarySummary, TreeSummary?) Library(MedalInstall install)
@@ -184,6 +189,12 @@ internal static class Inventory
             ("coordination", config.CoordinationRoot),
         })
         {
+            if (name == "remote" && config.PrimaryIsRclone)
+            {
+                // A provider folder is not a path on this PC; launch and finish contact it with the configured credentials.
+                result[name] = $"rclone remote {config.Remote}; checked at launch and finish";
+                continue;
+            }
             string? share = WindowsPath.TryParse(path, out var parsed, out _) ? parsed.Root : null;
             result[name] = Directory.Exists(path)
                 ? FreeSpace(path) is (long free, long total) ? $"reachable; {free / 1e9:0.0} GB free of {total / 1e9:0.0} GB" : "reachable"

@@ -53,6 +53,11 @@ internal sealed class ShareAssetChecker(WindowsPath capture, WindowsPath serverC
         WindowsPath.TryParse(capturePath, out var path, out _) && path.IsWithin(capture)
         && new RebasingProbe(capture, serverCapture, probe).Probe(path, capture) is { Exists: true, IsDirectory: false, HasReparsePoint: false };
 
+    public long? SizeOnServer(string capturePath) =>
+        WindowsPath.TryParse(capturePath, out var path, out _) && path.IsWithin(capture)
+        && new RebasingProbe(capture, serverCapture, probe).Probe(path, capture) is { Exists: true, IsDirectory: false, HasReparsePoint: false } found
+            ? found.Length : null;
+
     private sealed class RebasingProbe(WindowsPath from, WindowsPath to, IFileProbe inner) : IFileProbe
     {
         public FileProbeResult Probe(WindowsPath path, WindowsPath root) => inner.Probe(path.Rebase(from, to), root.Rebase(from, to));

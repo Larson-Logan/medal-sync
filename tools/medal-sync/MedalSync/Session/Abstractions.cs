@@ -75,6 +75,9 @@ internal interface IAssetChecker
     /// <summary>Whether a capture-root path (M:\Clips\...) exists on the server, bypassing the mount.</summary>
     bool ExistsOnServer(string capturePath);
 
+    /// <summary>Bytes of a capture-root file on the server, or null when it is absent or its size is unknown. Only budgets downloads.</summary>
+    long? SizeOnServer(string capturePath) => null;
+
     /// <summary>
     /// Proves the server's clip folder is reachable and is this library's, so
     /// "not on the server" means absent rather than unreachable. Throws

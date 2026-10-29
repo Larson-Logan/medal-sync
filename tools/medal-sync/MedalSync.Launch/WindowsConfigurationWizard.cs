@@ -2,6 +2,7 @@ using MedalSync.Cli;
 using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Platform;
+using MedalSync.Storage;
 
 namespace MedalSync.Launch;
 
@@ -221,13 +222,9 @@ internal sealed class WindowsConfigurationWizard : Form
         if (install.AccountId != config.AccountId) throw new IncompatibleLibraryException("The account ID does not match the signed-in Medal account. Run 'medal-sync inspect' and use that account ID.");
         MedalCompatibility.Check(install).RequireCompatible();
         if (!File.Exists(config.ExpandedRclonePath)) throw new UnsafeOperationException("The rclone executable is missing. Select the bundled rclone.exe from the installed bin directory.");
-        foreach (string folder in new[] { config.Remote, config.CoordinationRoot, config.CacheRoot }.Concat(config.Replication?.LocalCopyRoot is { } copy ? [copy] : Array.Empty<string>()))
-            if (!Directory.Exists(folder)) throw new UnsafeOperationException($"Storage folder is unavailable: '{folder}'. Create the dedicated folder or reconnect the share, then review again.");
-        string drive = Path.GetPathRoot(config.CacheRoot)!;
-        if (new DriveInfo(drive).AvailableFreeSpace < ((long)config.Mount.MinFreeGiB << 30))
-            throw new UnsafeOperationException("The cache drive is below the configured free-space reserve. Free space or select another SSD before saving.");
-        if (config.Replication?.Targets.Count > 0 && !File.Exists(Environment.ExpandEnvironmentVariables(config.Replication.RcloneConfigPath!)))
-            throw new UnsafeOperationException("The provider configuration file is missing. Authorize providers separately with 'rclone config'; keep credentials outside media and coordination folders.");
+        // Folders, disk type and free space are measured on the volumes that really hold them.
+        if (StorageReadiness.Problems(config, Directory.Exists, StorageVolume.Describe) is { Count: > 0 } problems)
+            throw new UnsafeOperationException(string.Join(" ", problems));
         if (fresh)
         {
             if (Directory.Exists(config.LibraryCoordinationDirectory)) throw new UnsafeOperationException("That library directory already exists. Join its library ID; never initialize it again.");
