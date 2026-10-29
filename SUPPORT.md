@@ -21,7 +21,15 @@ only occurs through Medal Sync.
 
 ## Share useful details safely
 
-Include the Medal Sync version or source commit, Windows build, installation
+On versions after 1.1.0, run `medal-sync diagnostics` to preview a summary of
+versions, storage mode, ownership state and refusal codes. It leaves out paths,
+names, remotes, clips, credentials and logs, and replaces library and PC IDs
+with tokens. Review the preview, then save it with
+`medal-sync diagnostics --out FILE` and attach that file to your report. See
+the [command reference](docs/commands.md) for what it contains. Nothing is
+uploaded for you.
+
+Without a summary, include the Medal Sync version or source commit, Windows build, installation
 method and storage mode. For library compatibility, include Medal app and
 recorder version numbers if available. Describe the smallest reproduction,
 expected result, actual result, and the relevant error text with synthetic
