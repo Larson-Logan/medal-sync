@@ -239,7 +239,7 @@
     "docs/storage.md": "ea48d78ef43ca39b3382f413701a29c1e5b23ebafce2b4a2bdefcaca01bcaf8f",
     "docs/triage.md": "f090035cf3bd304941a265227f1cde09ef754998f43a239e220ce9ca3a7c5b14",
     "docs/updates.md": "e15a5df0711e7b861c21a13fd2a4a6e71f512ea304b841b0fc37d4db2380b73f",
-    "global.json": "8b6b5b44c13418faabb994c91bf7a84d148d58609b42552d7d9555519590f345",
+    "global.json": "e276ea106f5350ca59f795e12e6af297f67c934177d77e7057b13483615a8adc",
     "installer/windows/medal-sync.iss": "9ee7a4db1cb9e039a03de527afd4872a9a1d45307053da2c722bfd6653c99ee5",
     "installer/windows/setup-layout.json": "a18ae27432424c680f752132cc208c20068dd2c4c6993cd44bb597f161486996",
     "installer/windows/toolchain.json": "bd6899644c4f444d48b3cf1364793398a843ff9d917af872b311ee341fe5d7e5",
