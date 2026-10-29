@@ -2,7 +2,7 @@
 
 .NET package versions, including Microsoft.Data.Sqlite, SQLitePCLRaw and xUnit,
 are pinned in project packages.lock.json files. Self-contained binary releases
-include the .NET runtime and native SQLite dependencies.
+include the .NET runtime, Windows Forms desktop runtime and native SQLite dependencies.
 
 The release also carries `DOTNET-LICENSE.txt` and `DOTNET-NOTICES.txt` copied
 from the pinned SDK distribution used to build it.

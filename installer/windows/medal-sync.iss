@@ -100,6 +100,7 @@ Source: "{#PayloadDir}\medal-sync.exe"; DestName: "medal-sync-check.exe"; Flags:
 #endif
 
 [Icons]
+Name: "{group}\Medal Sync Status"; Filename: "{app}\bin\medal-sync-launch.exe"; Parameters: "--status"; WorkingDir: "{app}\bin"
 Name: "{group}\Medal Sync Setup Guide"; Filename: "{app}\setup.html"
 Name: "{group}\Medal Sync"; Filename: "{app}\bin\medal-sync-launch.exe"; WorkingDir: "{app}\bin"
 Name: "{group}\Check for Medal Sync updates"; Filename: "{app}\bin\medal-sync-launch.exe"; Parameters: "--check-updates"; WorkingDir: "{app}\bin"

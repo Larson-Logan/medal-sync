@@ -74,6 +74,28 @@ internal static class SessionCommands
         return 0;
     }
 
+    /// <summary>Read-only status client: never creates device identity, mount credentials or a handoff request.</summary>
+    internal static DesktopStatus ReadDesktopStatus()
+    {
+        var state = LocalState.ForCurrentUser();
+        var config = MedalSyncConfig.Load(state.ConfigPath);
+        var device = state.ExistingDevice();
+        var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        var journal = store.ReadJournal();
+        _ = store.Generations.ReadManifest(journal.CommittedGeneration);
+        ProgressEnvelope? report = null;
+        try { report = Json.ReadFile<ProgressEnvelope>(Path.Combine(state.Root, "desktop-status.json"), "Desktop progress"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Explicit unknown below. */ }
+        var status = DesktopStatus.Resolve(journal, device, report, AnotherInstanceRunning(), DateTimeOffset.UtcNow);
+        try
+        {
+            var notice = Json.ReadFile<DesktopNotice>(Path.Combine(state.Root, "desktop-notice.json"), "Desktop notice");
+            if (DateTimeOffset.UtcNow - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
+        return status;
+    }
+
     public static int MountPlanCommand(Arguments args, TextWriter output)
     {
         args.RequireAllUsed();
@@ -132,6 +154,7 @@ internal static class SessionCommands
         var context = Load();
         using var instance = SingleInstance();
         shutdown ??= new SessionShutdown(new SystemClock());
+        using var status = new DesktopStatusPublisher(context.State, context.Config.LibraryId, context.Config.AccountId, context.Device.DeviceId);
         using var sessionEnd = new WindowsSessionEnd(shutdown, context.Log.Write);
         // At sign-in the network or WARP can still be starting; an unreachable
         // server after the wait is reported by the normal checks below.
@@ -141,7 +164,7 @@ internal static class SessionCommands
         }
         if (shutdown.Ending) return 3;
         GuardStartup(context);
-        var (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link);
+        var (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report);
         var journal = store.ReadJournal();
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
         var outcome = coordinator.Launch();
@@ -220,7 +243,10 @@ internal static class SessionCommands
         args.RequireAllUsed();
         var context = Load();
         using var instance = SingleInstance();
-        var (coordinator, store, mount) = Coordinator(context, accept);
+        var shutdown = new SessionShutdown(new SystemClock());
+        using var sessionEnd = new WindowsSessionEnd(shutdown, context.Log.Write);
+        using var status = new DesktopStatusPublisher(context.State, context.Config.LibraryId, context.Config.AccountId, context.Device.DeviceId);
+        var (coordinator, store, mount) = Coordinator(context, accept, shutdown: shutdown, progress: status.Report);
         var journal = store.ReadJournal();
         if (journal.Owner?.DeviceId != context.Device.DeviceId)
         {
@@ -313,7 +339,7 @@ internal static class SessionCommands
 
     private static (SessionCoordinator, CoordinationStore, RcloneClipMount) Coordinator(Context context, bool acceptChanges,
         bool replaceLocal = false, Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
-        string? launchLink = null)
+        string? launchLink = null, Action<SessionProgress>? progress = null)
     {
         var clock = new SystemClock();
         var store = CoordinationStore.Open(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, context.Config.AccountId);
@@ -342,7 +368,7 @@ internal static class SessionCommands
                 shutdown?.RequireTime();
                 if (new MedalProcess(context.Install).IsRunning())
                     throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
-            }), new MedalCompatibilityGuard(context.Install)), store, mount);
+            }, progress: progress), new MedalCompatibilityGuard(context.Install), progress), store, mount);
     }
 
     internal static string SaveReviewedChanges(string backupDirectory, LibraryChangeReview review)

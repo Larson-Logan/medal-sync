@@ -101,6 +101,34 @@ The helper saves originals before changes. Launch through the Medal Library
 shortcut so storage and ownership are checked before Medal opens. After exit,
 wait for **Ready** before switching PCs, updating or uninstalling.
 
+Open **Medal Sync Status** from the Start menu, double-click its notification-area
+icon, or run `medal-sync-launch.exe --status`. A configured desktop launch starts
+the tray view automatically. Starting, Recording / Active, Uploading, Verifying,
+Ready, Waiting for another PC, Recovery needed and Unknown / unreachable are
+distinct states. The panel shows available queued files and bytes, the current
+required replica, last confirmation time and the next action. Unavailable counts
+stay unavailable; an empty queue alone never means Ready. Ready requires the
+committed, released journal state after the supervisor's checks.
+
+The view reconnects automatically. Status older than 20 seconds, an unreadable
+journal or a lost progress feed shows Unknown; keep this PC's session and cache.
+**Retry finish** is available for this PC's interrupted finish after supervision
+has stopped. It uses the existing finish checks and never accepts library
+removals automatically. Interrupted startup cleanup instead requires reopening
+Medal Sync on this PC. A blocked finish shows its diagnostic and required recovery
+steps in **Last finish result**; follow those steps before retrying. The last
+supervisor refusal stays available when reopening status for that same session.
+Waiting for another PC does not start Medal automatically.
+
+The panel and tray menu support keyboard access and native accessibility APIs.
+Background notices are coalesced in the panel without popups or taking focus
+from games. Closing the panel hides it; **Exit status view** closes only the
+view. Supervision, Medal and rclone continue independently. Reopen status at any
+time. After Ready, exit the status view before running setup or uninstall, since
+those operations require all Medal Sync programs to be closed. Setup guidance
+and update checks are also available from the panel. Shutdown closes the view
+without interactive prompts while the supervisor keeps its existing finish budget.
+
 The desktop launcher passes `medal://` links through the same ownership and
 storage checks. A first launch opens the link as part of starting Medal; an
 already supervised session receives it immediately. An unmanaged Medal process

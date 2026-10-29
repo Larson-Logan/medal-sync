@@ -2,10 +2,12 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using MedalSync.Cli;
 using MedalSync.Library;
+using MedalSync.Config;
+using MedalSync.Util;
 
 namespace MedalSync.Platform;
 
-/// <summary>Plain Windows message boxes; no UI framework is bundled.</summary>
+/// <summary>Explicit Windows dialogs and passive notices for the independent status view.</summary>
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsLauncherUi : ILauncherUi
 {
@@ -29,9 +31,16 @@ internal sealed class WindowsLauncherUi : ILauncherUi
             MessageBoxW(IntPtr.Zero, page, "Medal - Review removed clips", IconWarning | YesNo | DefaultSecondButton) == Yes);
     }
 
-    // No SetForeground: a box that took focus could pull the user out of a full-screen game.
-    public void Notify(string message) =>
-        new Thread(() => _ = MessageBoxW(IntPtr.Zero, message, Title, IconInformation)) { IsBackground = true, Name = "medal-notice" }.Start();
+    // Passive, coalesced notices stay in the status panel. No focus, balloons or modal windows during a game.
+    public void Notify(string message)
+    {
+        try
+        {
+            var state = LocalState.ForCurrentUser();
+            AtomicFile.Replace(Path.Combine(state.Root, "desktop-notice.json"), Json.Serialize(new DesktopNotice(message, DateTimeOffset.UtcNow)));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Supervision continues. */ }
+    }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int MessageBoxW(IntPtr owner, string text, string caption, uint type);

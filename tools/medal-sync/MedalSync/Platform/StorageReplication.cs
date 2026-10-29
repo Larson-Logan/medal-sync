@@ -9,7 +9,7 @@ namespace MedalSync.Platform;
 
 /// <summary>Required copies finish and pass byte verification before the coordinator releases ownership.</summary>
 internal sealed class StorageReplication(MedalSyncConfig config, LocalState state, Action requireIdle,
-    Action<IReadOnlyList<string>>? execute = null) : IStorageReplication
+    Action<IReadOnlyList<string>>? execute = null, Action<SessionProgress>? progress = null) : IStorageReplication
 {
     private readonly IFileProbe _probe = new FileSystemProbe();
 
@@ -26,7 +26,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         var files = ReplicationPlan.Files(snapshot, config.Capture, config.ServerCapture, _probe);
         Directory.CreateDirectory(config.MountedCapture.Display);
         if (!File.Exists(marker)) AtomicFile.CreateNew(marker, System.Text.Encoding.UTF8.GetBytes(config.LibraryId + "\n"));
-        CopyAndCheck(config.ServerCapture.Display, config.MountedCapture.Display, files, cloud: false);
+        CopyAndCheck(config.ServerCapture.Display, config.MountedCapture.Display, files, cloud: false, replica: "Persistent local media");
     }
 
     public void Publish(LibrarySnapshot snapshot)
@@ -39,11 +39,11 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         RequireOrdinaryDirectory(source);
         var files = ReplicationPlan.Files(snapshot, config.Capture, source, _probe);
         if (replication.LocalCopyRoot is not null)
-            CopyAndCheck(source.Display, config.ServerCapture.Display, files, cloud: false, versionConflicts: replication.ConflictPolicy == ReplicaConflictPolicy.Version);
+            CopyAndCheck(source.Display, config.ServerCapture.Display, files, cloud: false, versionConflicts: replication.ConflictPolicy == ReplicaConflictPolicy.Version, replica: "Primary storage");
         foreach (var target in replication.Targets)
         {
             requireIdle();
-            CopyAndCheck(source.Display, ReplicationPlan.Destination(target, config.LibraryId), files, cloud: true, versionConflicts: replication.ConflictPolicy == ReplicaConflictPolicy.Version);
+            CopyAndCheck(source.Display, ReplicationPlan.Destination(target, config.LibraryId), files, cloud: true, versionConflicts: replication.ConflictPolicy == ReplicaConflictPolicy.Version, replica: target.Name);
         }
         requireIdle();
         RequireMarker(source);
@@ -56,7 +56,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         }));
     }
 
-    private void CopyAndCheck(string source, string target, IReadOnlyList<string> files, bool cloud, bool versionConflicts = false)
+    private void CopyAndCheck(string source, string target, IReadOnlyList<string> files, bool cloud, bool versionConflicts = false, string? replica = null)
     {
         requireIdle();
         if (files.Count == 0) return;
@@ -86,6 +86,9 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             foreach (string command in new[] { "copy", "check" })
             {
                 requireIdle();
+                try { progress?.Invoke(new(command == "copy" ? SessionPhase.Uploading : SessionPhase.Verifying,
+                    "Processing a required replica. Keep this PC on and wait for Ready.", Replica: replica)); }
+                catch (Exception) { /* UI telemetry cannot interrupt required copies. */ }
                 var arguments = ReplicationPlan.Arguments(command, source, target, list, configFile,
                     cloud ? config.Replication?.BandwidthLimitMiB : null, versionDirectory);
                 if (execute is not null) execute(arguments); else Execute(arguments);

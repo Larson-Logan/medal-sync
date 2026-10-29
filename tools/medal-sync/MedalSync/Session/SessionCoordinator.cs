@@ -46,13 +46,28 @@ internal sealed class SessionCoordinator(
     Func<LibraryChangeReview, bool>? reviewLibraryChanges = null,
     SessionShutdown? shutdown = null,
     IStorageReplication? replication = null,
-    ISessionCompatibility? compatibility = null)
+    ISessionCompatibility? compatibility = null,
+    Action<SessionProgress>? progress = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
 
     private DeviceIdentity Me => options.Device;
 
     public LaunchOutcome Launch()
+    {
+        Report(SessionPhase.Starting, "Preparing the shared library. Keep Medal closed until startup finishes.");
+        var outcome = LaunchCore();
+        Report(outcome.Status switch
+        {
+            LaunchStatus.Started or LaunchStatus.AlreadyRunning => SessionPhase.Active,
+            LaunchStatus.Waiting => SessionPhase.Waiting,
+            _ => SessionPhase.RecoveryNeeded,
+        }, outcome.Status is LaunchStatus.Started or LaunchStatus.AlreadyRunning
+            ? "Medal is active. Quit Medal normally from its tray icon when you want to switch PCs." : outcome.Message, outcome.Session);
+        return outcome;
+    }
+
+    private LaunchOutcome LaunchCore()
     {
         if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, "Windows is shutting down; Medal was not started.");
         var journal = store.ReadJournal();
@@ -132,6 +147,7 @@ internal sealed class SessionCoordinator(
             return new LaunchOutcome(LaunchStatus.Waiting, ex.Message);
         }
         RestoreResult restored;
+        Report(SessionPhase.Starting, "Restoring the committed library and preparing clip storage.", session);
         try
         {
             var generation = store.Generations.Read(journal.CommittedGeneration);
@@ -245,6 +261,18 @@ internal sealed class SessionCoordinator(
     /// <summary>Publishes the session after Medal has exited. Safe to call repeatedly.</summary>
     public FinishOutcome Finish(string session)
     {
+        var outcome = FinishAttempt(session);
+        Report(outcome.Status switch
+        {
+            FinishStatus.Published or FinishStatus.Unchanged => SessionPhase.Ready,
+            FinishStatus.Pending => SessionPhase.Unknown,
+            _ => SessionPhase.RecoveryNeeded,
+        }, outcome.Message, session, isOutcome: true);
+        return outcome;
+    }
+
+    private FinishOutcome FinishAttempt(string session)
+    {
         try
         {
             return FinishCore(session);
@@ -283,6 +311,7 @@ internal sealed class SessionCoordinator(
         // Uploads are allowed to drain even after an incompatible update, but
         // never publish that build's library or release its recovery cache.
         var publishVersions = compatibility?.RequirePublish() ?? options.Medal;
+        Report(SessionPhase.Verifying, "Verifying library changes, required replicas and server files. Keep this PC on.", session);
         // Without this, an unreachable server would make every file look
         // deleted on purpose and hide the damage the audit looks for.
         shutdown?.RequireTime();
@@ -322,6 +351,7 @@ internal sealed class SessionCoordinator(
         }
         shutdown?.RequireTime();
         replication?.Publish(snapshot);
+        Report(SessionPhase.Verifying, "Verifying server files, stopping the clip drive and committing the library. Wait for Ready.", session, replica: "Primary storage");
         if (Reopened(session) is { } duringReplication) return duringReplication;
         if (library.Read().Digest() != snapshot.Digest())
             return new FinishOutcome(FinishStatus.Blocked, "The library changed during replication; retry finish on this PC.", journal.CommittedGeneration);
@@ -451,6 +481,16 @@ internal sealed class SessionCoordinator(
             shutdown?.RequireTime();
             if (Reopened(session) is { } reopened) return reopened;
             var verdict = mount.Drain();
+            Report(verdict.State switch
+            {
+                DrainState.Unknown => SessionPhase.Unknown,
+                DrainState.Failed => SessionPhase.RecoveryNeeded,
+                _ => SessionPhase.Uploading,
+            }, verdict.State == DrainState.Unknown
+                ? "Upload status is unknown. Keep this PC on; ownership and cache are retained."
+                : "Finishing uploads to primary storage. Keep this PC on and wait for verification.", session,
+                verdict.State == DrainState.Unknown ? null : verdict.QueuedFiles,
+                verdict.State == DrainState.Unknown ? null : verdict.QueuedBytes, "Primary storage");
             shutdown?.RequireTime();
             switch (verdict.State)
             {
@@ -538,14 +578,17 @@ internal sealed class SessionCoordinator(
                 if (health.Healthy)
                 {
                     consecutiveStatusFailures = 0;
+                    Report(SessionPhase.Active, "Medal is active. Quit Medal normally from its tray icon when you want to switch PCs.", session);
                 }
-                else if (!health.Retryable || ++consecutiveStatusFailures >= 3)
+                else
                 {
+                    Report(health.Retryable ? SessionPhase.Unknown : SessionPhase.RecoveryNeeded,
+                        "Clip drive status could not be confirmed. Keep this PC's session and cache; check storage before switching.", session);
                     // One timed-out status request during a large file read is
                     // not proof that the clip drive has failed. Confirm repeated
                     // unknown responses before interrupting the user. Wrong
                     // storage identity and other definite failures alert at once.
-                    Once($"Clip drive problem: {health.Detail}");
+                    if (!health.Retryable || ++consecutiveStatusFailures >= 3) Once($"Clip drive problem: {health.Detail}");
                 }
             }
             Pause(options.PollInterval);
@@ -575,6 +618,13 @@ internal sealed class SessionCoordinator(
 
     private static bool IsExpected(Exception ex) =>
         ex is MedalSyncException or IOException or InvalidDataException or UnauthorizedAccessException or DbException;
+
+    private void Report(SessionPhase phase, string action, string? session = null, int? files = null, long? bytes = null, string? replica = null, bool isOutcome = false)
+    {
+        // A disconnected or failed view must never change ownership, uploads or recovery.
+        try { progress?.Invoke(new(phase, action, session, files, bytes, replica, isOutcome)); }
+        catch (Exception) { /* Telemetry is advisory. */ }
+    }
 
     internal static string NewId() => Guid.NewGuid().ToString("N");
 }

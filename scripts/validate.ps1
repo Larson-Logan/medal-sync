@@ -12,6 +12,8 @@ try {
     Invoke-Checked dotnet @('test','tests/tools/medal-sync/MedalSync.Tests.csproj','-c','Release','--no-restore','--nologo')
     Invoke-Checked dotnet @('restore','tools/medal-sync/MedalSync.Launch/MedalSync.Launch.csproj','--locked-mode')
     Invoke-Checked dotnet @('build','tools/medal-sync/MedalSync.Launch/MedalSync.Launch.csproj','-c','Release','--no-restore','--nologo')
+    Invoke-Checked dotnet @('restore','tests/desktop/MedalSync.Desktop.Tests.csproj','--locked-mode')
+    Invoke-Checked dotnet @('run','--project','tests/desktop/MedalSync.Desktop.Tests.csproj','-c','Release','--no-restore')
     Invoke-Checked dotnet @('restore','tests/integration/MedalSync.Integration.csproj','--locked-mode')
     Invoke-Checked dotnet @('build','tests/integration/MedalSync.Integration.csproj','-c','Release','--no-restore','--nologo')
     $nodeTests = @(Get-ChildItem tests/scripts/storage/medal-sync -Filter '*.test.mjs' -File | ForEach-Object FullName)
