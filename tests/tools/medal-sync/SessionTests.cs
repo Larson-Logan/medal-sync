@@ -191,6 +191,26 @@ public sealed class SessionTests : IDisposable
     }
 
     [Fact]
+    public void PendingPersistentMediaRefreshCannotBeAbortedByOrdinaryLaunchOrFinish()
+    {
+        var pc = Computer(FirstPc, "first");
+        string session = SessionCoordinator.NewId();
+        _store.Update(r => Ownership.Acquire(r, FirstPc, session, _clock.Now) with
+        {
+            Reason = MedalSync.Platform.PersistentMediaRefresh.ReasonPrefix + new string('a', 64),
+        }, TimeSpan.FromSeconds(1));
+        var before = _store.ReadJournal();
+        Assert.Equal(LaunchStatus.Blocked, pc.Coordinator.Launch().Status);
+        Assert.Equal(FinishStatus.Blocked, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(before, _store.ReadJournal());
+        Assert.Equal(0, pc.Medal.Launches);
+        Assert.Empty(pc.Mount.Starts);
+        var other = Computer(SecondPc, "second");
+        Assert.Equal(LaunchStatus.Blocked, other.Coordinator.Launch().Status);
+        Assert.Equal(before, _store.ReadJournal());
+    }
+
+    [Fact]
     public void StatusReadyIsEmittedOnlyAfterVerifiedPublicationAndRelease()
     {
         List<SessionProgress> reports = [];
