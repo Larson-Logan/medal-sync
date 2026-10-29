@@ -54,6 +54,81 @@ multiple-provider examples. SMB remains the shared ownership authority.
 Local mode keeps media and coordination on this PC, with optional cloud copies
 and no SMB dependency. It does not provide automatic handoff to another PC.
 
+## Optional: let an AI agent configure it
+
+If you use a coding agent with terminal access on this PC (for example Claude
+Code or Codex), you can paste the prompt below to have it gather the details,
+ask you the remaining questions and prepare `config.json` for you. It follows
+the same preview-then-apply rules as the manual steps in the next section. It
+stops before anything that creates or joins a library, changes Medal's startup
+entries or touches your clips, and shows you those steps to review instead.
+Prefer doing it yourself? Skip to the next section.
+
+Do not paste passwords, cloud tokens or Medal login details into the chat. The
+agent never needs them: cloud sign-in happens in rclone's own prompt, which you
+run yourself.
+
+```text
+Help me configure Medal Sync on this Windows PC. Follow
+https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md
+and docs/storage.md in the same repository. Work step by step, explain each
+command before running it, and ask me whenever a choice is mine.
+
+1. Find the CLI. Check, in order: "$env:ProgramFiles\Medal Sync\bin",
+   "$env:LOCALAPPDATA\Programs\Medal Sync\bin" and "$HOME\.medal-sync\bin".
+   Use medal-sync.exe from the first folder that has it and tell me which one.
+2. Read-only checks: run `compatibility` and `inspect --json`. Report the
+   Medal versions, whether the schema is supported, the account ID
+   (library.accountId), WinFsp status, existing capture folder and free SSD
+   space. Note the stateRoot that inspect reports. If compatibility fails,
+   stop and tell me.
+3. If config.json already exists in that state root, stop. Show me its
+   storage, cache and library settings and do not replace it.
+4. Ask me, one at a time:
+   - Storage type: server with SSD cache, server plus a persistent local
+     copy, local only, or an rclone primary (see docs/storage.md).
+   - For server modes: the SMB media share (for example
+     \\SERVER\Data\Media\Videos) and the coordination share (for example
+     \\SERVER\Data\AppData\MedalSync). Test that both paths are reachable.
+   - Whether this is a NEW library or joining an EXISTING one. If joining,
+     ask for the library ID from the other PC's config.json.
+   - SSD cache folder (for example E:\MedalCache) and, if used, the
+     persistent local copy folder (for example E:\MedalLibrary). Both must
+     be dedicated folders on a local SSD, outside OneDrive/Dropbox/Google
+     Drive/Syncthing folders. Offer to create them.
+   - Capture folder (default M:\Clips); confirm the drive letter is free.
+   - Optional cloud copies. If I want them, have me run
+     `rclone config --config "$HOME\.medal-sync\rclone.conf"` myself and
+     sign in; you only need the remote name, such as onedrive:MedalSync.
+5. Build the `config create` command with my answers and
+   --out "$HOME\medal-sync-candidate.json". Use --new-library only for a
+   genuinely new library; use --library-id ID when joining. Run it WITHOUT
+   --apply, show me the full preview and wait for my OK. Then run the same
+   command with --apply.
+6. Run `config validate --config` on the candidate and fix any reported
+   field with me. If the stateRoot from step 2 has no config.json, copy the
+   validated candidate there as config.json. Never overwrite an existing
+   config.json and never copy device.json from another PC.
+7. Run `inspect` again and summarise what is configured.
+   Then list the remaining steps from getting-started.md for me to do
+   (init preview for a new library or enroll preview for a joining PC,
+   backups, startup helper), with the exact commands. Do not run anything
+   with --apply in those steps.
+
+Rules: never run `init --apply`, `enroll --apply`, `abandon`, `repair`,
+`finish --accept-library-changes` or set-medal-startup.ps1 -Apply. Never
+force-close Medal, delete SQLite -wal/-shm files, clear the cache, reset or
+initialize an existing journal, or edit Medal's database. If any command
+refuses or reports a problem, stop, show me its exact output and explain it;
+do not work around it. Keep config files, snapshots and logs out of Git and
+synced folders, and do not print tokens or credentials.
+```
+
+The agent's result is the same `config.json` the wizard or CLI would produce,
+so the remaining steps in this guide still apply. Review its summary before
+continuing; you can always rerun `config validate` or the configuration wizard
+to check its work.
+
 ## Plan configuration before using live data
 
 Run `medal-sync-launch.exe --configure`, choose **Configure** from the status
