@@ -11,6 +11,11 @@
 - Releases no longer need a hand-made release or tag. Merging a version bump to
   main builds, verifies and attests that commit and creates one draft release
   targeting it. Publishing the draft creates the tag.
+- Each release has a milestone titled with its version. Merged pull requests
+  and the issues they close join the next release's milestone automatically,
+  and publishing a release closes it. A Medal Sync project board with Board,
+  Triage, Releases and Pull requests views tracks planned and active work; see
+  [maintainer triage](docs/triage.md#project-board).
 - New [command reference](docs/commands.md) and
   [configuration reference](docs/configuration.md) list every command, exit
   code, `config.json` field, default and limit in one place.

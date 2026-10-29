@@ -60,7 +60,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           # Files that never reach a build, test or package. Docs-only pull
           # requests skip the Windows suites; main always runs everything.
-          DOCS_ONLY: '^((README|CHANGELOG|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY|SUPPORT)\.md|docs/[^/]+\.md|tests/README\.md|\.github/(ISSUE_TEMPLATE/[^/]+|PULL_REQUEST_TEMPLATE\.md|labels\.json|release\.yml|dependabot\.yml)|public-source\.json)$'
+          DOCS_ONLY: '^((README|CHANGELOG|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY|SUPPORT)\.md|docs/[^/]+\.md|tests/README\.md|\.github/(ISSUE_TEMPLATE/[^/]+|PULL_REQUEST_TEMPLATE\.md|labels\.json|project\.json|release\.yml|dependabot\.yml)|public-source\.json)$'
         run: |
           windows=true
           if [ "$EVENT_NAME" = pull_request ]; then
