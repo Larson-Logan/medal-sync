@@ -86,6 +86,7 @@ internal static partial class DiagnosticSummary
             ["dependencies"] = Dependencies(facts, refusals),
             ["configuration"] = Configuration(facts, tokens, refusals),
             ["capacity"] = Capacity(facts, refusals),
+            ["replication"] = Replication(facts, tokens, refusals),
             ["ownership"] = Ownership(facts, tokens, refusals),
         };
         report["refusals"] = new JsonArray([.. refusals.Select(r => JsonValue.Create(r))]);
@@ -207,7 +208,6 @@ internal static partial class DiagnosticSummary
         // This PC is pc-1 so reports read the same way; another owner gets the next token.
         string thisPc = tokens.For("pc", facts.Device?.DeviceId ?? "this PC");
         if (journal.State == OwnershipState.RecoveryRequired) refusals.Add("recovery-required");
-        if (facts.PendingCloudCopies.Count > 0) refusals.Add("cloud-copy-pending");
         return new JsonObject
         {
             ["status"] = "ok",
@@ -220,6 +220,17 @@ internal static partial class DiagnosticSummary
             ["updatedAgo"] = Age(facts.Now - journal.UpdatedAt),
             ["phase"] = facts.Phase is { } phase ? Name(phase) : null,
             ["pendingSwitchRequests"] = facts.PendingSwitchRequests,
+        };
+    }
+
+    /// <summary>Read from this PC's own state, so it is reported even while the shared journal is out of reach.</summary>
+    private static JsonObject Replication(DiagnosticFacts facts, Tokens tokens, ISet<string> refusals)
+    {
+        if (facts.Config is null) return new JsonObject { ["status"] = "not-configured" };
+        if (facts.PendingCloudCopies.Count > 0) refusals.Add("cloud-copy-pending");
+        return new JsonObject
+        {
+            ["status"] = "ok",
             ["pendingCloudCopies"] = new JsonArray([.. facts.PendingCloudCopies.Select(n => JsonValue.Create(tokens.For("target", n)))]),
             ["lastVerifiedAgo"] = facts.LastVerifiedAt is { } verified ? Age(facts.Now - verified) : "never",
         };

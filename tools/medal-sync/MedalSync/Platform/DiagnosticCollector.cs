@@ -77,11 +77,11 @@ internal static class DiagnosticCollector
         {
             var volume = StorageVolume.Describe(config.CacheRoot);
             facts = facts with { CacheFreeBytes = volume?.FreeBytes, CacheTotalBytes = volume?.TotalBytes };
-            if (volume is not null && facts.BitrateMbps is { } bitrate)
+            // The same admission launch uses: the cache and any persistent clip folder, sharing one budget on one disk.
+            if (facts.BitrateMbps is { } bitrate)
                 facts = facts with
                 {
-                    SessionFits = CapacityAdmission.Evaluate(new CapacityInputs(volume.FreeBytes, (long)config.Mount.MinFreeGiB << 30, bitrate,
-                        TimeSpan.FromHours(config.MaxSessionHours), 0)).Admitted,
+                    SessionFits = CapacityAdmission.ForRecording(config, config.CacheRoot, bitrate, 0, StorageVolume.Describe).All(v => v.Admitted),
                 };
         }
         catch (Exception ex) when (Expected(ex)) { facts = facts with { CapacityError = ex }; }

@@ -114,8 +114,8 @@ public sealed class DiagnosticSummaryTests : IDisposable
         Assert.Equal("pc-2", (string)ownership["owner"]!);
         Assert.Equal(41, (long)ownership["committedGeneration"]!);
         Assert.Equal("under 1 day", (string)ownership["updatedAgo"]!);
-        Assert.Equal(["target-1"], ownership["pendingCloudCopies"]!.AsArray().Select(t => (string)t!));
-        Assert.Equal("under 7 days", (string)ownership["lastVerifiedAgo"]!);
+        Assert.Equal(["target-1"], report["replication"]!["pendingCloudCopies"]!.AsArray().Select(t => (string)t!));
+        Assert.Equal("under 7 days", (string)report["replication"]!["lastVerifiedAgo"]!);
         Assert.Equal(["cloud-copy-pending", "recovery-required"], report["refusals"]!.AsArray().Select(r => (string)r!));
     }
 
@@ -140,6 +140,7 @@ public sealed class DiagnosticSummaryTests : IDisposable
         Assert.Equal("unavailable: InvalidDataException", (string)report["medalSync"]!["installation"]!);
         Assert.Equal("unavailable: IOException", (string)report["medal"]!["status"]!);
         Assert.Equal("unavailable: InvalidDataException", (string)report["configuration"]!["status"]!);
+        Assert.Equal("not-configured", (string)report["replication"]!["status"]!);
         Assert.Equal("unavailable: IOException", (string)report["capacity"]!["status"]!);
         Assert.Contains("configuration-invalid", report["refusals"]!.AsArray().Select(r => (string)r!));
     }
@@ -164,6 +165,10 @@ public sealed class DiagnosticSummaryTests : IDisposable
         AssertNoCanary(text);
         Assert.Equal("unreachable", (string)report["ownership"]!["status"]!);
         Assert.Contains("storage-offline", report["refusals"]!.AsArray().Select(r => (string)r!));
+        // Pending copies come from this PC's own state, so an outage does not hide them.
+        Assert.Equal(["target-1"], report["replication"]!["pendingCloudCopies"]!.AsArray().Select(t => (string)t!));
+        Assert.Equal("under 7 days", (string)report["replication"]!["lastVerifiedAgo"]!);
+        Assert.Contains("cloud-copy-pending", report["refusals"]!.AsArray().Select(r => (string)r!));
     }
 
     [Fact]
