@@ -20,6 +20,8 @@
   handoff continues. Set `"required": true` on a target to keep it blocking.
 - Report storage outages as a calm "Waiting for storage" state with backoff
   retries instead of an unknown or error state. Ownership and media stay on the PC.
+- Report missing or null library IDs as invalid configuration, with a field
+  diagnostic and controlled refusal instead of an unhandled exception.
 - Add an exact preview/apply workflow for stale persistent local media. Show
   matches to retained server history separately from unknown local changes,
   preserve replaced bytes, and retain ownership until interrupted refreshes

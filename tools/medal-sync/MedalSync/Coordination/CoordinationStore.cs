@@ -46,7 +46,7 @@ internal sealed partial class CoordinationStore
 
     private string RequestsPath => Path.Combine(Root, "requests");
 
-    public static bool IsValidId(string value) => IdPattern().IsMatch(value);
+    public static bool IsValidId(string? value) => value is not null && IdPattern().IsMatch(value);
 
     /// <summary>False when the journal cannot be seen, which distinguishes an outage from a refusal.</summary>
     public bool IsReachable()
