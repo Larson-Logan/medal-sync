@@ -19,7 +19,11 @@ Follow [security reporting](SECURITY.md) for vulnerabilities and the
 
 Use Windows, PowerShell 7, the .NET SDK pinned in global.json, Node 24 and
 Python 3.11+. Fork the repository if you do not have write access, clone your
-fork, and create a branch from current `main`. Use one branch per focused change.
+fork, and create a branch from current `dev`. Use one branch per focused change.
+
+`dev` is the default branch, where all work lands first; it may be briefly
+broken. `main` only receives tested promotions from `dev`, always works, and is
+the only branch releases are built from. See [branches](docs/releases.md#branches).
 See the [test guide](tests/README.md) for the source layout and individual suites.
 
 Tests require no account, server, credentials or recordings. Fixtures are
@@ -30,7 +34,8 @@ Personal assistant settings stay local; see
 ## Validate your change
 
 After adding, removing or renaming files, refresh the public source inventory.
-It lists file names only, so edits to existing files never change it:
+It lists each file with the Windows CI suites that file affects, so edits to
+existing files never change it:
 
 ```powershell
 python scripts/update-source-manifest.py
@@ -38,8 +43,11 @@ pwsh -File scripts/validate.ps1
 ```
 
 The generator runs source hygiene first and includes only Git-visible files.
-Validation checks the inventory, synthetic tests, builds and local file
-links. Personal configuration and runtime files remain excluded. Inspect
+CI reads the inventory to run only the suites a pull request into `dev` can
+affect; to see which ones your branch needs, run
+`python scripts/update-source-manifest.py --affected origin/dev`. A file no
+rule names needs every suite. Validation checks the inventory, synthetic tests,
+builds and local file links. Personal configuration and runtime files remain excluded. Inspect
 `git diff` and `git status --short` before sharing changes.
 
 For documentation and GitHub-template changes, these focused checks are enough;
@@ -78,11 +86,11 @@ establish real reboot, playback, provider sign-in or two-PC acceptance.
 
 ## Open and review a pull request
 
-Target `main` and use a title that describes the resulting behavior. Explain
+Target `dev` and use a title that describes the resulting behavior. Explain
 the problem, link related issues and list the commands and results you checked.
-Use `Closes #123` only when the change fully resolves that issue; merged pull
-requests and the issues they close join the next release's milestone
-automatically, and maintainers handle milestones and the
+Use `Closes #123` only when the change fully resolves that issue; pull
+requests merged to `dev` and the issues they close join the next release's
+milestone automatically, and maintainers handle milestones and the
 [project board](docs/triage.md#project-board). Explain
 failure and recovery behavior for stateful changes, and any compatibility or
 upgrade effects. Small documentation fixes do not need invented runtime tests.

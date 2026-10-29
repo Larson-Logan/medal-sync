@@ -27,23 +27,47 @@ with the [standalone suite](../tests/README.md) before merging it.
 
 ## Branches, tags and Actions
 
-The main ruleset must explicitly select `~DEFAULT_BRANCH`, refuse deletion and
-force pushes, require a pull request with resolved review threads, and require
-the `validate` check from GitHub Actions with the branch up to date. `validate`
-summarizes the other jobs: it passes only when every suite passed, or when a
-documentation-only pull request skipped the Windows suites. A ruleset
-whose include list is empty does not protect main. The solo-maintainer policy
-requires zero approving reviews; this does not establish independent review.
+The rulesets live in [.github/rulesets](../.github/rulesets) and are applied
+by a repository administrator with the GitHub CLI. The script creates `dev` if
+needed, creates or updates each ruleset by name, keeps merge commits enabled
+and makes `dev` the default branch:
 
-Repository administrators have an emergency bypass through pull requests only.
-Use it only after reviewing the exact revision, recording local validation and
-explaining any unavailable required check in the PR. A queued, skipped or failed
-job never counts as a passing check. Ordinary direct pushes cannot use this
-bypass. Keep the bypass limited to repository administrators.
+```powershell
+pwsh -File scripts/setup-github-rulesets.ps1
+```
 
-Restrict creation, updates and deletion of `refs/tags/v*` to repository
-administrators. Preserve published version tags and assets; publish a new version
-to correct an existing release. Follow the [release process](releases.md).
+It warns about any other ruleset, which still applies on top of these; review
+and delete it, or run again with `-RemoveOthers`. Repository checks fail when a
+ruleset requires a check that no validation job reports, or selects its
+branches implicitly.
+
+- **main** selects `refs/heads/main` by name. `~DEFAULT_BRANCH` now means
+  `dev`, so a main ruleset written that way would protect the wrong branch. It
+  refuses deletion and force pushes, requires a pull request with resolved
+  review threads and merge commits only, and requires the `validate` check from
+  GitHub Actions. Validation fails any pull request into `main` whose head is
+  not this repository's `dev`, and runs every suite for it. `validate`
+  summarizes the other jobs: it passes only when every suite passed, or was
+  skipped because the source inventory showed the change cannot affect it.
+  Branches need not be up to date first: only `dev` merges into `main`, and
+  validation tests the merge result.
+- **dev** selects `refs/heads/dev`. It refuses deletion, so merging a
+  promotion never removes it, and force pushes. It requires a pull request and
+  `Repository checks`, so the source and history privacy audit passes before
+  anything reaches `dev`. Build and test failures may merge; fix them before
+  promoting.
+
+The solo-maintainer policy requires zero approving reviews; this does not
+establish independent review. Repository administrators have an emergency
+bypass through pull requests only. Use it only after reviewing the exact
+revision, recording local validation and explaining any unavailable required
+check in the PR. A queued, skipped or failed job never counts as a passing
+check. Ordinary direct pushes cannot use this bypass. Keep the bypass limited
+to repository administrators.
+
+The **release tags** ruleset restricts creation, updates and deletion of
+`refs/tags/v*` to repository administrators. Preserve published version tags
+and assets; publish a new version to correct an existing release. Follow the [release process](releases.md).
 
 Require full commit SHA pins for Actions. Allow `actions/*` and
 `github/codeql-action/*`; review an action's source and requested permissions

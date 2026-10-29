@@ -2,7 +2,8 @@ name: Release Medal Sync
 # Runs on standard GitHub-hosted runners, which are free for this public
 # repository. Release builds deliberately use no caches.
 #
-# Merging a version bump to main builds and verifies that commit, then creates
+# Releases are built only from main, which only accepts promotions from dev.
+# Promoting a version bump to main builds and verifies that commit, then creates
 # a draft release targeting it. Publishing the draft creates the v* tag as the
 # maintainer, so the admin-only tag ruleset stays in force.
 on:
