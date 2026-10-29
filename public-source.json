@@ -203,7 +203,7 @@
     ".github/workflows/release.yml": "eaeb039b73c22df51ca6b8527fba9205771dcac8c68687a3290f471a45b6c2c7",
     ".github/workflows/validate.yml": "0cdcbf8c1f1eeb8e83b0df55920859d87b8f083c207c0ee7abfd28017abb26b4",
     ".gitignore": "7a7cbc086acddefa589b612c84a26f234fbab93f42d497905abe1ce9cfefc7f5",
-    "CHANGELOG.md": "7bd64fcf1bf1e230bc6c70232965fb02d806e913dc96a953665e9ad8d20c66a9",
+    "CHANGELOG.md": "9c5e10922d7b987142ba43e516f7e42fc4342ea37c0a4aeae0eec1f223c28ed7",
     "CODE_OF_CONDUCT.md": "7d291ae9e107ec62f51d63f856a9d790a394a4c3d5459fc0317415fa18c95684",
     "CONTRIBUTING.md": "63d61c1894a215ab05cfecf76a2623bf2abdffebd577ebc7a91adfff9be1475b",
     "Directory.Build.props": "2e69afd4faa80b93021e5f59d9410c61577081451e6e1764e6720e2b839b8356",
