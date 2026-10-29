@@ -231,9 +231,27 @@ are reused. Verification starts again to prove the current destination state.
 Primary storage and targets marked `"required": true` must verify before
 handoff. A network error, full quota, failed verification, conflicting
 destination file or expired shutdown budget there leaves ownership and local
-media on this PC. Quit Medal normally and retry `finish` when the cause is
-resolved. The last verification receipt is `replication/last-verified.json`
-under the configured state root; it lists verified and deferred targets.
+media on this PC. The supervisor tries again on its own, waiting longer after
+each failed attempt: from 30 seconds up to 5 minutes while storage cannot be
+reached, and up to 10 minutes after any other failure, because each attempt
+copies and verifies again from scratch. A failure that waiting cannot fix shows
+as *Action needed* (status *Recovery needed*) with its cause and next step:
+
+- **Sign-in rejected** (an expired or revoked token): run
+  `rclone config reconnect "REMOTE:" --config "CREDENTIAL FILE"` on this PC.
+- **Credential file missing** at the configured `rcloneConfigPath`, or a
+  configuration rclone cannot open (for example one that asks for a password,
+  or does not define the remote).
+- **Conflicting destination file** with the default `"STOP"` policy.
+- **Out of space or quota** at the destination.
+- **Verification found missing or different files** at the destination.
+
+Fix the cause and the next automatic attempt finishes the handoff. After a
+restart, open Medal through Medal Sync again to resume the finish. rclone's
+error text is never stored or shown, since it can contain credentials or private
+file names; only the kind of problem is kept. The last verification receipt is
+`replication/last-verified.json` under the configured state root; it lists
+verified and deferred targets.
 
 ### Offline storage
 
@@ -254,7 +272,10 @@ Remote outages are waits, not errors:
 - **At launch.** With a persistent local copy that already holds every
   referenced clip, Medal starts and records locally while the primary is
   offline. If clips must be downloaded first, or the server journal is
-  unreachable, launch waits (exit code 3) and changes nothing.
+  unreachable, launch waits (exit code 3) and changes nothing. If the primary
+  instead rejects sign-in or its credential file is missing, Medal still starts
+  when nothing must be downloaded, and a notice in the status panel says the
+  handoff cannot finish until that is fixed.
 
 The copier adds files and refuses conflicting replacements. It does not
 propagate deletions or remove older replica files. Removing a clip from Medal

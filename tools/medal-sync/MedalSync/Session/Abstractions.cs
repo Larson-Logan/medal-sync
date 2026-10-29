@@ -96,7 +96,8 @@ internal interface IClock
 /// <summary>Hydrates persistent local media and verifies primary storage and required replicas before handoff.</summary>
 internal interface IStorageReplication
 {
-    void Prepare(LibrarySnapshot snapshot);
+    /// <summary>Null when ready; otherwise a warning that recording can go ahead locally but the handoff cannot finish until the user fixes something.</summary>
+    string? Prepare(LibrarySnapshot snapshot);
 
     /// <summary>Throws while primary storage or a required replica is unverified; names optional replicas left for a retry.</summary>
     ReplicationResult Publish(LibrarySnapshot snapshot);

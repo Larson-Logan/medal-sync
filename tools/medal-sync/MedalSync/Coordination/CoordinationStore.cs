@@ -13,6 +13,9 @@ internal sealed record LibraryIdentity(int Format, string LibraryId, string Acco
 internal sealed record HandoffRequest(int Format, DeviceIdentity Device, string RequestId, DateTimeOffset RequestedAt)
 {
     public const int CurrentFormat = 1;
+
+    /// <summary>After this, a request no longer prompts the owner: the PC that asked stopped waiting long ago, or no longer exists.</summary>
+    public static readonly TimeSpan Lifetime = TimeSpan.FromHours(6);
 }
 
 /// <summary>
@@ -163,10 +166,23 @@ internal sealed partial class CoordinationStore
         AtomicFile.Replace(Path.Combine(RequestsPath, request.Device.DeviceId + ".json"), Json.Serialize(request));
     }
 
-    public IReadOnlyList<HandoffRequest> PendingRequests()
+    /// <summary>Requests younger than <see cref="HandoffRequest.Lifetime"/>, oldest first.</summary>
+    public IReadOnlyList<HandoffRequest> PendingRequests(DateTimeOffset now) => ReadRequests().Where(r => IsFresh(r, now)).Select(r => r.Request).ToList();
+
+    /// <summary>Requests too old to prompt anyone; <see cref="RemoveStaleRequest"/> clears them.</summary>
+    public IReadOnlyList<HandoffRequest> StaleRequests(DateTimeOffset now) => ReadRequests().Where(r => !IsFresh(r, now)).Select(r => r.Request).ToList();
+
+    /// <summary>
+    /// Both the requesting PC's clock and the share's file time must say the request is recent, so a PC whose
+    /// clock runs ahead cannot keep an old request alive. A time in the future counts as recent.
+    /// </summary>
+    private static bool IsFresh((HandoffRequest Request, DateTimeOffset WrittenAt) stored, DateTimeOffset now) =>
+        now - stored.Request.RequestedAt < HandoffRequest.Lifetime && now - stored.WrittenAt < HandoffRequest.Lifetime;
+
+    private List<(HandoffRequest Request, DateTimeOffset WrittenAt)> ReadRequests()
     {
         if (!Directory.Exists(RequestsPath)) return [];
-        var requests = new List<HandoffRequest>();
+        var requests = new List<(HandoffRequest, DateTimeOffset)>();
         foreach (string file in Directory.EnumerateFiles(RequestsPath, "*.json"))
         {
             string name = Path.GetFileNameWithoutExtension(file);
@@ -174,14 +190,52 @@ internal sealed partial class CoordinationStore
             try
             {
                 var request = Json.ReadFile<HandoffRequest>(file, "Handoff request");
-                if (request.Device?.DeviceId == name && request.Device.DisplayName is not null) requests.Add(request);
+                if (request.Device?.DeviceId == name && request.Device.DisplayName is not null && IsValidId(request.RequestId))
+                    requests.Add((request, new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero)));
             }
             catch (InvalidDataException)
             {
                 // A half-written or foreign file is not a request.
             }
+            catch (FileNotFoundException)
+            {
+                // Removed or replaced while being read.
+            }
         }
-        return requests.OrderBy(r => r.RequestedAt).ToList();
+        return requests.OrderBy(r => r.Item1.RequestedAt).ToList();
+    }
+
+    /// <summary>
+    /// Removes a stale request without ever deleting a newer one from the same PC. The requesting PC replaces its file
+    /// without the writer lock, so the file is first renamed aside and put back unless it is still exactly
+    /// <paramref name="stale"/>. True when it was removed; a failure only leaves the request in place.
+    /// </summary>
+    public bool RemoveStaleRequest(HandoffRequest stale)
+    {
+        if (!IsValidId(stale.Device.DeviceId)) return false;
+        string path = Path.Combine(RequestsPath, stale.Device.DeviceId + ".json");
+        string aside = Path.Combine(RequestsPath, $"{stale.Device.DeviceId}.{Guid.NewGuid():N}.removing");
+        try
+        {
+            try { File.Move(path, aside); }
+            catch (FileNotFoundException) { return false; }
+            bool same;
+            try { same = Json.ReadFile<HandoffRequest>(aside, "Handoff request") == stale; }
+            catch (InvalidDataException) { same = false; }
+            if (same)
+            {
+                File.Delete(aside);
+                return true;
+            }
+            // A newer request arrived in between: put it back, unless an even newer one has already taken its place.
+            try { File.Move(aside, path); }
+            catch (IOException) when (File.Exists(path)) { File.Delete(aside); }
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     public void RemoveRequest(DeviceIdentity device)

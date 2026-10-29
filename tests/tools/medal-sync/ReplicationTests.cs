@@ -330,7 +330,7 @@ public sealed class ReplicationTests : IDisposable
         {
             if (arguments[2].StartsWith("onedrive:", StringComparison.Ordinal)) throw new RcloneFailedException("quota", 7);
         });
-        Assert.Throws<RcloneFailedException>(() => replication.Publish(snapshot));
+        Assert.Throws<StorageActionRequiredException>(() => replication.Publish(snapshot));
         Assert.False(File.Exists(Path.Combine(state.Root, "replication", "last-verified.json")));
     }
 

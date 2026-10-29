@@ -166,7 +166,20 @@ internal static partial class Launcher
         // Declining is a deliberate cancellation, not another error dialog.
         if (shutdown.SuppressUi) return code;
         if (reviewDeclined) return 3;
-        if (Outcome(code, output.ToString(), error.ToString()) is { } message) ui.Show(message);
+        if (Outcome(code, output.ToString(), error.ToString()) is { } message) ShowOutcome(ui, message, () => medal.IsRunning());
         return code;
+    }
+
+    /// <summary>
+    /// A dialog takes focus, so it is shown only when Medal (and perhaps a game) has closed. While Medal still runs,
+    /// for example after supervision stopped, the outcome is a passive notice in the status view instead.
+    /// </summary>
+    internal static void ShowOutcome(ILauncherUi ui, string message, Func<bool> medalRunning)
+    {
+        bool running;
+        try { running = medalRunning(); }
+        catch (Exception) { running = true; } // Unsure: stay passive.
+        if (running) ui.Notify(message);
+        else ui.Show(message);
     }
 }

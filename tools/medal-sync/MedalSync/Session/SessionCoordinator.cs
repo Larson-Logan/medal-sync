@@ -14,7 +14,8 @@ internal enum LaunchStatus
     Blocked,
 }
 
-internal sealed record LaunchOutcome(LaunchStatus Status, string Message, string? Session = null, bool StorageOffline = false);
+/// <param name="Warning">Medal started, but something the user must fix will stop the handoff; shown as a passive notice.</param>
+internal sealed record LaunchOutcome(LaunchStatus Status, string Message, string? Session = null, bool StorageOffline = false, string? Warning = null);
 
 internal enum FinishStatus
 {
@@ -24,8 +25,27 @@ internal enum FinishStatus
     Blocked,
 }
 
-/// <param name="StorageOffline">Pending only because primary storage or the journal is unreachable; retried automatically.</param>
-internal sealed record FinishOutcome(FinishStatus Status, string Message, long Generation, bool StorageOffline = false);
+/// <summary>Why a finish attempt is pending; every cause but <see cref="None"/> is retried with backoff.</summary>
+internal enum PendingCause
+{
+    /// <summary>Nothing failed: uploads are still running, Medal is open, or another PC briefly holds the lock.</summary>
+    None,
+
+    /// <summary>Primary storage, a required replica or the journal cannot be reached right now.</summary>
+    StorageOffline,
+
+    /// <summary>The attempt failed for another reason that may clear by itself.</summary>
+    Failed,
+
+    /// <summary>Storage refused the work in a way only the user can fix: sign-in, configuration, a conflict, quota, failed verification.</summary>
+    NeedsAction,
+}
+
+internal sealed record FinishOutcome(FinishStatus Status, string Message, long Generation, PendingCause Cause = PendingCause.None)
+{
+    /// <summary>Pending only because storage or the journal is unreachable; retried automatically.</summary>
+    public bool StorageOffline => Cause == PendingCause.StorageOffline;
+}
 
 /// <summary>
 /// The launch and handoff sequence. Launch: take ownership of a clean
@@ -51,6 +71,7 @@ internal sealed class SessionCoordinator(
     Action<SessionProgress>? progress = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
+    private const string ActiveMessage = "Medal is active. Quit Medal normally from its tray icon when you want to switch PCs.";
 
     private DeviceIdentity Me => options.Device;
 
@@ -65,7 +86,7 @@ internal sealed class SessionCoordinator(
             LaunchStatus.Waiting => SessionPhase.Waiting,
             _ => SessionPhase.RecoveryNeeded,
         }, outcome.Status is LaunchStatus.Started or LaunchStatus.AlreadyRunning
-            ? "Medal is active. Quit Medal normally from its tray icon when you want to switch PCs." : outcome.Message, outcome.Session);
+            ? ActiveMessage + (outcome.Warning is { } warning ? " " + warning : "") : outcome.Message, outcome.Session);
         return outcome;
     }
 
@@ -136,7 +157,7 @@ internal sealed class SessionCoordinator(
         var finished = Finish(session);
         return finished.Status is FinishStatus.Published or FinishStatus.Unchanged
             ? null
-            : new LaunchOutcome(finished.Status == FinishStatus.Pending ? LaunchStatus.Waiting : LaunchStatus.Blocked,
+            : new LaunchOutcome(finished.Status == FinishStatus.Pending && finished.Cause != PendingCause.NeedsAction ? LaunchStatus.Waiting : LaunchStatus.Blocked,
                 "This PC's previous session must finish first. " + finished.Message, StorageOffline: finished.StorageOffline);
     }
 
@@ -164,6 +185,7 @@ internal sealed class SessionCoordinator(
             return StorageOfflineLaunch();
         }
         RestoreResult restored;
+        string? warning;
         Report(SessionPhase.Starting, "Restoring the committed library and preparing clip storage.", session);
         try
         {
@@ -181,7 +203,7 @@ internal sealed class SessionCoordinator(
             // authorizes replacing this PC's old entries, with a backup.
             restored = library.Restore(generation.Snapshot, allowEmptyReplacement: true);
             RequireCaptureFolder();
-            replication?.Prepare(generation.Snapshot);
+            warning = replication?.Prepare(generation.Snapshot);
             mount.Start(session, forRecording: true);
             var health = mount.Health();
             if (!health.Healthy) throw new UnsafeOperationException(health.Detail);
@@ -219,7 +241,8 @@ internal sealed class SessionCoordinator(
         }
         if (shutdown is null) medal.Launch();
         string backup = restored.Changed ? $" This PC's previous library was backed up to {restored.BackupPath}." : "";
-        return new LaunchOutcome(LaunchStatus.Started, "Medal started with the shared library." + backup, session);
+        return new LaunchOutcome(LaunchStatus.Started, "Medal started with the shared library." + backup + (warning is null ? "" : " " + warning), session,
+            Warning: warning);
     }
 
     private string GiveBackStart(string session, string reason)
@@ -289,6 +312,7 @@ internal sealed class SessionCoordinator(
         {
             FinishStatus.Published or FinishStatus.Unchanged => SessionPhase.Ready,
             FinishStatus.Pending when outcome.StorageOffline => SessionPhase.WaitingForStorage,
+            FinishStatus.Pending when outcome.Cause == PendingCause.NeedsAction => SessionPhase.RecoveryNeeded,
             FinishStatus.Pending => SessionPhase.Unknown,
             _ => SessionPhase.RecoveryNeeded,
         }, outcome.Message, session, isOutcome: true);
@@ -309,16 +333,23 @@ internal sealed class SessionCoordinator(
         {
             return new FinishOutcome(FinishStatus.Pending,
                 $"Waiting for storage: {ex.Message} Clips are safe on this PC, which keeps the library; the switch finishes automatically when storage is back.",
-                -1, StorageOffline: true);
+                -1, PendingCause.StorageOffline);
+        }
+        catch (StorageActionRequiredException ex)
+        {
+            return new FinishOutcome(FinishStatus.Pending,
+                $"Action needed before switching PCs: {ex.Message} The session and clips stay on this PC, and the switch is retried every few minutes.",
+                -1, PendingCause.NeedsAction);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or StorageBusyException)
         {
             if (ex is not StorageBusyException && !store.IsReachable())
                 return new FinishOutcome(FinishStatus.Pending,
                     "Waiting for storage: the shared library's server cannot be reached right now. Clips are safe on this PC, which keeps the library; "
-                    + "the switch finishes automatically when it is back.", -1, StorageOffline: true);
+                    + "the switch finishes automatically when it is back.", -1, PendingCause.StorageOffline);
             return new FinishOutcome(FinishStatus.Pending,
-                $"Clip storage is unreachable or busy ({ex.Message}); the session stays on this PC and will be retried.", -1);
+                $"Clip storage is unreachable or busy ({ex.Message}); the session stays on this PC and will be retried.", -1,
+                ex is StorageBusyException ? PendingCause.None : PendingCause.Failed);
         }
         catch (Exception ex) when (IsExpected(ex))
         {
@@ -584,11 +615,18 @@ internal sealed class SessionCoordinator(
     {
         var told = new HashSet<string>(StringComparer.Ordinal);
         int consecutiveStatusFailures = 0;
-        int offlineRetries = 0;
+        int failedAttempts = 0;
         var nextCompatibilityCheck = clock.Now;
+        var nextRequestCleanup = clock.Now;
+        void Send(string message)
+        {
+            // A notice is advisory. A failed log write or view must never end supervision while Medal runs.
+            try { notify(message); }
+            catch (Exception) { /* Dropped; the session continues. */ }
+        }
         void Once(string message)
         {
-            if (told.Add(message)) notify(message);
+            if (told.Add(message)) Send(message);
         }
         while (!cancellation.IsCancellationRequested)
         {
@@ -597,17 +635,20 @@ internal sealed class SessionCoordinator(
             {
                 var outcome = Finish(session);
                 if (outcome.Status != FinishStatus.Pending) return outcome;
-                if (outcome.StorageOffline)
+                if (outcome.Cause != PendingCause.None)
                 {
-                    // Calm, bounded retries: 30 s doubling to 5 minutes, without repeating the same notice.
-                    Once("Waiting for storage. Clips are safe on this PC; the switch finishes automatically when storage is back.");
-                    var retryAt = clock.Now + TimeSpan.FromSeconds(Math.Min(300, 30 << Math.Min(offlineRetries++, 4)));
+                    // Bounded retries that never repeat the same notice. An outage is cheap to probe: 30 s doubling to
+                    // 5 minutes. Any other failure repeats a full copy-and-verify pass, so it waits up to 10 minutes.
+                    // Each attempt still verifies from scratch; backoff only changes how often one starts.
+                    Once(outcome.StorageOffline ? "Waiting for storage. Clips are safe on this PC; the switch finishes automatically when storage is back." : outcome.Message);
+                    int limit = outcome.StorageOffline ? 300 : 600;
+                    var retryAt = clock.Now + TimeSpan.FromSeconds(Math.Min(limit, 30 << Math.Min(failedAttempts++, 5)));
                     // Short steps keep cancellation, shutdown and a reopened Medal responsive during the wait.
                     while (clock.Now < retryAt && !cancellation.IsCancellationRequested && shutdown?.Ending != true && !medal.IsRunning())
                         Pause(options.PollInterval);
                     continue;
                 }
-                offlineRetries = 0;
+                failedAttempts = 0;
                 Once(outcome.Message);
             }
             else
@@ -626,9 +667,15 @@ internal sealed class SessionCoordinator(
                 }
                 try
                 {
-                    foreach (var request in store.PendingRequests())
+                    foreach (var request in store.PendingRequests(clock.Now))
                     {
-                        Once($"{request.Device.DisplayName} wants to use Medal. {QuitFromTray} to switch.");
+                        // Keyed by request, so a new request from the same PC notifies again.
+                        if (told.Add("request:" + request.RequestId)) Send($"{request.Device.DisplayName} wants to use Medal. {QuitFromTray} to switch.");
+                    }
+                    if (clock.Now >= nextRequestCleanup)
+                    {
+                        nextRequestCleanup = clock.Now + TimeSpan.FromMinutes(10);
+                        foreach (var stale in store.StaleRequests(clock.Now)) store.RemoveStaleRequest(stale);
                     }
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -639,7 +686,7 @@ internal sealed class SessionCoordinator(
                 if (health.Healthy)
                 {
                     consecutiveStatusFailures = 0;
-                    Report(SessionPhase.Active, "Medal is active. Quit Medal normally from its tray icon when you want to switch PCs.", session);
+                    Report(SessionPhase.Active, ActiveMessage, session);
                 }
                 else
                 {
