@@ -9,7 +9,8 @@ function Invoke-Checked([string]$Program, [string[]]$Arguments) {
 Push-Location $repo
 try {
     Invoke-Checked dotnet @('restore','tests/tools/medal-sync/MedalSync.Tests.csproj','--locked-mode')
-    Invoke-Checked dotnet @('test','tests/tools/medal-sync/MedalSync.Tests.csproj','-c','Release','--no-restore','--nologo')
+    # global.json opts dotnet test into Microsoft.Testing.Platform mode; it forwards unknown flags such as --nologo to the test app.
+    Invoke-Checked dotnet @('test','--project','tests/tools/medal-sync/MedalSync.Tests.csproj','-c','Release','--no-restore')
     Invoke-Checked dotnet @('restore','tools/medal-sync/MedalSync.Launch/MedalSync.Launch.csproj','--locked-mode')
     Invoke-Checked dotnet @('build','tools/medal-sync/MedalSync.Launch/MedalSync.Launch.csproj','-c','Release','--no-restore','--nologo')
     Invoke-Checked dotnet @('restore','tests/desktop/MedalSync.Desktop.Tests.csproj','--locked-mode')
