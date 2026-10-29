@@ -79,7 +79,10 @@ establish real reboot, playback, provider sign-in or two-PC acceptance.
 
 Target `main` and use a title that describes the resulting behavior. Explain
 the problem, link related issues and list the commands and results you checked.
-Use `Closes #123` only when the change fully resolves that issue. Explain
+Use `Closes #123` only when the change fully resolves that issue; merged pull
+requests and the issues they close join the next release's milestone
+automatically, and maintainers handle milestones and the
+[project board](docs/triage.md#project-board). Explain
 failure and recovery behavior for stateful changes, and any compatibility or
 upgrade effects. Small documentation fixes do not need invented runtime tests.
 

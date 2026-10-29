@@ -1,0 +1,109 @@
+{
+  "title": "Medal Sync",
+  "description": "Triage, release planning and work in progress for Medal Sync.",
+  "visibility": "PUBLIC",
+  "fields": [
+    {
+      "name": "Priority",
+      "data_type": "single_select",
+      "options": [
+        {
+          "name": "P0",
+          "color": "RED",
+          "description": "Data integrity, a broken release or a security fix; ahead of everything else"
+        },
+        {
+          "name": "P1",
+          "color": "ORANGE",
+          "description": "Needed for the current milestone"
+        },
+        {
+          "name": "P2",
+          "color": "GRAY",
+          "description": "Worth doing; no release depends on it"
+        }
+      ]
+    },
+    {
+      "name": "Size",
+      "data_type": "single_select",
+      "options": [
+        {
+          "name": "S",
+          "color": "GREEN",
+          "description": "One focused change, usually a single pull request"
+        },
+        {
+          "name": "M",
+          "color": "YELLOW",
+          "description": "Several files or a new command; needs recovery tests"
+        },
+        {
+          "name": "L",
+          "color": "PURPLE",
+          "description": "Storage, schema or ownership work; discuss the design first"
+        }
+      ]
+    }
+  ],
+  "views": [
+    {
+      "name": "Board",
+      "layout": "board",
+      "filter": "",
+      "vertical_group_by": "Status",
+      "fields": [
+        "Title",
+        "Assignees",
+        "Milestone",
+        "Priority",
+        "Size",
+        "Linked pull requests"
+      ]
+    },
+    {
+      "name": "Triage",
+      "layout": "table",
+      "filter": "is:open label:\"needs triage\"",
+      "fields": [
+        "Title",
+        "Labels",
+        "Priority",
+        "Size",
+        "Milestone"
+      ]
+    },
+    {
+      "name": "Releases",
+      "layout": "table",
+      "filter": "is:open",
+      "group_by": "Milestone",
+      "sort_by": [
+        [
+          "Priority",
+          "asc"
+        ]
+      ],
+      "fields": [
+        "Title",
+        "Status",
+        "Priority",
+        "Size",
+        "Labels",
+        "Assignees"
+      ]
+    },
+    {
+      "name": "Pull requests",
+      "layout": "table",
+      "filter": "is:pr is:open",
+      "fields": [
+        "Title",
+        "Status",
+        "Milestone",
+        "Reviewers",
+        "Labels"
+      ]
+    }
+  ]
+}
