@@ -137,14 +137,19 @@ public sealed class MedalCompatibilityTests : IDisposable
     }
 
     [Theory]
-    [InlineData("2643.583.1", "2644.591.1", "2643.3040.1", true)]
-    [InlineData("2644.591.1", "2643.583.1", "2643.3040.1", true)]
-    [InlineData("2644.591.1", "2644.591.1", "2643.3040.2", false)]
-    [InlineData("9999.1.1", "2644.591.1", "2643.3040.1", false)]
-    [InlineData("2644.591.1", "9999.1.1", "2643.3040.1", false)]
-    public void EnrollmentAllowsReviewedBuildDifferencesOnly(string shared, string local, string recorder, bool supported)
+    [InlineData("2643.583.1", "2643.3040.1", "2644.591.1", "2643.3040.1", true)]
+    [InlineData("2644.591.1", "2643.3040.1", "2643.583.1", "2643.3040.1", true)]
+    [InlineData("2644.591.1", "2643.3040.1", "2644.604.1", "2644.3209.1", true)]
+    [InlineData("2644.604.1", "2644.3209.1", "2644.591.1", "2643.3040.1", true)]
+    [InlineData("2644.604.1", "2644.3209.1", "2644.604.1", "2644.3209.1", true)]
+    [InlineData("2644.591.1", "2643.3040.1", "2644.591.1", "2643.3040.2", false)]
+    [InlineData("2644.591.1", "2643.3040.1", "2644.604.1", "2643.3040.1", false)]
+    [InlineData("2644.604.1", "2643.3040.1", "2644.591.1", "2643.3040.1", false)]
+    [InlineData("9999.1.1", "2643.3040.1", "2644.591.1", "2643.3040.1", false)]
+    [InlineData("2644.591.1", "2643.3040.1", "9999.1.1", "2643.3040.1", false)]
+    public void EnrollmentAllowsReviewedBuildDifferencesOnly(string shared, string sharedRecorder, string local, string recorder, bool supported)
     {
-        var first = new MedalVersions(shared, "2643.3040.1");
+        var first = new MedalVersions(shared, sharedRecorder);
         var second = new MedalVersions(local, recorder);
         if (supported) NativeBackupBuilds.RequireCompatible(first, second);
         else Assert.Throws<IncompatibleLibraryException>(() => NativeBackupBuilds.RequireCompatible(first, second));

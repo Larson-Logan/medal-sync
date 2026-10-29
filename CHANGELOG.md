@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Verified native-backup compatibility for Medal 2644.604.1 with recorder
+  2644.3209.1, which uses the reviewed schema. Reviewed app builds are now
+  accepted only with the recorder they were reviewed with; unknown pairs
+  remain refused.
 - Add `diagnostics [--out FILE]`, a privacy-safe summary to share when asking
   for help. It reports versions, schema compatibility, installation and
   storage mode, coarse free space, ownership state and refusal codes, built

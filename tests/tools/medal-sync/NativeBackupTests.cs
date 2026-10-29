@@ -14,10 +14,18 @@ public sealed class NativeBackupTests : IDisposable
     [Theory]
     [InlineData("2643.583.1", "2643.3040.1", true)]
     [InlineData("2644.591.1", "2643.3040.1", true)]
+    [InlineData("2644.604.1", "2644.3209.1", true)]
     [InlineData("2644.591.2", "2643.3040.1", false)]
     [InlineData("2644.591.1", "2643.3040.2", false)]
+    // Reviewed app builds are only accepted with the recorder they were reviewed with.
+    [InlineData("2644.604.1", "2643.3040.1", false)]
+    [InlineData("2644.591.1", "2644.3209.1", false)]
+    [InlineData("2644.604.2", "2644.3209.1", false)]
+    [InlineData("2644.604.1", "2644.3209.2", false)]
     [InlineData(null, "2643.3040.1", false)]
     [InlineData("2644.591.1", null, false)]
+    [InlineData("2644.604.1", null, false)]
+    [InlineData(null, "2644.3209.1", false)]
     public void NativeBackupCompatibilityAcceptsOnlyReviewedExactBuildPairs(string? app, string? recorder, bool supported)
     {
         var versions = new MedalVersions(app, recorder);
