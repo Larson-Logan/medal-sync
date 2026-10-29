@@ -179,7 +179,7 @@ public sealed class SessionTests : IDisposable
 
     private Pc Computer(DeviceIdentity device, string machine, bool acceptChanges = false, bool replaceLocal = false, string? database = null, Action? prepareNativeBackup = null,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null,
-        ISessionCompatibility? compatibility = null)
+        ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
@@ -187,7 +187,62 @@ public sealed class SessionTests : IDisposable
         var options = new SessionOptions(device, WindowsPath.Parse(@"M:\Clips"), Versions,
             TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal);
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
-        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility));
+        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress));
+    }
+
+    [Fact]
+    public void StatusReadyIsEmittedOnlyAfterVerifiedPublicationAndRelease()
+    {
+        List<SessionProgress> reports = [];
+        var pc = Computer(FirstPc, "first", progress: report =>
+        {
+            reports.Add(report);
+            if (report.Phase == SessionPhase.Ready) Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        });
+        AssertStarted(pc.Coordinator.Launch());
+        Record(pc, "new-recording");
+        pc.Medal.Running = false;
+        string session = _store.ReadJournal().SessionId!;
+        pc.Mount.Verdicts.Enqueue(new(DrainState.Pending, [], 2, 8192));
+        pc.Mount.Verdicts.Enqueue(new(DrainState.Drained, [], 0, 0));
+        _assets.OnServerCheck = () => Assert.DoesNotContain(reports, p => p.Phase == SessionPhase.Ready);
+        Assert.Equal(FinishStatus.Published, pc.Coordinator.Finish(session).Status);
+        Assert.Contains(reports, p => p.Phase == SessionPhase.Uploading && p.QueuedFiles == 2 && p.QueuedBytes == 8192);
+        Assert.Contains(reports, p => p.Phase == SessionPhase.Verifying);
+        Assert.Equal(SessionPhase.Ready, reports[^1].Phase);
+    }
+
+    [Fact]
+    public void UnknownUploadsAndLateFailuresNeverEmitReadyAndCanRecover()
+    {
+        List<SessionProgress> reports = [];
+        var pc = Computer(FirstPc, "first", progress: reports.Add);
+        AssertStarted(pc.Coordinator.Launch());
+        pc.Medal.Running = false;
+        string session = _store.ReadJournal().SessionId!;
+        pc.Mount.Steady = DrainVerdict.Unknown("fake disconnected supervisor");
+        Assert.Equal(FinishStatus.Pending, pc.Coordinator.Finish(session).Status);
+        Assert.Contains(reports, p => p.Phase == SessionPhase.Unknown && p.QueuedBytes is null);
+        Assert.DoesNotContain(reports, p => p.Phase == SessionPhase.Ready);
+        pc.Mount.Steady = new(DrainState.Drained, [], 0, 0);
+        pc.Mount.OnStop = () => Record(pc, "late-recording");
+        Assert.Equal(FinishStatus.Blocked, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(SessionPhase.RecoveryNeeded, reports[^1].Phase);
+        Assert.DoesNotContain(reports, p => p.Phase == SessionPhase.Ready);
+        Assert.Empty(pc.Mount.Forgotten);
+        pc.Mount.OnStop = null;
+        Assert.Equal(FinishStatus.Published, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(SessionPhase.Ready, reports[^1].Phase);
+    }
+
+    [Fact]
+    public void ViewDisconnectCannotInterruptTheSupervisor()
+    {
+        var pc = Computer(FirstPc, "first", progress: _ => throw new IOException("view disconnected"));
+        AssertStarted(pc.Coordinator.Launch());
+        pc.Medal.Running = false;
+        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Finish(_store.ReadJournal().SessionId!).Status);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
     }
 
     [Fact]

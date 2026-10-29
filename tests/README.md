@@ -5,6 +5,10 @@ global.json, PowerShell 7, Node 24 and Python 3.11+.
 
 - .NET tests use synthetic SQLite fixtures and cover ownership, restoration,
   upload verification, configuration, library review, shutdown and release checks.
+- Native desktop checks in `tests/desktop/` use a fake supervisor and isolated
+  event names. They exercise every displayed state, queue/replica text, accessible
+  controls, stale status, disconnect/reconnect and closing the panel. No live
+  configuration, Medal process, media, journal or storage is read or changed.
 - Node tests exercise helper previews, scratch registry keys and temporary
   COM shortcuts. Python tests exercise a synthetic Samba configuration.
 - PowerShell installer tests use temporary fake payloads and replace process

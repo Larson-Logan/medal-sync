@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using MedalSync.Config;
@@ -134,6 +135,15 @@ internal static partial class Launcher
         // Record entry before loading the share: this distinguishes a failed
         // sign-in attempt from Windows never invoking the startup entry.
         log.Write(request.AtSignIn ? "launcher: invoked at sign-in" : "launcher: invoked manually");
+        // The tray owns no session or mount. It can exit/reconnect without affecting this supervisor.
+        try
+        {
+            var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, StartupEntries.LauncherFile))
+                { UseShellExecute = false, CreateNoWindow = true };
+            start.ArgumentList.Add("--tray");
+            Process.Start(start)?.Dispose();
+        }
+        catch (System.ComponentModel.Win32Exception) { log.Write("launcher: status view could not be started; supervision continues"); }
         if (HandleExistingSession(request, medal.IsRunning(), SessionCommands.AnotherInstanceRunning(), medal.Open, ui) is { } existingResult)
             return existingResult;
         ReleaseUpdate.NotifyAtLaunch(ui.Notify);

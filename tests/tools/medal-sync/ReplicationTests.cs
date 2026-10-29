@@ -1,6 +1,7 @@
 using MedalSync.Config;
 using MedalSync.Library;
 using MedalSync.Platform;
+using MedalSync.Session;
 using MedalSync.Storage;
 using MedalSync.Tests.Fixtures;
 using MedalSync.Util;
@@ -209,6 +210,7 @@ public sealed class ReplicationTests : IDisposable
         MedalFixture.AddContent(db, "a", video: @"M:\Clips\clip.mp4");
         var snapshot = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
         List<string> commands = [];
+        List<SessionProgress> progress = [];
         var replication = new StorageReplication(config, state, () => { }, arguments =>
         {
             commands.Add(arguments[0]);
@@ -217,7 +219,7 @@ public sealed class ReplicationTests : IDisposable
             Assert.False(File.Exists(Path.Combine(state.Root, "replication", "last-verified.json")));
             if (arguments[0] == "copy" && arguments[1] == config.ServerCapture.Display)
                 File.Copy(Path.Combine(arguments[1], "clip.mp4"), Path.Combine(arguments[2], "clip.mp4"));
-        });
+        }, progress.Add);
         replication.Prepare(snapshot);
         Assert.Equal(config.LibraryId, File.ReadAllText(config.MountedCapture.Append(MedalSyncConfig.StorageMarker).Display).Trim());
         replication.Publish(snapshot);
@@ -225,6 +227,8 @@ public sealed class ReplicationTests : IDisposable
         Assert.True(File.Exists(Path.Combine(state.Root, "replication", "last-verified.json")));
         Assert.True(File.Exists(Path.Combine(config.MountedCapture.Display, "clip.mp4")));
         Assert.Empty(Directory.GetFiles(state.Root, "replication-*.txt"));
+        Assert.Equal(new[] { SessionPhase.Uploading, SessionPhase.Verifying, SessionPhase.Uploading, SessionPhase.Verifying }, progress.Select(p => p.Phase));
+        Assert.Equal(new[] { "Persistent local media", "Persistent local media", "Primary storage", "Primary storage" }, progress.Select(p => p.Replica));
     }
 
     [Fact]

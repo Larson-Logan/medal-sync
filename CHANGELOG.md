@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add a native tray status panel with supervisor progress, available upload
+  counts, required replica, confirmation time and safe finish retry. Stale or
+  unreachable status is explicit; closing the view leaves supervision intact.
+- Keep repeated background notices in the status panel without taking focus.
+  Windows setup includes a Medal Sync Status shortcut.
 - Retain ownership when an aborted startup cannot verify that its mount stopped,
   and retry cleanup on the owning PC.
 - Recheck the library after final server verification and mount shutdown before
