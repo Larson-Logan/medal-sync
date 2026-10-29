@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an optional copy-and-paste agent prompt to the setup guide. It lets a
+  coding agent gather this PC's details, ask the remaining questions and
+  prepare a validated `config.json`, stopping before library creation,
+  enrollment or startup changes.
 - Retain stopped aborted-start logins separately from unfinished sessions, keeping
   unverified cache bytes intact so recovered startup failures no longer block setup.
   `finish` recovers STARTING without launching; `recover-start` previews and
