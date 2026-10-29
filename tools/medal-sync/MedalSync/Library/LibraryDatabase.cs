@@ -76,7 +76,9 @@ internal static class LibraryDatabase
         {
             string quoted = MedalSchema.Quote(c);
             string value = c == json ? $"CASE WHEN typeof({quoted}) = 'blob' THEN json({quoted}) END" : quoted;
-            return $"typeof({quoted}), {value}";
+            // The storage class as a number: reading it allocates nothing, unlike typeof()'s text for every cell.
+            return $"CASE typeof({quoted}) WHEN 'null' THEN {TypeNull} WHEN 'integer' THEN {TypeInteger} WHEN 'text' THEN {TypeText} "
+                + $"WHEN 'blob' THEN {TypeBlob} ELSE {TypeReal} END, {value}";
         });
         var rows = new List<IReadOnlyList<Cell?>>();
         try
@@ -101,18 +103,21 @@ internal static class LibraryDatabase
         return new TableSnapshot(table, columns.ToArray(), rows);
     }
 
+    private const int TypeNull = 0, TypeInteger = 1, TypeText = 2, TypeBlob = 3, TypeReal = 4;
+    private static readonly string[] TypeNames = ["null", "integer", "text", "blob", "real"];
+
     private static Cell? ReadCell(SqliteDataReader reader, int typeOrdinal, string table, string column, bool isJson)
     {
-        string type = reader.GetString(typeOrdinal);
+        int type = reader.GetInt32(typeOrdinal);
         int value = typeOrdinal + 1;
         return (type, isJson) switch
         {
-            ("null", _) => null,
-            ("integer", false) => new IntegerCell(reader.GetInt64(value)),
-            ("text", false) => new TextCell(reader.GetString(value)),
-            ("blob", true) => new JsonbCell(reader.GetString(value)),
+            (TypeNull, _) => null,
+            (TypeInteger, false) => IntegerCell.Of(reader.GetInt64(value)),
+            (TypeText, false) => new TextCell(reader.GetString(value)),
+            (TypeBlob, true) => new JsonbCell(reader.GetString(value)),
             _ => throw new IncompatibleLibraryException(
-                $"{table}.{column} holds a {type} value this adapter does not transfer. Nothing was changed."),
+                $"{table}.{column} holds a {TypeNames[type]} value this adapter does not transfer. Nothing was changed."),
         };
     }
 

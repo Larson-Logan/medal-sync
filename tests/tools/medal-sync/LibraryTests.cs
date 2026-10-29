@@ -1,5 +1,6 @@
 using MedalSync.Library;
 using MedalSync.Tests.Fixtures;
+using MedalSync.Util;
 using Microsoft.Data.Sqlite;
 
 namespace MedalSync.Tests;
@@ -35,6 +36,80 @@ public sealed class LibraryTests : IDisposable
         Assert.Equal(4, schema.UserVersion);
         Assert.Contains(schema.Fingerprint, MedalSchema.SupportedFingerprints);
         Assert.True(schema.IsSupported);
+    }
+
+    private static LibrarySnapshot Synthetic(IEnumerable<string> ids, string padding = "")
+    {
+        TableSnapshot Table(string name, string key) => new(name, [key, "n", "note"],
+            ids.Select((id, i) => (IReadOnlyList<Cell?>)[new TextCell(id), IntegerCell.Of(i * 7919L), new TextCell(padding + id)]).ToArray());
+        return LibrarySnapshot.Create(MedalFixture.AccountId, 4, "synthetic",
+            [Table("contents", "local_content_id"), Table("deleted_contents", "local_content_id"), Table("content_counts", "key")]);
+    }
+
+    [Fact]
+    public void Snapshot_DigestIsTheHashOfItsCanonicalJsonWhicheverComesFirst()
+    {
+        // Large enough that the streamed digest spans many writer buffers.
+        var ids = Enumerable.Range(0, 3000).Select(i => $"clip-{i:D5}").ToArray();
+        var hashedFirst = Synthetic(ids, new string('x', 200));
+        string digest = hashedFirst.Digest();
+        byte[] json = hashedFirst.ToCanonicalJson();
+        Assert.True(json.Length > 1 << 20);
+        Assert.Equal(Hashing.Sha256Hex(json), digest);
+        var serializedFirst = Synthetic(ids, new string('x', 200));
+        Assert.Equal(json, serializedFirst.ToCanonicalJson());
+        Assert.Equal(digest, serializedFirst.Digest());
+        Assert.Equal(digest, LibrarySnapshot.FromCanonicalJson(json).Digest());
+        Assert.Equal(digest, LibrarySnapshot.FromCanonicalJson((ReadOnlySpan<byte>)json).Digest());
+    }
+
+    [Fact]
+    public void Snapshot_OrdersUnsortedRowsAndRejectsDuplicates()
+    {
+        var sorted = Synthetic(["a", "b", "c", "\u00e9", "\U0001F600", "\uFB01"]);
+        var shuffled = Synthetic(["\uFB01", "c", "\U0001F600", "a", "\u00e9", "b"]);
+        Assert.Equal(new[] { "a", "b", "c", "\u00e9", "\U0001F600", "\uFB01" },
+            shuffled.Table("contents").Rows.Select(r => TableSnapshot.Text(r[0])));
+        Assert.Equal(sorted.Table("contents").Rows.Select(r => TableSnapshot.Text(r[0])), shuffled.Table("contents").Rows.Select(r => TableSnapshot.Text(r[0])));
+        Assert.Contains("twice", Assert.Throws<InvalidDataException>(() => Synthetic(["a", "b", "a"])).Message, StringComparison.Ordinal);
+        Assert.Contains("twice", Assert.Throws<InvalidDataException>(() => Synthetic(["a", "a"])).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Snapshot_IsUnaffectedByLaterEditsToItsSourceRows()
+    {
+        var row = new Cell?[] { new TextCell("a"), IntegerCell.Of(1), null };
+        TableSnapshot Table(string name, string key) => new(name, [key, "n", "note"], [row]);
+        var snapshot = LibrarySnapshot.Create(MedalFixture.AccountId, 4, "synthetic",
+            [Table("contents", "local_content_id"), Table("deleted_contents", "local_content_id"), Table("content_counts", "key")]);
+        string digest = snapshot.Digest();
+        row[1] = IntegerCell.Of(2);
+        Assert.Equal(IntegerCell.Of(1), snapshot.Table("contents").Rows[0][1]);
+        Assert.Equal(digest, Hashing.Sha256Hex(snapshot.ToCanonicalJson()));
+    }
+
+    [Fact]
+    public void SharedIntegerCellsKeepValueSemantics()
+    {
+        Assert.Same(IntegerCell.Of(0), IntegerCell.Of(0));
+        Assert.Equal(new IntegerCell(5), IntegerCell.Of(5));
+        Assert.Equal(new IntegerCell(long.MaxValue), IntegerCell.Of(long.MaxValue));
+        Assert.Equal(new IntegerCell(-17), IntegerCell.Of(-17));
+        Assert.Equal(1023, IntegerCell.Of(1023).Value);
+        Assert.Equal(1024, IntegerCell.Of(1024).Value);
+    }
+
+    [Fact]
+    public void Sha256File_MatchesTheInMemoryHashAcrossChunks()
+    {
+        foreach (int size in new[] { 0, 1, (1 << 20) - 1, 1 << 20, (3 << 20) + 17 })
+        {
+            byte[] bytes = new byte[size];
+            new Random(size).NextBytes(bytes);
+            string path = _fixture.PathFor($"hash-{size}.bin");
+            File.WriteAllBytes(path, bytes);
+            Assert.Equal(Hashing.Sha256Hex(bytes), Hashing.Sha256File(path));
+        }
     }
 
     [Fact]

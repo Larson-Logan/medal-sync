@@ -136,14 +136,21 @@ internal sealed class DesktopStatusPublisher : IDisposable
         _report = new(1, libraryId, accountId, deviceId, DateTimeOffset.UtcNow,
             new(SessionPhase.Starting, "Preparing the shared library. Keep Medal closed until startup finishes."));
         Write();
-        _heartbeat = new Timer(_ => Write(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        _heartbeat = new Timer(_ => Write(), null, Heartbeat, Heartbeat);
     }
+
+    /// <summary>How often the unchanged report is re-confirmed. Readers treat it as stale after 20 seconds.</summary>
+    internal static readonly TimeSpan Heartbeat = TimeSpan.FromSeconds(5);
 
     public void Report(SessionProgress progress)
     {
         lock (_gate)
         {
-            _report = _report with { Progress = progress with { SessionId = progress.SessionId ?? _report.Progress.SessionId } };
+            var next = progress with { SessionId = progress.SessionId ?? _report.Progress.SessionId };
+            // The supervisor repeats the same progress on every poll; the heartbeat already keeps it fresh,
+            // so only a change is written straight away.
+            if (next == _report.Progress) return;
+            _report = _report with { Progress = next };
             Write();
         }
     }

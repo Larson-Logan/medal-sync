@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Lower background CPU, memory and disk use. While Medal runs, the supervisor
+  re-checks the Medal process it already found instead of listing every process
+  each poll, and rewrites the private status file only when status changes or
+  every 5 seconds (was 2). The tray reads status every 5 seconds while its panel
+  is closed (every second while open). Reading and checking a library snapshot
+  is about twice as fast with a third of the allocations, and a snapshot no
+  longer keeps a serialized copy of the library in memory. File hashes reuse a
+  pooled buffer.
 - Medal Sync has its own icon on its program, shortcuts, uninstall entry and
   windows. The notification-area icon replaces the generic Windows icons and
   shows a colored dot for the current state (green Ready, red recording, blue
