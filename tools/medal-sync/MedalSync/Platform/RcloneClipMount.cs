@@ -161,6 +161,16 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
         _session = null;
     }
 
+    public void RetainAbortedStart(string session)
+    {
+        if (IsRunning) throw new IOException("The clip drive is still running; aborted-start evidence was not moved.");
+        state.RetainAbortedStart(session, config.LibraryId, config.SessionCacheDirectory(session), clock.Now);
+        if (_session != session) return;
+        _control?.Dispose();
+        _control = null;
+        _session = null;
+    }
+
     private RcloneControl? Control()
     {
         if (_session is null) return null;

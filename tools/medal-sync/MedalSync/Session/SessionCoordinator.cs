@@ -226,11 +226,16 @@ internal sealed class SessionCoordinator(
     {
         try
         {
-            if (mount.IsRunning && !mount.Stop())
+            if (!mount.Stop())
                 throw new UnsafeOperationException("The clip drive did not stop; it may still be in use.");
             if (mount.IsRunning)
                 throw new UnsafeOperationException("The clip drive is still running after shutdown.");
-            store.Update(r => Ownership.AbortStart(r, Me, session, reason, clock.Now), options.LockTimeout);
+            store.Update(r =>
+            {
+                var aborted = Ownership.AbortStart(r, Me, session, reason, clock.Now);
+                mount.RetainAbortedStart(session);
+                return aborted;
+            }, options.LockTimeout);
             return "";
         }
         catch (Exception cleanup)
@@ -330,6 +335,15 @@ internal sealed class SessionCoordinator(
         if (!journal.IsOwnedBy(Me, session))
         {
             return new FinishOutcome(FinishStatus.Blocked, $"This PC does not own session {session}.", journal.CommittedGeneration);
+        }
+        if (journal.State == OwnershipState.Starting)
+        {
+            if (medal.IsRunning()) return new FinishOutcome(FinishStatus.Blocked,
+                "Quit Medal normally before recovering the interrupted start; ownership and cache are retained.", journal.CommittedGeneration);
+            string cleanup = GiveBackStart(session, "explicit finish of interrupted start");
+            return new FinishOutcome(cleanup.Length == 0 ? FinishStatus.Unchanged : FinishStatus.Blocked,
+                cleanup.Length == 0 ? "Ready: interrupted start recovered. Login and unverified cache are retained as aborted-start evidence." : cleanup.TrimStart(),
+                journal.CommittedGeneration);
         }
         if (Reopened(session) is { } running) return running;
         if (journal.State != OwnershipState.Publishing)

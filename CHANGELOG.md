@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Retain stopped aborted-start logins separately from unfinished sessions, keeping
+  unverified cache bytes intact so recovered startup failures no longer block setup.
+  `finish` recovers STARTING without launching; `recover-start` previews and
+  explicitly retains older orphan logins only when their cache is absent or empty.
 - Harden rclone primaries: cap listing output, refuse unsafe, linked or
   duplicate remote file names, refuse a reparse-point SMB marker, keep
   pending-replica evidence when a later target fails, and fix `config create`

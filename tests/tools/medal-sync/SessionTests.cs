@@ -1,5 +1,7 @@
+using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Library;
+using MedalSync.Platform;
 using MedalSync.Session;
 using MedalSync.Storage;
 using MedalSync.Tests.Fixtures;
@@ -94,6 +96,9 @@ public sealed class SessionTests : IDisposable
 
         public List<string> Forgotten { get; } = [];
 
+        public Action<string>? OnRetainAbortedStart { get; set; }
+        public List<string> RetainedAbortedStarts { get; } = [];
+
         public MountHealth HealthResult { get; set; } = new(true, "ok");
 
         public Queue<MountHealth> HealthResults { get; } = new();
@@ -103,6 +108,7 @@ public sealed class SessionTests : IDisposable
         public DrainVerdict Steady { get; set; } = new(DrainState.Drained, [], 0, 0);
 
         public Action? OnStart { get; set; }
+        public Action<string>? OnStarted { get; set; }
 
         public Action? OnDrain { get; set; }
 
@@ -120,6 +126,7 @@ public sealed class SessionTests : IDisposable
             Starts.Add(session);
             ForRecording.Add(forRecording);
             IsRunning = true;
+            OnStarted?.Invoke(session);
         }
 
         public MountHealth Health() => HealthResults.Count > 0 ? HealthResults.Dequeue() : HealthResult;
@@ -139,6 +146,12 @@ public sealed class SessionTests : IDisposable
         }
 
         public void Forget(string session) => Forgotten.Add(session);
+
+        public void RetainAbortedStart(string session)
+        {
+            OnRetainAbortedStart?.Invoke(session);
+            RetainedAbortedStarts.Add(session);
+        }
     }
 
     private sealed class FakeAssets : IAssetChecker
@@ -737,6 +750,85 @@ public sealed class SessionTests : IDisposable
         Assert.Equal(0, pc.Medal.Launches);
     }
 
+    private (LocalState State, MedalSyncConfig Config) RecoverySetup()
+    {
+        var state = new LocalState(_fixture.PathFor("state"));
+        var config = new MedalSyncConfig(1, LibraryId, MedalFixture.AccountId, _fixture.PathFor("server"),
+            _fixture.PathFor("media"), @"M:\Clips", _fixture.PathFor("cache"), @"C:\Tools\rclone.exe",
+            new(5, 20, 20, 300, 30, 1000, 2, 53682), 4, []) { StorageMode = StorageMode.Local };
+        Directory.CreateDirectory(state.Root);
+        File.WriteAllBytes(state.ConfigPath, Json.Serialize(config));
+        _ = state.Device();
+        return (state, config);
+    }
+
+    [Fact]
+    public void StoppedFailedStartRetainsUnknownCacheAndLoginWithoutBlockingSetup()
+    {
+        var (state, config) = RecoverySetup();
+        var pc = Computer(FirstPc, "first");
+        pc.Mount.HealthResult = new(false, "Synthetic failed health check");
+        pc.Mount.OnStarted = session =>
+        {
+            _ = state.SessionSecret(session, _clock.Now);
+            Directory.CreateDirectory(config.SessionCacheDirectory(session));
+            File.WriteAllText(Path.Combine(config.SessionCacheDirectory(session), "unknown-cache"), "retained private bytes");
+        };
+        pc.Mount.OnRetainAbortedStart = session =>
+        {
+            Assert.Equal(OwnershipState.Starting, _store.ReadJournal().State);
+            state.RetainAbortedStart(session, LibraryId, config.SessionCacheDirectory(session), _clock.Now);
+        };
+        Assert.Equal(LaunchStatus.Blocked, pc.Coordinator.Launch().Status);
+        string session = Assert.Single(pc.Mount.RetainedAbortedStarts);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal("retained private bytes", File.ReadAllText(Path.Combine(config.SessionCacheDirectory(session), "unknown-cache")));
+        Assert.True(File.Exists(Path.Combine(state.Root, "aborted-starts", session, "login.json")));
+        Assert.Empty(Directory.GetFiles(Path.Combine(state.Root, "sessions")));
+        Assert.Empty(pc.Mount.Forgotten);
+        SetupMaintenance.RequireReady(state.Root, false, false, _ => _store.ReadJournal());
+    }
+
+    [Fact]
+    public void ExplicitFinishRecoversStartingAfterRestartWithoutLaunchingOrDeletingCache()
+    {
+        var (state, config) = RecoverySetup();
+        string session = SessionCoordinator.NewId();
+        _store.Update(r => Ownership.Acquire(r, FirstPc, session, _clock.Now), TimeSpan.FromSeconds(1));
+        var secret = state.SessionSecret(session, _clock.Now);
+        Directory.CreateDirectory(config.SessionCacheDirectory(session));
+        File.WriteAllText(Path.Combine(config.SessionCacheDirectory(session), "unknown"), "retain");
+        // Simulate a crash after evidence was retained but before journal publication completed.
+        state.RetainAbortedStart(session, LibraryId, config.SessionCacheDirectory(session), _clock.Now);
+        Assert.Equal(secret, new LocalState(state.Root).SessionSecret(session, _clock.Now));
+        Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(state.Root, false, false, _ => _store.ReadJournal()));
+        var restarted = Computer(FirstPc, "restarted");
+        restarted.Mount.OnRetainAbortedStart = id => state.RetainAbortedStart(id, LibraryId, config.SessionCacheDirectory(id), _clock.Now);
+        Assert.Equal(FinishStatus.Unchanged, restarted.Coordinator.Finish(session).Status);
+        Assert.Equal(0, restarted.Medal.Launches);
+        Assert.Empty(restarted.Mount.Starts);
+        Assert.Empty(restarted.Mount.Forgotten);
+        Assert.Equal("retain", File.ReadAllText(Path.Combine(config.SessionCacheDirectory(session), "unknown")));
+        SetupMaintenance.RequireReady(state.Root, false, false, _ => _store.ReadJournal());
+    }
+
+    [Fact]
+    public void EvidenceFailureOrRunningMedalRefusesExplicitStartingRecovery()
+    {
+        var pc = Computer(FirstPc, "first");
+        pc.Mount.HealthResult = new(false, "Synthetic failed health check");
+        pc.Mount.OnRetainAbortedStart = _ => throw new IOException("Evidence storage unavailable");
+        Assert.Equal(LaunchStatus.Blocked, pc.Coordinator.Launch().Status);
+        string session = _store.ReadJournal().SessionId!;
+        Assert.Equal(OwnershipState.Starting, _store.ReadJournal().State);
+        pc.Mount.OnRetainAbortedStart = null;
+        pc.Medal.Running = true;
+        Assert.Equal(FinishStatus.Blocked, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(OwnershipState.Starting, _store.ReadJournal().State);
+        pc.Medal.Running = false;
+        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Finish(session).Status);
+    }
+
     [Theory]
     [InlineData(false, true, false)]
     [InlineData(true, true, false)]
@@ -758,6 +850,7 @@ public sealed class SessionTests : IDisposable
         Assert.Equal(FirstPc, retained.Owner);
         Assert.Equal(pc.Mount.Starts.Single(), retained.SessionId);
         Assert.Empty(pc.Mount.Forgotten);
+        Assert.Empty(pc.Mount.RetainedAbortedStarts);
         Assert.Equal(0, pc.Medal.Launches);
         var other = Computer(SecondPc, "second");
         Assert.Equal(LaunchStatus.Waiting, other.Coordinator.Launch().Status);
