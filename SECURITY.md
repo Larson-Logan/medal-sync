@@ -16,7 +16,7 @@ account information or credentials; GitHub receives the ordinary network
 request and its source IP address.
 
 Maintainers keep private vulnerability reporting, secret scanning, push protection
-and Dependabot security updates enabled. Require pull requests and Windows
-validation on main, restrict release tags to maintainers and review dependency
-updates before merging. See [security maintenance](docs/security-maintenance.md)
+and Dependabot security updates enabled. Require pull requests on `dev` and
+`main`, accept only `dev` into `main` after full Windows validation, restrict
+release tags to maintainers and review dependency updates before merging. See [security maintenance](docs/security-maintenance.md)
 for repository settings, scanning and emergency handling.

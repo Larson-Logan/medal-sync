@@ -2,6 +2,7 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: monthly
     labels: [dependencies, github_actions]
@@ -15,6 +16,7 @@ updates:
       - /tools/medal-sync/MedalSync.Launch
       - /tests/tools/medal-sync
       - /tests/integration
+    target-branch: dev
     schedule:
       interval: monthly
     labels: [dependencies, .NET]

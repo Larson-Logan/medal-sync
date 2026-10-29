@@ -1,4 +1,7 @@
 changelog:
+  exclude:
+    # Promotions from dev to main repeat work already listed by its own PR.
+    labels: [promotion]
   categories:
     - title: Fixes
       labels: [bug]

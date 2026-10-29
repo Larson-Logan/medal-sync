@@ -90,6 +90,39 @@ def content_failures(data):
     return failures
 
 
+def ruleset_failures():
+    """Committed rulesets must name their branches and require checks CI reports."""
+    folder = root / '.github/rulesets'
+    workflow = root / '.github/workflows/validate.yml'
+    if not folder.is_dir():
+        return []
+    text = workflow.read_text(encoding='utf-8') if workflow.is_file() else ''
+    jobs = text.split('\njobs:\n', 1)[-1]
+    checks = set(re.findall(r'^  ([A-Za-z0-9_-]+):\s*$', jobs, re.MULTILINE))
+    checks |= {name.strip().strip('\'"') for name in re.findall(r'^    name: (.+)$', jobs, re.MULTILINE)}
+    failures, names = [], set()
+    for path in sorted(folder.glob('*.json')):
+        where = f'.github/rulesets/{path.name}'
+        ruleset = json.loads(path.read_text(encoding='utf-8'))
+        if ruleset.get('name') in names:
+            failures.append(f'Duplicate ruleset name in {where}')
+        names.add(ruleset.get('name'))
+        include = ruleset.get('conditions', {}).get('ref_name', {}).get('include', [])
+        prefix = 'refs/tags/' if ruleset.get('target') == 'tag' else 'refs/heads/'
+        if not include or any(not ref.startswith(prefix) for ref in include):
+            # ~DEFAULT_BRANCH is dev, so a main ruleset written that way would protect the wrong branch.
+            failures.append(f'Ruleset must include explicit {prefix} names: {where}')
+        if ruleset.get('enforcement') != 'active':
+            failures.append(f'Ruleset is not active: {where}')
+        for rule in ruleset.get('rules', []):
+            if rule.get('type') != 'required_status_checks':
+                continue
+            for check in rule['parameters']['required_status_checks']:
+                if check['context'] not in checks:
+                    failures.append(f'Required check {check["context"]!r} is not a validate.yml job: {where}')
+    return failures
+
+
 def git(*args, repository=root):
     return subprocess.check_output(['git', '-C', str(repository), *args])
 
@@ -97,9 +130,9 @@ def git(*args, repository=root):
 def source_files():
     if (root / 'public-source.json').is_file() and not (root / '.git').exists():
         manifest = json.loads((root / 'public-source.json').read_text(encoding='utf-8'))
-        if manifest['format'] != 1:
+        if manifest['format'] != 2:
             raise ValueError('Unsupported public export manifest')
-        return sorted(manifest['files'] + ['public-source.json'])
+        return sorted([*manifest['files'], 'public-source.json'])
     return git('ls-files', '--cached', '--others', '--exclude-standard', '-z').decode().split('\0')
 
 
@@ -178,6 +211,7 @@ def main():
             continue
         failures.extend(f'{reason} in {name}' for reason in content_failures(path.read_bytes()))
     json.loads((root / 'global.json').read_text(encoding='utf-8-sig'))
+    failures.extend(ruleset_failures())
     if args.history:
         history, commits, blobs = history_failures(args.history_repo or root)
         failures.extend(history)

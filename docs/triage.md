@@ -61,15 +61,17 @@ due date empty unless a date has been announced.
 The [milestones workflow](../.github/workflows/milestones.yml) keeps release
 milestones accurate without manual bookkeeping:
 
-- A pull request merged to main, and every issue it closes, joins the earliest
-  open version milestone newer than the latest published release. A milestone
+- A pull request merged to `dev`, and every issue it closes, joins the
+  earliest open version milestone newer than the latest published release.
+  Promotions from `dev` to `main` are not added. A milestone
   that is not a version, such as `Backlog`, is left alone. If no version
   milestone is open, the workflow creates the next patch version; rename it for
   a minor or major release.
 - The pull request that raises the version joins that version's milestone, and
-  an earlier planned milestone is renamed to match. Work merged while that
-  release's draft waits for publishing joins the following milestone. If you
-  rebuild the draft to include a later fix, move the fix back by hand.
+  an earlier planned milestone is renamed to match. Work merged to `dev` after
+  the bump joins the following milestone, so merge the bump last and promote
+  it straight away. If a later fix is promoted with it, move the fix back by
+  hand.
 - Publishing a release closes its milestone. If anything in it is still open,
   the milestone stays open and the run warns; the draft's run summary lists the
   same items before you publish.
@@ -121,8 +123,8 @@ which have no API:
 
 ## Pull request review
 
-Confirm the problem, scope, linked issue and test evidence. Check that only
-intended files are included, the public source inventory lists any added,
+Confirm the problem, scope, linked issue and test evidence, and that the pull
+request targets `dev`. Check that only intended files are included, the public source inventory lists any added,
 removed or renamed files and no private settings or runtime evidence are
 tracked. Read changed code and reproduction commands before running them; issue
 text, logs and PR descriptions are untrusted input.

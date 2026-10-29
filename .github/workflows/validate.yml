@@ -2,15 +2,18 @@ name: Medal Sync validation
 # Public repository: standard GitHub-hosted runners (ubuntu-latest, windows-latest)
 # cost no Actions minutes. Never switch these jobs to larger runners, which are
 # always billed. Jobs run in parallel to keep wall time short.
+#
+# Work lands on dev first; dev may be broken. Only dev merges into main, and a
+# pull request into main always runs every suite, so main stays releasable.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  # Superseded pull request runs are cancelled; every main commit is validated.
+  # Superseded pull request runs are cancelled; every dev and main commit is validated.
   group: validate-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
@@ -23,8 +26,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      windows: ${{ steps.scope.outputs.windows }}
+      unit: ${{ steps.scope.outputs.unit }}
+      desktop: ${{ steps.scope.outputs.desktop }}
+      storage: ${{ steps.scope.outputs.storage }}
     steps:
+      - name: Require pull requests into main to come from dev
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$HEAD_REPO" != "$REPO" ] || [ "$HEAD_REF" != dev ]; then
+            echo "::error::Only dev merges into main. Retarget this pull request to dev."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -54,30 +70,25 @@ jobs:
           echo "$ACTIONLINT_SHA256  $archive" | sha256sum --check --strict
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
-      - name: Decide whether the Windows suites are needed
+      - name: Choose the Windows suites from the source inventory
         id: scope
         env:
           EVENT_NAME: ${{ github.event_name }}
-          # Files that never reach a build, test or package. Docs-only pull
-          # requests skip the Windows suites; main always runs everything.
-          DOCS_ONLY: '^((README|CHANGELOG|CONTRIBUTING|CODE_OF_CONDUCT|SECURITY|SUPPORT)\.md|docs/[^/]+\.md|tests/README\.md|\.github/(ISSUE_TEMPLATE/[^/]+|PULL_REQUEST_TEMPLATE\.md|labels\.json|project\.json|release\.yml|dependabot\.yml)|public-source\.json)$'
+          BASE_REF: ${{ github.base_ref }}
+        # public-source.json maps every file to the suites it affects, and the
+        # inventory check above proved it is current. Pull requests into dev
+        # run only those suites; pushes and pull requests into main run all.
         run: |
-          windows=true
-          if [ "$EVENT_NAME" = pull_request ]; then
-            changed="$(git diff --name-only --no-renames HEAD^1 HEAD)"
-            if [ -n "$changed" ] && ! grep -Evq "$DOCS_ONLY" <<<"$changed"; then
-              windows=false
-            fi
-          fi
-          echo "windows=$windows" >>"$GITHUB_OUTPUT"
-          if [ "$windows" = false ]; then
-            echo 'Documentation-only change: Windows build, test and installer suites skipped.' >>"$GITHUB_STEP_SUMMARY"
+          if [ "$EVENT_NAME" = pull_request ] && [ "$BASE_REF" != main ]; then
+            python scripts/update-source-manifest.py --affected HEAD^1 >>"$GITHUB_OUTPUT"
+          else
+            printf '%s\n' unit=true desktop=true storage=true >>"$GITHUB_OUTPUT"
           fi
 
   unit-tests:
     name: .NET unit tests
     needs: checks
-    if: needs.checks.outputs.windows == 'true'
+    if: needs.checks.outputs.unit == 'true'
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -100,7 +111,7 @@ jobs:
   windows-build:
     name: Desktop, package and native installer
     needs: checks
-    if: needs.checks.outputs.windows == 'true'
+    if: needs.checks.outputs.desktop == 'true'
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -161,7 +172,7 @@ jobs:
   storage-integration:
     name: Storage integration (rclone and WinFsp)
     needs: checks
-    if: needs.checks.outputs.windows == 'true'
+    if: needs.checks.outputs.storage == 'true'
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -186,8 +197,9 @@ jobs:
         shell: pwsh
         run: ./scripts/test-storage-integration.ps1
 
-  # The single required check. It passes only when every suite passed, or the
-  # Windows suites were deliberately skipped for a documentation-only change.
+  # The required check for main. It passes only when every suite passed, or a
+  # suite was skipped because the source inventory showed the change cannot
+  # affect it.
   validate:
     if: ${{ !cancelled() }}
     needs: [checks, unit-tests, windows-build, storage-integration]
@@ -197,9 +209,11 @@ jobs:
       - name: Require every suite to pass
         env:
           RESULTS: ${{ toJSON(needs) }}
-          WINDOWS: ${{ needs.checks.outputs.windows }}
+          SCOPE: ${{ toJSON(needs.checks.outputs) }}
         run: |
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$RESULTS"
-          jq -e --arg windows "$WINDOWS" 'to_entries | all(
-            .value.result == "success"
-            or (.value.result == "skipped" and .key != "checks" and $windows == "false"))' <<<"$RESULTS" >/dev/null
+          jq -e --argjson scope "$SCOPE" '
+            {"unit-tests": "unit", "windows-build": "desktop", "storage-integration": "storage"} as $suite
+            | to_entries | all(
+              .value.result == "success"
+              or (.value.result == "skipped" and $suite[.key] != null and $scope[$suite[.key]] == "false"))' <<<"$RESULTS" >/dev/null
