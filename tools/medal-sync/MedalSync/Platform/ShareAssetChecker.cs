@@ -13,8 +13,8 @@ namespace MedalSync.Platform;
 internal static class PrimaryStorage
 {
     /// <summary>The checker for this configuration's primary: a share or local folder, or a named rclone remote.</summary>
-    public static IAssetChecker Checker(MedalSyncConfig config, LocalState state) => config.PrimaryIsRclone
-        ? new RcloneAssetChecker(config, state)
+    public static IAssetChecker Checker(MedalSyncConfig config, LocalState state, Action? requireTime = null) => config.PrimaryIsRclone
+        ? new RcloneAssetChecker(config, state, requireTime: requireTime)
         : new ShareAssetChecker(config.Capture, config.ServerCapture, config.LibraryId, new FileSystemProbe());
 }
 

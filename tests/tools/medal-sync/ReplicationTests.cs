@@ -409,4 +409,15 @@ public sealed class ReplicationTests : IDisposable
         failure = 3;
         Assert.Throws<UnsafeOperationException>(checker.RequireServer);
     }
+
+    [Fact]
+    public void ShutdownBudgetStopsPrimaryChecksInsteadOfLookingLikeAnOutage()
+    {
+        var config = Config() with { Remote = "onedrive:MedalSync", Replication = new(@"E:\MedalLibrary", @"C:\Private\rclone.conf", []) };
+        var checker = new RcloneAssetChecker(config, new LocalState(_fixture.PathFor("state")),
+            _ => throw new InvalidOperationException("rclone must not run after the shutdown budget expires"),
+            requireTime: () => throw new OperationCanceledException("Windows shutdown budget expired."));
+        Assert.Throws<OperationCanceledException>(checker.RequireServer);
+        Assert.Throws<OperationCanceledException>(() => checker.ExistsOnServer(@"M:\Clips\one.mp4"));
+    }
 }

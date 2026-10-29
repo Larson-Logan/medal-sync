@@ -418,7 +418,7 @@ internal static class SessionCommands
         }
         var mount = new RcloneClipMount(context.Config, context.State, bitrate, clock);
         var library = new SqliteLocalLibrary(context.Install.DatabasePath, context.Install.AccountId, context.State.BackupDirectory, clock);
-        var checker = PrimaryStorage.Checker(context.Config, context.State);
+        var checker = PrimaryStorage.Checker(context.Config, context.State, () => shutdown?.RequireTime());
         var options = new SessionOptions(context.Device, context.Config.Capture, context.Install.Versions,
             TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal);
         return (new SessionCoordinator(store, library, mount, new MedalProcess(context.Install, launchLink), checker, clock, options,

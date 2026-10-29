@@ -10,7 +10,9 @@ namespace MedalSync.Platform;
 /// Primary storage on a named rclone remote (cloud or personal server). Presence comes from
 /// one recursive listing per check; byte verification happens in <see cref="StorageReplication"/>.
 /// </summary>
-internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState state, Func<IReadOnlyList<string>, string>? run = null) : IAssetChecker
+/// <param name="requireTime">Checked while rclone runs, so a Windows shutdown budget stops slow provider checks.</param>
+internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState state, Func<IReadOnlyList<string>, string>? run = null,
+    Action? requireTime = null) : IAssetChecker
 {
     private Dictionary<string, long>? _listing;
 
@@ -18,9 +20,10 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
 
     private string Run(IReadOnlyList<string> arguments)
     {
+        requireTime?.Invoke();
         if (run is not null) return run(arguments);
         if (!File.Exists(Credentials)) throw new IOException("The configured rclone credential file is missing; configure the provider before retrying.");
-        return new RcloneRunner(config.ExpandedRclonePath).Run(arguments, TimeSpan.FromMinutes(5), captureOutput: true);
+        return new RcloneRunner(config.ExpandedRclonePath).Run(arguments, TimeSpan.FromMinutes(5), requireTime, captureOutput: true);
     }
 
     private IReadOnlyList<string> Common(string command, params string[] rest) =>
