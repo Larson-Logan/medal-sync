@@ -9,7 +9,21 @@ internal static class ReplicationPlan
     /// <summary>Only known media references; never database backups, credentials or arbitrary trees.</summary>
     public static IReadOnlyList<string> Files(LibrarySnapshot snapshot, WindowsPath capture, WindowsPath source, IFileProbe probe)
     {
-        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var files = new List<string>();
+        foreach (var (relative, required) in Media(snapshot, capture))
+        {
+            var found = probe.Probe(capture.Append(relative.Split('/')).Rebase(capture, source), source);
+            if (found.HasReparsePoint || found.IsDirectory || (!found.Exists && required))
+                throw new IOException("Referenced media is missing or unsafe; replication was refused.");
+            if (found.Exists) files.Add(relative);
+        }
+        return files;
+    }
+
+    /// <summary>Every safe, known media reference relative to the capture folder, with whether the library requires it.</summary>
+    public static IReadOnlyList<(string Relative, bool Required)> Media(LibrarySnapshot snapshot, WindowsPath capture)
+    {
+        var files = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var reference in AssetInventory.Collect(snapshot).Where(r => r.Role != AssetRole.Unrecognized))
         {
             if (!WindowsPath.TryParse(reference.Path, out var path, out _) || !path.IsWithin(capture) || path.Equals(capture))
@@ -21,12 +35,10 @@ internal static class ReplicationPlan
                 || (!overlay && extension is not (".mp4" or ".mkv" or ".webm" or ".mov" or ".avi" or ".m4v"
                     or ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp" or ".avif" or ".heic")))
                 throw new UnsafeOperationException("A library reference points to private state instead of media; replication was refused.");
-            var found = probe.Probe(path.Rebase(capture, source), source);
-            if (found.HasReparsePoint || found.IsDirectory || (!found.Exists && reference.Role == AssetRole.Required))
-                throw new IOException("Referenced media is missing or unsafe; replication was refused.");
-            if (found.Exists) files.Add(relative);
+            bool required = reference.Role == AssetRole.Required;
+            files[relative] = files.TryGetValue(relative, out bool already) ? already || required : required;
         }
-        return files.Order(StringComparer.Ordinal).ToArray();
+        return files.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => (f.Key, f.Value)).ToArray();
     }
 
     public static IReadOnlyList<string> Arguments(string command, string source, string target, string fileList, string configPath, int? bandwidthLimitMiB = null, string? versionDirectory = null)

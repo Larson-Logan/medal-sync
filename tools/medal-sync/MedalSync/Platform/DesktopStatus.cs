@@ -42,8 +42,13 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         SessionPhase.Waiting => "Waiting for another PC",
         SessionPhase.RecoveryNeeded => "Recovery needed",
         SessionPhase.Unknown => "Unknown / unreachable",
+        SessionPhase.WaitingForStorage => "Waiting for storage",
         _ => Phase.ToString(),
     };
+
+    /// <summary>The server or primary is offline. Media and any session stay on this PC; nothing needs fixing.</summary>
+    public static DesktopStatus StorageOffline(DateTimeOffset now) => new(SessionPhase.WaitingForStorage,
+        "Waiting for storage. Keep this PC's session and cache; its supervisor retries, or reopen Medal when storage returns.", now);
 
     public static DesktopStatus Unknown(DateTimeOffset? lastConfirmed = null) => new(SessionPhase.Unknown,
         "Status is stale or unreadable. Keep this PC's session and cache; reconnect to storage or reopen status to retry.", lastConfirmed);
@@ -77,7 +82,7 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
             // A terminal refusal remains useful after its heartbeat expires. It is historical
             // advice for this exact session, never live upload evidence or permission to release.
             string? lastResult = matches && report?.Progress is { IsOutcome: true } outcome
-                && outcome.SessionId == journal.SessionId && outcome.Phase is SessionPhase.RecoveryNeeded or SessionPhase.Unknown
+                && outcome.SessionId == journal.SessionId && outcome.Phase is SessionPhase.RecoveryNeeded or SessionPhase.Unknown or SessionPhase.WaitingForStorage
                 ? $"{report!.ConfirmedAt:yyyy-MM-dd HH:mm:ss} UTC: {outcome.NextAction}" : null;
             return journal.State == OwnershipState.Starting
                 ? new(SessionPhase.RecoveryNeeded, "Keep this PC's cache. Open Medal Sync on this PC to retry interrupted startup cleanup.", now)

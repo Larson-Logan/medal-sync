@@ -14,7 +14,7 @@ internal enum LaunchStatus
     Blocked,
 }
 
-internal sealed record LaunchOutcome(LaunchStatus Status, string Message, string? Session = null);
+internal sealed record LaunchOutcome(LaunchStatus Status, string Message, string? Session = null, bool StorageOffline = false);
 
 internal enum FinishStatus
 {
@@ -24,7 +24,8 @@ internal enum FinishStatus
     Blocked,
 }
 
-internal sealed record FinishOutcome(FinishStatus Status, string Message, long Generation);
+/// <param name="StorageOffline">Pending only because primary storage or the journal is unreachable; retried automatically.</param>
+internal sealed record FinishOutcome(FinishStatus Status, string Message, long Generation, bool StorageOffline = false);
 
 /// <summary>
 /// The launch and handoff sequence. Launch: take ownership of a clean
@@ -60,6 +61,7 @@ internal sealed class SessionCoordinator(
         Report(outcome.Status switch
         {
             LaunchStatus.Started or LaunchStatus.AlreadyRunning => SessionPhase.Active,
+            LaunchStatus.Waiting when outcome.StorageOffline => SessionPhase.WaitingForStorage,
             LaunchStatus.Waiting => SessionPhase.Waiting,
             _ => SessionPhase.RecoveryNeeded,
         }, outcome.Status is LaunchStatus.Started or LaunchStatus.AlreadyRunning
@@ -70,7 +72,12 @@ internal sealed class SessionCoordinator(
     private LaunchOutcome LaunchCore()
     {
         if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, "Windows is shutting down; Medal was not started.");
-        var journal = store.ReadJournal();
+        OwnershipRecord journal;
+        try { journal = store.ReadJournal(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return StorageOfflineLaunch();
+        }
         if (medal.IsRunning())
         {
             if (journal.State == OwnershipState.Active && journal.Owner?.DeviceId == Me.DeviceId)
@@ -111,6 +118,10 @@ internal sealed class SessionCoordinator(
         return StartSession();
     }
 
+    private static LaunchOutcome StorageOfflineLaunch() => new(LaunchStatus.Waiting,
+        "Waiting for storage: the shared library's server cannot be reached right now. Nothing was changed; open Medal again once it is back.",
+        StorageOffline: true);
+
     /// <summary>Clears this PC's own unfinished session before a new one starts.</summary>
     private LaunchOutcome? ResolveOwnSession(OwnershipRecord journal)
     {
@@ -124,7 +135,7 @@ internal sealed class SessionCoordinator(
         return finished.Status is FinishStatus.Published or FinishStatus.Unchanged
             ? null
             : new LaunchOutcome(finished.Status == FinishStatus.Pending ? LaunchStatus.Waiting : LaunchStatus.Blocked,
-                "This PC's previous session must finish first. " + finished.Message);
+                "This PC's previous session must finish first. " + finished.Message, StorageOffline: finished.StorageOffline);
     }
 
     private LaunchOutcome StartSession()
@@ -145,6 +156,10 @@ internal sealed class SessionCoordinator(
         catch (OwnershipConflictException ex)
         {
             return new LaunchOutcome(LaunchStatus.Waiting, ex.Message);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return StorageOfflineLaunch();
         }
         RestoreResult restored;
         Report(SessionPhase.Starting, "Restoring the committed library and preparing clip storage.", session);
@@ -189,6 +204,7 @@ internal sealed class SessionCoordinator(
             string cleanup = GiveBackStart(session, ex.Message);
             if (ex is OperationCanceledException && shutdown?.Ending == true)
                 return new LaunchOutcome(LaunchStatus.Waiting, "Windows shutdown interrupted storage preparation. This PC can retry at next sign-in." + cleanup);
+            if (ex is StorageOfflineException) return new LaunchOutcome(LaunchStatus.Waiting, "Waiting for storage: " + ex.Message + cleanup, StorageOffline: true);
             if (!IsExpected(ex)) throw;
             return new LaunchOutcome(LaunchStatus.Blocked, ex.Message + cleanup);
         }
@@ -265,6 +281,7 @@ internal sealed class SessionCoordinator(
         Report(outcome.Status switch
         {
             FinishStatus.Published or FinishStatus.Unchanged => SessionPhase.Ready,
+            FinishStatus.Pending when outcome.StorageOffline => SessionPhase.WaitingForStorage,
             FinishStatus.Pending => SessionPhase.Unknown,
             _ => SessionPhase.RecoveryNeeded,
         }, outcome.Message, session, isOutcome: true);
@@ -281,8 +298,18 @@ internal sealed class SessionCoordinator(
         {
             return new FinishOutcome(FinishStatus.Pending, "Windows shutdown time limit reached; ownership and cached clips are retained for next sign-in.", -1);
         }
+        catch (StorageOfflineException ex)
+        {
+            return new FinishOutcome(FinishStatus.Pending,
+                $"Waiting for storage: {ex.Message} Clips are safe on this PC, which keeps the library; the switch finishes automatically when storage is back.",
+                -1, StorageOffline: true);
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or StorageBusyException)
         {
+            if (ex is not StorageBusyException && !store.IsReachable())
+                return new FinishOutcome(FinishStatus.Pending,
+                    "Waiting for storage: the shared library's server cannot be reached right now. Clips are safe on this PC, which keeps the library; "
+                    + "the switch finishes automatically when it is back.", -1, StorageOffline: true);
             return new FinishOutcome(FinishStatus.Pending,
                 $"Clip storage is unreachable or busy ({ex.Message}); the session stays on this PC and will be retried.", -1);
         }
@@ -350,7 +377,7 @@ internal sealed class SessionCoordinator(
             }
         }
         shutdown?.RequireTime();
-        replication?.Publish(snapshot);
+        var replicated = replication?.Publish(snapshot) ?? ReplicationResult.None;
         Report(SessionPhase.Verifying, "Verifying server files, stopping the clip drive and committing the library. Wait for Ready.", session, replica: "Primary storage");
         if (Reopened(session) is { } duringReplication) return duringReplication;
         if (library.Read().Digest() != snapshot.Digest())
@@ -390,9 +417,10 @@ internal sealed class SessionCoordinator(
                 shutdown?.RequireTime();
                 return Ownership.CompleteUnchanged(r, Me, session, clock.Now);
             }, options.LockTimeout);
-            return new FinishOutcome(FinishStatus.Unchanged, "Ready to switch: the library did not change." + Forget(session), journal.CommittedGeneration);
+            return new FinishOutcome(FinishStatus.Unchanged, "Ready to switch: the library did not change." + Deferred(replicated) + Forget(session), journal.CommittedGeneration);
         }
-        return Publish(journal, session, snapshot, onServer, publishVersions);
+        var published = Publish(journal, session, snapshot, onServer, publishVersions);
+        return published with { Message = published.Message + Deferred(replicated) };
     }
 
     /// <summary>
@@ -450,6 +478,9 @@ internal sealed class SessionCoordinator(
             return false;
         }
     }
+
+    private static string Deferred(ReplicationResult result) => result.Deferred.Count == 0 ? ""
+        : $" Cloud copy {string.Join(", ", result.Deferred.Select(n => $"'{n}'"))} is offline or failing; primary storage is verified and the copy retries on the next finish.";
 
     /// <summary>Removes the finished session's cache and login; a failure only leaves files behind.</summary>
     private string Forget(string session)
@@ -535,6 +566,7 @@ internal sealed class SessionCoordinator(
     {
         var told = new HashSet<string>(StringComparer.Ordinal);
         int consecutiveStatusFailures = 0;
+        int offlineRetries = 0;
         var nextCompatibilityCheck = clock.Now;
         void Once(string message)
         {
@@ -547,6 +579,16 @@ internal sealed class SessionCoordinator(
             {
                 var outcome = Finish(session);
                 if (outcome.Status != FinishStatus.Pending) return outcome;
+                if (outcome.StorageOffline)
+                {
+                    // Calm, bounded retries: 30 s doubling to 5 minutes, without repeating the same notice.
+                    Once("Waiting for storage. Clips are safe on this PC; the switch finishes automatically when storage is back.");
+                    var retryAt = clock.Now + TimeSpan.FromSeconds(Math.Min(300, 30 << Math.Min(offlineRetries++, 4)));
+                    while (clock.Now < retryAt && !cancellation.IsCancellationRequested && shutdown?.Ending != true)
+                        Pause(TimeSpan.FromSeconds(Math.Min(5, (retryAt - clock.Now).TotalSeconds)));
+                    continue;
+                }
+                offlineRetries = 0;
                 Once(outcome.Message);
             }
             else

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Support rclone cloud/personal-server primary media with persistent local
+  recording and the SMB ownership journal. Hydrate only missing local media,
+  initialize dedicated primaries explicitly, and verify every primary copy
+  before handoff. Optional cloud replica failures are retained for retry;
+  required replicas still block. Primary outages show Waiting for storage
+  with bounded supervisor backoff.
+
 - Fix `mount-plan` refusing its own `<session>` placeholder. The plan is
   validated with a sample session ID, then shown with the placeholder and a
   quoted rclone path when it contains spaces.

@@ -160,9 +160,11 @@ public sealed class SessionTests : IDisposable
         public bool ExistsOnServer(string capturePath) => OnServerFiles.Contains(capturePath);
 
         public bool ServerReachable { get; set; } = true;
+        public bool StorageOffline { get; set; }
 
         public void RequireServer()
         {
+            if (StorageOffline) throw new StorageOfflineException("Synthetic offline primary");
             if (!ServerReachable) throw new IOException("The clip folder on the server cannot be reached.");
         }
 
@@ -1354,7 +1356,54 @@ public sealed class SessionTests : IDisposable
         public Action? OnPublish { get; set; }
         public int Published { get; private set; }
         public void Prepare(LibrarySnapshot snapshot) => OnPrepare?.Invoke();
-        public void Publish(LibrarySnapshot snapshot) { Published++; OnPublish?.Invoke(); }
+        public ReplicationResult Publish(LibrarySnapshot snapshot) { Published++; OnPublish?.Invoke(); return ReplicationResult.None; }
+    }
+
+    [Fact]
+    public void OfflinePrimaryRetainsOwnershipThenSupervisorBacksOffAndCompletes()
+    {
+        List<SessionProgress> reports = [];
+        var pc = Computer(FirstPc, "first", progress: reports.Add);
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        _assets.StorageOffline = true;
+        var pending = pc.Coordinator.Finish(session);
+        Assert.Equal(FinishStatus.Pending, pending.Status);
+        Assert.True(pending.StorageOffline);
+        Assert.Equal(SessionPhase.WaitingForStorage, reports[^1].Phase);
+        Assert.Equal(FirstPc.DeviceId, _store.ReadJournal().Owner!.DeviceId);
+        Assert.Empty(pc.Mount.Forgotten);
+        var started = _clock.Now;
+        _clock.OnSleep = () => { if (_clock.Now - started >= TimeSpan.FromSeconds(31)) _assets.StorageOffline = false; };
+        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Supervise(session, _ => { }, CancellationToken.None).Status);
+        Assert.Equal(TimeSpan.FromSeconds(90), _clock.Now - started);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void OfflineHydrationReturnsWaitingAndNeverLaunchesMedal()
+    {
+        var pc = Computer(FirstPc, "first", replication: new FakeReplication
+        {
+            OnPrepare = () => throw new StorageOfflineException("A missing clip needs storage"),
+        });
+        var outcome = pc.Coordinator.Launch();
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.True(outcome.StorageOffline);
+        Assert.Equal(0, pc.Medal.Launches);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void JournalDisappearingBeforeLaunchReturnsWaiting()
+    {
+        var pc = Computer(FirstPc, "first");
+        File.Delete(Path.Combine(_store.Root, "journal.json"));
+        var outcome = pc.Coordinator.Launch();
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.True(outcome.StorageOffline);
+        Assert.Empty(pc.Mount.Starts);
+        Assert.Equal(0, pc.Medal.Launches);
     }
 
     [Fact]

@@ -14,6 +14,7 @@ internal static class PromotionCommands
     {
         var spike = MedalSyncConfig.Load(args.Required("--spike-config"));
         var production = MedalSyncConfig.Load(args.Required("--config"));
+        if (spike.PrimaryIsRclone || production.PrimaryIsRclone) throw new UnsafeOperationException("Spike promotion requires SMB primary storage.");
         string serverIgnore = args.Required("--server-ignore");
         bool apply = args.Flag("--apply");
         args.RequireAllUsed();

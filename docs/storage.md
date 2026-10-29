@@ -1,7 +1,8 @@
 # Storage choices
 
 Medal Sync supports an SMB server, a persistent local media collection, and
-required cloud replicas. Server mode shares one-PC-at-a-time library ownership
+cloud or personal-server primary storage, and optional or required replicas.
+Server mode shares one-PC-at-a-time library ownership
 through SMB. Local mode keeps its media and journal on one PC and requires no
 server; optional replicas send its media to cloud storage.
 
@@ -10,7 +11,8 @@ server; optional replicas send its media to cloud storage.
 | Server with SSD cache | SSD-backed virtual drive, uploaded to SMB | Server media; finished session cache is removed |
 | Local copy and server | Virtual drive backed by a persistent local folder | Complete referenced media on the local disk and server |
 | Local storage, with optional cloud copies | Virtual drive backed by a persistent local folder | Local media and optional verified cloud copies; no SMB dependency |
-| Either mode with cloud replicas | Same recording path as above | Media copied and verified at every configured cloud destination |
+| Cloud/personal-server primary with SMB journal | Virtual drive backed by a persistent local folder | Verified primary media and retained local collection |
+| Either mode with cloud replicas | Same recording path as above | Primary verified; optional unavailable copies deferred |
 
 The local collection and VFS cache are separate. `localCopyRoot` names a
 dedicated storage root, for example `E:\MedalLibrary`; with capture folder
@@ -36,8 +38,9 @@ This previews configuration; add `--apply` to create the candidate. Reuse
 `--library-id ID` when configuring another PC. Review configuration while
 Ready and retain the original file before adopting a candidate.
 
-Before Medal starts, the companion copies and verifies the committed
-generation's referenced media from the server into the local collection.
+Before Medal starts, the companion downloads and verifies only referenced
+media missing from the local collection. Existing local files remain untouched.
+Each required file must exist locally or on the primary.
 The virtual drive then writes to that persistent collection. After Medal
 quits and VFS writes drain, the companion copies current referenced media
 to SMB, verifies it byte for byte, and checks server assets before releasing
@@ -84,7 +87,7 @@ in the candidate JSON's optional `replication` object:
     "targets": [
       { "name": "onedrive", "remote": "onedrive:MedalSync" },
       { "name": "dropbox", "remote": "dropbox:MedalSync" },
-      { "name": "google", "remote": "gdrive:MedalSync" }
+      { "name": "google", "remote": "gdrive:MedalSync", "required": true }
     ]
   }
 }
@@ -96,6 +99,33 @@ without cloud. The companion appends the library ID to each cloud destination
 to separate collections. Remotes must name a dedicated folder, not an entire
 provider root. Existing configuration files without `replication` retain their
 original storage behavior.
+
+## Use a cloud provider or personal server as primary
+
+Server-mode `remote` can name a dedicated rclone folder, such as
+`onedrive:MedalSync`, `gdrive:Medal`, `sftp-home:Media/Videos`, or
+`r2:medal-sync`. Set both `replication.localCopyRoot` and an explicit local
+`replication.rcloneConfigPath`. The virtual drive records to the persistent
+local collection; `coordinationRoot` remains on SMB for atomic ownership.
+See the [cloud primary example](../tools/medal-sync/config/medal-sync.cloud.example.json).
+The capture subfolder is appended to the remote: `sftp-home:Media/Clips` for
+`M:\Clips`. Replicas still append the library ID to their own destinations,
+which must not overlap the primary folder. Credentials stay outside media,
+cache, coordination and exported configuration.
+
+To switch primaries, finish the current session first and retain the existing
+configuration. Keep the same library ID, SMB journal and persistent local
+collection; update only the primary destination and necessary credentials.
+Run `medal-sync storage init-primary` to preview, then add `--apply` to mark
+an empty destination or verify an existing matching marker. An unmarked
+nonempty destination or another library's marker is refused. No old primary
+is modified or deleted. The next finish copies all referenced local media
+to the new primary and verifies it byte for byte before releasing ownership.
+For a fresh cloud primary, initialize its marker before `init --apply`; all
+initial library media must already be present there before creating generation 0.
+
+SMB-specific enrollment, relocation, and spike promotion refuse an rclone
+primary. Use those workflows with an SMB primary before switching.
 
 ## Local storage and cloud without a server
 
@@ -141,11 +171,22 @@ clips. Each transfer command has a four-hour default timeout; set
 Interrupted commands are retried on the next finish; completed immutable files
 are reused. Verification starts again to prove the current destination state.
 
-All configured targets are required. A network error, full quota, failed
-verification, conflicting destination file or expired shutdown budget leaves
-ownership and local media on this PC. Quit Medal normally and retry `finish`
-when the cause is resolved. The last successful verification receipt is
-`replication/last-verified.json` under the configured state root.
+Primary storage always requires verification. Replica targets are best-effort
+by default; set `"required": true` on a target to make its failure block handoff.
+Unavailable optional copies are recorded by name with their first failure and
+last attempt in `replication/pending.json`. The next finish retries them and
+clears successful targets. `replication/last-verified.json` separately records
+verified and deferred targets for the last completed replication attempt.
+
+A primary outage leaves ownership and local media on this PC and shows
+**Waiting for storage**. The running supervisor retries after 30 seconds, then
+60, 120, 240, and at most 300 seconds. Handoff finishes after storage returns
+and verification passes. An unavailable SMB journal at launch returns Waiting
+(exit 3); reopen Medal once it returns. A configured primary may be offline at
+launch if all required media is already local, but the journal must be reachable.
+Missing local media waits for storage without opening Medal. A failed required
+copy, conflicting file, unsafe marker, shutdown budget, or reopened Medal still
+retains the session. Cancellation never counts as an optional provider failure.
 
 The copier adds files and refuses conflicting replacements. It does not
 propagate deletions or remove older replica files. Removing a clip from Medal
@@ -160,8 +201,9 @@ file, rclone moves the previous file beneath
 `.medal-sync-history/TIMESTAMP-ATTEMPT/` at that destination. The replacement is
 then verified byte for byte. Histories are never copied back into the library
 or automatically pruned. Budget space for retained versions. The default
-`"STOP"` policy refuses replacements. Hydration from the server always refuses
-conflicting local files to protect unpublished work.
+`"STOP"` policy refuses replacements. Hydration never replaces existing local files. Possible unpublished local work
+stays on this PC; differing primary files are refused at publication unless
+the configured version policy explicitly preserves their previous bytes.
 
 Cloud folders cannot replace the SMB ownership journal: consumer sync does
 not provide the locking used by this companion. Cloud-only coordination and
