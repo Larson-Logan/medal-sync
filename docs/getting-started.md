@@ -107,7 +107,9 @@ $cli = "$env:ProgramFiles/Medal Sync/bin/medal-sync.exe"
 Use `--apply` only after reviewing the preview; it creates a new candidate file
 and refuses to overwrite an existing file. Validate it with
 `config validate --config FILE`. Validation checks syntax and paths, not
-server readiness. Keep real configuration and identity outside Git.
+server readiness. Missing, null or empty required fields produce an invalid
+configuration diagnostic naming the field and exit code 1; correct the candidate
+and validate it again. Keep real configuration and identity outside Git.
 
 After validating the candidate, place it at `config.json` in the resolved user
 data folder described above or shown by an unconfigured desktop launch. Create
