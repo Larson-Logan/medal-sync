@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add an exact preview/apply workflow for stale persistent local media. Show
+  matches to retained server history separately from unknown local changes,
+  preserve replaced bytes, and retain ownership until interrupted refreshes
+  resume and verify the whole reviewed file set.
 - Fix `mount-plan` refusing its own `<session>` placeholder. The plan is
   validated with a sample session ID, then shown with the placeholder and a
   quoted rclone path when it contains spaces.

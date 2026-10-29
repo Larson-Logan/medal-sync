@@ -163,6 +163,52 @@ or automatically pruned. Budget space for retained versions. The default
 `"STOP"` policy refuses replacements. Hydration from the server always refuses
 conflicting local files to protect unpublished work.
 
+### Review and refresh persistent local media
+
+When another PC publishes changed bytes at an existing path, close Medal and
+finish the local mounted session before reviewing the persistent copy:
+
+```powershell
+medal-sync refresh-media --out C:\Private\media-review.json
+medal-sync refresh-media --in C:\Private\media-review.json --apply
+```
+
+The preview lists each conflicting relative path. A byte-for-byte match to a
+file preserved beneath the server's `.medal-sync-history` is identified as
+matching retained history. Every other differing local file is an **unknown
+local modification**; do not assume it is stale. Inspect those paths and keep
+unpublished work. Replacing unknown files requires explicitly adding
+`--accept-unknown-media` when applying this exact plan. This approval covers
+all unknown conflicts listed in that plan. Preview and apply never start Medal.
+
+The private plan binds the library, device, configuration, committed generation,
+ownership revision and hashes/identities of every referenced server/local file.
+Keep the plan local: it contains identifiers and media paths. A changed review
+state refuses before replacing files; prepare and review a new plan while the
+journal is Ready. Compatibility, idle Medal, storage identity and configuration
+are checked again immediately before replacement. Ordinary unattended hydration
+keeps refusing conflicts, including with the VERSION publication policy.
+
+Apply acquires ownership, saves the plan and copies every replaced local file
+to `Backups/media-refresh-PLAN_ID/previous/` under the resolved state root.
+Only after verifying each backup does it stage and verify replacement bytes on
+the persistent volume and atomically replace the reviewed file. Budget space
+for retained backups and a staged media file. Backups are never automatically
+pruned. This workflow copies only the committed library's referenced media;
+it does not alter the database or resurrect deleted clips.
+
+An interruption retains ownership, the original review and all preserved bytes.
+Ordinary launch and finish refuse that refresh session. Retry the same
+`refresh-media --in ... --apply` command on the same PC, with the same explicit
+unknown-file approval if needed. It verifies already replaced files and backups
+before continuing. Partial staged writes are preserved as `partial-*` recovery
+files before retrying. A changed source, unexpected local edit or damaged backup
+refuses further replacement and retains evidence for manual recovery. Restore
+the reviewed configuration/device identity before retrying if either changed.
+After the entire reviewed file set verifies again, the journal returns to Ready;
+open Medal through Medal Sync normally. An explicit abandon remains an operator
+recovery decision and does not reconcile local media.
+
 Cloud folders cannot replace the SMB ownership journal: consumer sync does
 not provide the locking used by this companion. Cloud-only coordination and
 automatic two-way conflict merging are not supported. Local mode avoids the
