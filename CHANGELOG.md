@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `SUPPORT.md` now asks for a `diagnostics` summary in reports. The exporter
+  was checked on a real Windows PC with an active library; its preview held no
+  paths, names or IDs and saved nothing.
 - Add `diagnostics [--out FILE]`, a privacy-safe summary to share when asking
   for help. It reports versions, schema compatibility, installation and
   storage mode, coarse free space, ownership state and refusal codes, built
