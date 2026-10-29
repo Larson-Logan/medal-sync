@@ -39,9 +39,10 @@ then an older `%LOCALAPPDATA%/LarsonServer/MedalSync` configuration. Fresh
 installations use `$HOME/.medal-sync`. Existing portable installations continue
 using adjacent state. No identity or library data is copied by setup.
 
-An unconfigured desktop launch shows the expected configuration path and points
-to **Medal Sync Setup Guide** in the Start menu. An unconfigured sign-in launch
-exits quietly. Neither launch creates configuration or a device identity.
+An unconfigured desktop launch shows the expected configuration path and offers
+the native configuration wizard. Open **Medal Sync Setup Guide** in the Start
+menu for the full setup steps. An unconfigured sign-in launch exits quietly.
+Declining or canceling the wizard leaves configuration and identity untouched.
 Repeated sign-in launches also leave an already supervised session alone.
 
 ## Choose storage
@@ -54,6 +55,40 @@ Local mode keeps media and coordination on this PC, with optional cloud copies
 and no SMB dependency. It does not provide automatic handoff to another PC.
 
 ## Plan configuration before using live data
+
+Run `medal-sync-launch.exe --configure`, choose **Configure** from the status
+tray menu, or accept the wizard offered by an unconfigured desktop launch.
+Choose local storage or server (SMB) storage and explicitly choose a new library
+ID or enter the existing ID to join. Supply the account ID from `medal-sync
+inspect`, storage/coordination/cache folders, capture drive and folder, and
+optional persistent local copy and cloud targets (`name=remote:folder`, one per
+line). Local mode needs no persistent-copy field because its primary storage
+already stays on this PC. Cloud credentials remain in the separate local rclone
+configuration file; authorize providers explicitly with `rclone config` first.
+
+Create the dedicated storage, coordination and cache folders before reviewing.
+The wizard checks path rules, Medal compatibility/account, folder availability,
+the rclone executable and the SSD free-space reserve. A new library ID must not
+already have a coordination directory. Joining checks the existing journal and
+committed generation and requires Ready. **Review** shows the resolved state
+location, identity, destinations, capture drive, cache limit/reserve, planned
+session length, sync exclusions and remaining initialization/enrollment steps.
+Press **Confirm and save** only after reviewing them; Enter in the review page
+does not save. **Back** discards that review; **Cancel** and Escape leave the
+existing setup untouched.
+
+An existing setup displays and preserves its account, library and device
+identities. Before changes, both its original journal and the proposed
+destination must be Ready and no unfinished local session may remain. Saving
+rechecks compatibility, storage and the exact reviewed config/device files,
+retains a verified configuration backup in `Backups`, and atomically replaces
+the configuration. Changed review state or a linked/reparse state path refuses
+saving. Recover missing configuration with an existing device identity from its
+original backup instead of creating a new identity. No wizard operation mounts
+storage, initializes a journal, enrolls a PC, changes Medal's database or edits
+startup entries. Continue with the separate reviewed steps below after saving.
+
+The CLI configuration workflow remains available:
 
 The JSON examples under `tools/medal-sync/config/` contain placeholders. The
 `192.0.2.10` address is documentation-only; replace it with your server.
