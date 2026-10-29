@@ -226,7 +226,7 @@
     "scripts/storage/medal-sync/set-medal-sync-exclusions.ps1": "e63b96b55f9c02ea4e5a069df81dc7229bc0125f712c7429e6502e05276a51eb",
     "scripts/storage/medal-sync/update-medal-sync.ps1": "36e86c30ffc723ff90f141770ba8eeabefa8c2db2d99115c21ac17ef5a1f0829",
     "scripts/test-storage-integration.ps1": "daf771c40b5161cbac67be909ec6f8eacd8bcee0305f74f95336c57b6f970a36",
-    "scripts/test-windows-installer-isolated.ps1": "aa252cc4176f07b55f9b72756ec03879852209f71682b08cfe2498851e21126d",
+    "scripts/test-windows-installer-isolated.ps1": "9a0986a43189719e199acee85dc918168f67e043128265a59aeee30cc878ad06",
     "scripts/test-windows-installer.ps1": "6cc32350f9a218a83db0ea2c9d2df0fef85ef243a03bff1b87db1b9a4679dcdf",
     "scripts/update-source-manifest.py": "01898a18ae553399ea7bf43a15859016198683365e13f260297eed412899b71b",
     "scripts/validate.ps1": "770eb967f7608849162fcf40f590f1409d5c5c9d470b17a46f9582434e654bf2",

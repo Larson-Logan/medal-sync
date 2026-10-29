@@ -55,6 +55,8 @@ try {
     Assert-Check (Test-Path -LiteralPath (Join-Path $shortcutGroup 'Medal Sync Setup Guide.lnk')) 'offline guide shortcut exists'
     $shell = New-Object -ComObject WScript.Shell
     try {
+        $statusShortcut = $shell.CreateShortcut((Join-Path $shortcutGroup 'Medal Sync Status.lnk'))
+        Assert-Check ($statusShortcut.TargetPath -eq (Join-Path $app 'bin/medal-sync-launch.exe') -and $statusShortcut.Arguments -eq '--status') 'native status shortcut opens the independent status view'
         $updateShortcut = $shell.CreateShortcut((Join-Path $shortcutGroup 'Check for Medal Sync updates.lnk'))
         Assert-Check ($updateShortcut.TargetPath -eq (Join-Path $app 'bin/medal-sync-launch.exe') -and $updateShortcut.Arguments -eq '--check-updates') 'native update shortcut uses the configuration-independent update entrypoint'
         $uninstallShortcut = $shell.CreateShortcut((Join-Path $shortcutGroup 'Uninstall Medal Sync.lnk'))
