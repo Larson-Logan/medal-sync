@@ -1,6 +1,6 @@
 # Medal Sync
 
-[![Windows validation](https://github.com/Larson-Logan/medal-sync/actions/workflows/validate.yml/badge.svg)](https://github.com/Larson-Logan/medal-sync/actions/workflows/validate.yml)
+[![Validation](https://github.com/Larson-Logan/medal-sync/actions/workflows/validate.yml/badge.svg)](https://github.com/Larson-Logan/medal-sync/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Your Medal recordings, on your storage.** A Windows companion for

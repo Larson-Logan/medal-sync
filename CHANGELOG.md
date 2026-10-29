@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Release downloads carry a GitHub build provenance attestation. Check that a
+  setup EXE or ZIP was built from the tagged source with
+  `gh attestation verify FILE --repo Larson-Logan/medal-sync`.
 - Lower background CPU, memory and disk use. While Medal runs, the supervisor
   re-checks the Medal process it already found instead of listing every process
   each poll, and rewrites the private status file only when status changes or

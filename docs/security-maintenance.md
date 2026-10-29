@@ -29,7 +29,9 @@ with the [standalone suite](../tests/README.md) before merging it.
 
 The main ruleset must explicitly select `~DEFAULT_BRANCH`, refuse deletion and
 force pushes, require a pull request with resolved review threads, and require
-the `validate` check from GitHub Actions with the branch up to date. A ruleset
+the `validate` check from GitHub Actions with the branch up to date. `validate`
+summarizes the other jobs: it passes only when every suite passed, or when a
+documentation-only pull request skipped the Windows suites. A ruleset
 whose include list is empty does not protect main. The solo-maintainer policy
 requires zero approving reviews; this does not establish independent review.
 
@@ -47,7 +49,9 @@ Require full commit SHA pins for Actions. Allow `actions/*` and
 `github/codeql-action/*`; review an action's source and requested permissions
 before expanding this allowlist. Default workflow permissions stay read-only,
 and Actions cannot approve pull requests. Checkout must not retain credentials.
-Write permissions belong only to the job that needs them.
+Write permissions belong only to the job that needs them. Workflow lint
+downloads a release of actionlint pinned by version and SHA-256 rather than
+using a third-party action. Validation caches never feed a release build.
 
 Require approval for all external fork contributors. Approval does not make fork
 code safe for a self-hosted runner. Keep untrusted code away from personal data,
