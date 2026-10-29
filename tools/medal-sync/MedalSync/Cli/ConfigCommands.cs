@@ -13,8 +13,9 @@ internal static class ConfigCommands
         args.RequireAllUsed();
         var config = MedalSyncConfig.Load(path);
         output.WriteLine($"Valid configuration: account {config.AccountId}, library {config.LibraryId}.");
-        output.WriteLine($"Capture: {config.Capture.Display}; storage: {config.ServerCapture.Display}; cache: {config.CacheRoot}.");
-        output.WriteLine($"Recording storage: {config.MountRemote}; cloud replicas: {config.Replication?.Targets.Count ?? 0}.");
+        output.WriteLine($"Capture: {config.Capture.Display}; primary storage: {config.PrimaryCapture}{(config.PrimaryIsRclone ? " (rclone remote)" : "")}; cache: {config.CacheRoot}.");
+        var targets = config.Replication?.Targets ?? [];
+        output.WriteLine($"Recording storage: {config.MountRemote}; cloud replicas: {targets.Count} ({targets.Count(t => t.Required)} required, others retry when offline).");
         output.WriteLine("Syntax and path checks only; storage access, sync exclusions and device readiness are separate checks.");
         return 0;
     }

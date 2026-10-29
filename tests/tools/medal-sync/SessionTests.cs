@@ -1467,7 +1467,8 @@ public sealed class SessionTests : IDisposable
         public Action? OnPublish { get; set; }
         public int Published { get; private set; }
         public void Prepare(LibrarySnapshot snapshot) => OnPrepare?.Invoke();
-        public void Publish(LibrarySnapshot snapshot) { Published++; OnPublish?.Invoke(); }
+        public IReadOnlyList<string> Deferred { get; set; } = [];
+        public ReplicationResult Publish(LibrarySnapshot snapshot) { Published++; OnPublish?.Invoke(); return new(Deferred); }
     }
 
     [Fact]
@@ -1557,6 +1558,89 @@ public sealed class SessionTests : IDisposable
         Assert.Equal(FinishStatus.Pending, pc.Coordinator.Finish(session).Status);
         Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
         Assert.Empty(pc.Mount.Forgotten);
+    }
+
+    [Fact]
+    public void OfflinePrimaryAtFinishWaitsCalmlyRetainsOwnershipAndFinishesWhenBack()
+    {
+        List<SessionProgress> reports = [];
+        var replication = new FakeReplication { OnPublish = () => throw new StorageOfflineException("synthetic outage") };
+        var pc = Computer(FirstPc, "first", replication: replication, progress: reports.Add);
+        string session = pc.Coordinator.Launch().Session!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        var waiting = pc.Coordinator.Finish(session);
+        Assert.Equal(FinishStatus.Pending, waiting.Status);
+        Assert.True(waiting.StorageOffline);
+        Assert.StartsWith("Waiting for storage", waiting.Message);
+        Assert.Equal(SessionPhase.WaitingForStorage, reports.Last(r => r.IsOutcome).Phase);
+        Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
+        Assert.Empty(pc.Mount.Forgotten);
+        replication.OnPublish = null;
+        Assert.Equal(FinishStatus.Published, pc.Coordinator.Finish(session).Status);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void SupervisorBacksOffDuringAStorageOutageAndNotifiesOnce()
+    {
+        int attempts = 0;
+        var replication = new FakeReplication { OnPublish = () => { if (++attempts <= 3) throw new StorageOfflineException("synthetic outage"); } };
+        var pc = Computer(FirstPc, "first", replication: replication);
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        var started = _clock.Now;
+        List<string> notices = [];
+        var finished = pc.Coordinator.Supervise(session, notices.Add, CancellationToken.None);
+        Assert.Equal(FinishStatus.Unchanged, finished.Status);
+        Assert.Equal(4, attempts);
+        Assert.True(_clock.Now - started >= TimeSpan.FromSeconds(30 + 60 + 120));
+        Assert.StartsWith("Waiting for storage", Assert.Single(notices));
+    }
+
+    [Fact]
+    public void DeferredOptionalReplicaStillReleasesTheLibraryAndIsNamed()
+    {
+        var replication = new FakeReplication { Deferred = ["cloud"] };
+        var pc = Computer(FirstPc, "first", replication: replication);
+        string session = pc.Coordinator.Launch().Session!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        var finished = pc.Coordinator.Finish(session);
+        Assert.Equal(FinishStatus.Published, finished.Status);
+        Assert.Contains("'cloud'", finished.Message);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void OfflineHydrationAtLaunchWaitsInsteadOfBlocking()
+    {
+        List<SessionProgress> reports = [];
+        var replication = new FakeReplication { OnPrepare = () => throw new StorageOfflineException("synthetic outage") };
+        var pc = Computer(FirstPc, "first", replication: replication, progress: reports.Add);
+        var outcome = pc.Coordinator.Launch();
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.True(outcome.StorageOffline);
+        Assert.Equal(SessionPhase.WaitingForStorage, reports.Last().Phase);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal(0, pc.Medal.Launches);
+    }
+
+    [Fact]
+    public void UnreachableJournalAtLaunchIsAWaitNotAnException()
+    {
+        var pc = Computer(FirstPc, "first");
+        string offline = _store.Root + "-offline";
+        Directory.Move(_store.Root, offline);
+        try
+        {
+            var outcome = pc.Coordinator.Launch();
+            Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+            Assert.True(outcome.StorageOffline);
+            Assert.Equal(0, pc.Medal.Launches);
+        }
+        finally { Directory.Move(offline, _store.Root); }
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
     }
 
     private sealed class StoppingClock(IClock inner, Action onSleep) : IClock

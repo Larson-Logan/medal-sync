@@ -34,6 +34,7 @@ internal static class Program
             string rclone = args[Array.IndexOf(args, "--rclone") + 1];
             if (!File.Exists(rclone)) throw new IOException("An explicit pinned rclone executable is required.");
             TestReplication(rclone);
+            TestCloudPrimary(rclone);
             TestInterruptedTransfer(rclone);
             if (args.Contains("--mount"))
             {
@@ -120,7 +121,8 @@ internal static class Program
         return file;
     }
 
-    private static ReplicaTarget[] Targets() => [new("onedrive", "onedrive:MedalSync"), new("dropbox", "dropbox:MedalSync"), new("google", "gdrive:MedalSync")];
+    private static ReplicaTarget[] Targets() => [new("onedrive", "onedrive:MedalSync") { Required = true },
+        new("dropbox", "dropbox:MedalSync") { Required = true }, new("google", "gdrive:MedalSync") { Required = true }];
 
     private static string ReplicaFile(MedalFixture fixture, string remote, string file) =>
         fixture.PathFor(remote, "MedalSync", "0123456789abcdef0123456789abcdef", file);
@@ -172,6 +174,51 @@ internal static class Program
         string history = Path.Combine(Path.GetDirectoryName(ReplicaFile(fixture, "onedrive", "#clip [test].mp4"))!, ".medal-sync-history");
         Check(Directory.EnumerateFiles(history, "*.mp4", SearchOption.AllDirectories).Any(f => File.ReadAllText(f) == "prior destination version"), "versioned replication preserves the previous destination before updating");
         Check(File.ReadAllText(ReplicaFile(fixture, "onedrive", "#clip [test].mp4")) == "synthetic media bytes", "versioned replication verifies the updated destination");
+    }
+
+    private static void TestCloudPrimary(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone) with
+        {
+            StorageMode = StorageMode.Server, Remote = "onedrive:Primary",
+            Replication = new(fixture.PathFor("persistent"), Remotes(fixture), [new("optional", "gdrive:Replica")]),
+        };
+        var state = new LocalState(fixture.PathFor("state"));
+        var checker = new RcloneAssetChecker(config, state);
+        checker.Initialize(false);
+        Check(File.ReadAllText(fixture.PathFor("onedrive", "Primary", "Clips", MedalSyncConfig.StorageMarker)).Trim() == config.LibraryId,
+            "real named primary initializes and reads back its immutable library marker");
+        Directory.CreateDirectory(config.MountedCapture.Display);
+        File.WriteAllText(config.MountedCapture.Append(MedalSyncConfig.StorageMarker).Display, config.LibraryId);
+        File.WriteAllText(config.MountedCapture.Append("clip.mp4").Display, "synthetic primary media");
+        string db = fixture.CreateLibrary("source");
+        MedalFixture.AddContent(db, "clip", video: config.Capture.Append("clip.mp4").Display);
+        var snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        var replication = new StorageReplication(config, state, () => { });
+        replication.Prepare(snapshot);
+        replication.Publish(snapshot);
+        Check(File.ReadAllText(fixture.PathFor("onedrive", "Primary", "Clips", "clip.mp4")) == "synthetic primary media",
+            "real named primary receives and byte-verifies local-only media");
+        string optional = fixture.PathFor("gdrive", "Replica", config.LibraryId, "clip.mp4");
+        File.WriteAllText(optional, "synthetic conflict");
+        Check(replication.Publish(snapshot).Deferred.SequenceEqual(["optional"]) && StorageReplication.Pending(state, config.LibraryId).Count == 1,
+            "real optional replica conflict is deferred with pending evidence after primary verification");
+        File.Delete(optional); // Disposable synthetic destination only.
+        replication.Publish(snapshot);
+        Check(StorageReplication.Pending(state, config.LibraryId).Count == 0 && File.ReadAllText(optional) == "synthetic primary media",
+            "real optional replica retry verifies bytes and clears pending evidence");
+        var migrated = config with { Remote = "dropbox:NewPrimary" };
+        new RcloneAssetChecker(migrated, state).Initialize(false);
+        new StorageReplication(migrated, state, () => { }).Prepare(snapshot);
+        new StorageReplication(migrated, state, () => { }).Publish(snapshot);
+        Check(File.ReadAllText(fixture.PathFor("dropbox", "NewPrimary", "Clips", "clip.mp4")) == "synthetic primary media"
+            && File.Exists(fixture.PathFor("onedrive", "Primary", "Clips", "clip.mp4")),
+            "switching to an empty named primary verifies all media and preserves the old primary");
+        var second = migrated with { Replication = migrated.Replication! with { LocalCopyRoot = fixture.PathFor("second-local") } };
+        new StorageReplication(second, new(fixture.PathFor("second-state")), () => { }).Prepare(snapshot);
+        Check(File.ReadAllText(second.MountedCapture.Append("clip.mp4").Display) == "synthetic primary media",
+            "a second local collection hydrates missing bytes from the real named primary");
     }
 
     private static void TestInterruptedTransfer(string rclone)

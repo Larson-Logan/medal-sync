@@ -1,16 +1,18 @@
 # Storage choices
 
-Medal Sync supports an SMB server, a persistent local media collection, and
-required cloud replicas. Server mode shares one-PC-at-a-time library ownership
-through SMB. Local mode keeps its media and journal on one PC and requires no
-server; optional replicas send its media to cloud storage.
+Medal Sync supports primary storage on an SMB server or any named rclone remote
+(cloud or a personal server), a persistent local media collection, and cloud
+replicas. Server mode shares one-PC-at-a-time library ownership through the SMB
+journal. Local mode keeps its media and journal on one PC and requires no
+server; replicas send its media to cloud storage.
 
 | Mode | Where Medal writes | What stays after handoff |
 | --- | --- | --- |
 | Server with SSD cache | SSD-backed virtual drive, uploaded to SMB | Server media; finished session cache is removed |
 | Local copy and server | Virtual drive backed by a persistent local folder | Complete referenced media on the local disk and server |
 | Local storage, with optional cloud copies | Virtual drive backed by a persistent local folder | Local media and optional verified cloud copies; no SMB dependency |
-| Either mode with cloud replicas | Same recording path as above | Media copied and verified at every configured cloud destination |
+| Cloud or personal-server primary | Virtual drive backed by a persistent local folder | Local media and the rclone primary; journal stays on the server |
+| Either mode with cloud replicas | Same recording path as above | Media copied and verified at each reachable cloud destination; offline ones retry later |
 
 The local collection and VFS cache are separate. `localCopyRoot` names a
 dedicated storage root, for example `E:\MedalLibrary`; with capture folder
@@ -37,7 +39,8 @@ This previews configuration; add `--apply` to create the candidate. Reuse
 Ready and retain the original file before adopting a candidate.
 
 Before Medal starts, the companion copies and verifies the committed
-generation's referenced media from the server into the local collection.
+generation's referenced media that the server holds into the local collection.
+Clips that only this PC holds are uploaded and verified at finish.
 The virtual drive then writes to that persistent collection. After Medal
 quits and VFS writes drain, the companion copies current referenced media
 to SMB, verifies it byte for byte, and checks server assets before releasing
@@ -47,6 +50,49 @@ collection stays. Initial hydration can take time for a large library.
 The SMB journal must be reachable to acquire ownership. This is not an
 offline multi-writer mode. A server outage during recording leaves local
 work in place; recovery and handoff wait for the server to return.
+
+## Use a cloud provider or personal server as primary storage
+
+`--remote` (JSON `remote`) accepts either a UNC share or a named rclone remote
+and dedicated folder, for example `onedrive:MedalSync`, `gdrive:Medal`,
+`r2:medal-sync` or `sftp-home:Media/Videos`. Configure the remote as shown in
+the next section. An rclone primary requires `--local-copy-root` and
+`--rclone-config`: Medal always records to the persistent local copy, and the
+companion uploads and verifies byte for byte before handoff, exactly as for an
+SMB primary. `--coordination-root` must still be the SMB share, because cloud
+folders cannot provide the ownership lock.
+
+```powershell
+& $cli config create --account-id YOUR_ACCOUNT_ID --library-id YOUR_LIBRARY_ID `
+  --cache-root E:\MedalCache --local-copy-root E:\MedalLibrary `
+  --remote sftp-home:Media/Videos --rclone-config "$HOME/.medal-sync/rclone.conf" `
+  --coordination-root '\\YOUR-SERVER\Data\AppData\MedalSync' `
+  --out "$HOME/medal-sync-candidate.json"
+```
+
+See the [cloud primary example](../tools/medal-sync/config/medal-sync.cloud.example.json).
+
+### Switch primaries
+
+Primaries are interchangeable. Startup downloads only the clips that the
+primary holds and this PC lacks. Every finish uploads all referenced clips to
+the configured primary and verifies them. To move a library:
+
+1. On the PC with the complete local copy, adopt a configuration whose
+   `remote` names the new primary, with the same library ID.
+2. While Ready, run `medal-sync storage init-primary`, then repeat with
+   `--apply`. It writes the library marker only to an empty folder, or verifies
+   an existing marker.
+3. Open Medal and finish normally. The next finish uploads and verifies every
+   clip at the new primary before releasing the library.
+4. Update every other PC's configuration to the new primary.
+
+A PC that still points at the old primary refuses to start if the library
+needs clips that are missing there and locally. Nothing is lost. The old
+primary is never modified or deleted; remove it yourself once every PC uses the new one.
+
+Enrollment copies, relocation copies, spike promotion and persistent media
+refresh (`refresh-media`) work on folder primaries only. They refuse an rclone primary.
 
 ## Add OneDrive, Dropbox or Google Drive
 
@@ -89,6 +135,10 @@ in the candidate JSON's optional `replication` object:
   }
 }
 ```
+
+Add `"required": true` to a target that must be verified before every
+handoff. Other targets are best-effort; see
+[offline storage](#offline-storage).
 
 Set `localCopyRoot` to `null` to keep server-with-cache recording and add only
 cloud replicas. Use an empty `targets` array for local-and-server storage
@@ -141,11 +191,33 @@ clips. Each transfer command has a four-hour default timeout; set
 Interrupted commands are retried on the next finish; completed immutable files
 are reused. Verification starts again to prove the current destination state.
 
-All configured targets are required. A network error, full quota, failed
-verification, conflicting destination file or expired shutdown budget leaves
-ownership and local media on this PC. Quit Medal normally and retry `finish`
-when the cause is resolved. The last successful verification receipt is
-`replication/last-verified.json` under the configured state root.
+Primary storage and targets marked `"required": true` must verify before
+handoff. A network error, full quota, failed verification, conflicting
+destination file or expired shutdown budget there leaves ownership and local
+media on this PC. Quit Medal normally and retry `finish` when the cause is
+resolved. The last verification receipt is `replication/last-verified.json`
+under the configured state root; it lists verified and deferred targets.
+
+### Offline storage
+
+Remote outages are waits, not errors:
+
+- **Optional cloud replicas.** If a replica cannot be reached or fails, the
+  primary's verified copy still lets the library hand off. The target is
+  recorded in `replication/pending.json` with its first failure and latest
+  attempt. `status`, the tray panel and the
+  finish result name it, and the next finish retries it. Any failure is
+  deferred, including a conflicting destination file, so check `status` for
+  long-pending targets. Medal reopening and Windows shutdown still stop the
+  finish as before.
+- **Primary storage or the server journal.** Finish keeps ownership and media
+  on this PC and reports *Waiting for storage*. The supervisor retries with
+  backoff from 30 seconds up to 5 minutes and completes the handoff when
+  storage returns.
+- **At launch.** With a persistent local copy that already holds every
+  referenced clip, Medal starts and records locally while the primary is
+  offline. If clips must be downloaded first, or the server journal is
+  unreachable, launch waits (exit code 3) and changes nothing.
 
 The copier adds files and refuses conflicting replacements. It does not
 propagate deletions or remove older replica files. Removing a clip from Medal
@@ -210,7 +282,8 @@ open Medal through Medal Sync normally. An explicit abandon remains an operator
 recovery decision and does not reconcile local media.
 
 Cloud folders cannot replace the SMB ownership journal: consumer sync does
-not provide the locking used by this companion. Cloud-only coordination and
+not provide the locking used by this companion. An rclone primary holds media
+only. Cloud-only coordination and
 automatic two-way conflict merging are not supported. Local mode avoids the
 server by keeping coordination on one PC. The reproducible integration suite
 uses real rclone processes, named local test remotes and real WinFsp mounts.
