@@ -2,7 +2,9 @@
 
 `Directory.Build.props` is the single version source for both programs. Stable
 releases use `MAJOR.MINOR.PATCH` and the exact tag `vMAJOR.MINOR.PATCH`.
-Changelog entries remain Unreleased until publication.
+[Versions and schemas](versioning.md) explains which part to raise and how file
+formats and Medal schemas are versioned. Changelog entries remain Unreleased
+until publication.
 
 ## Build locally
 
@@ -75,11 +77,11 @@ action and NuGet updates, grouping minor and patch versions while keeping major
 upgrades separate. See [maintainer triage](triage.md) for review and labels.
 
 Update the version and changelog, merge validated changes to main, then tag
-that commit and push the exact version tag. For version 1.0.0:
+that commit and push the exact version tag. For version 1.1.0:
 
 ```powershell
-git tag -a v1.0.0 -m 'Medal Sync 1.0.0'
-git push origin v1.0.0
+git tag -a v1.1.0 -m 'Medal Sync 1.1.0'
+git push origin v1.1.0
 ```
 
 The release workflow checks tag/version equality and main ancestry, runs tests,
@@ -93,7 +95,7 @@ for the setup EXE and portable ZIP. Anyone can check that a download was built
 by this workflow from the tagged commit:
 
 ```powershell
-gh attestation verify medal-sync-1.0.0-setup-win-x64.exe --repo Larson-Logan/medal-sync
+gh attestation verify medal-sync-1.1.0-setup-win-x64.exe --repo Larson-Logan/medal-sync
 ```
 
 Generated notes use [.github/release.yml](../.github/release.yml) to group PRs

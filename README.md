@@ -96,7 +96,8 @@ maintainer review.
 
 - [Contributing](CONTRIBUTING.md), [local development](docs/local-development.md),
   [tests](tests/README.md) and [changelog](CHANGELOG.md)
-- [Release process](docs/releases.md), [security](SECURITY.md) and
+- [Release process](docs/releases.md), [versions and schemas](docs/versioning.md),
+  [security](SECURITY.md) and
   [third-party dependencies](THIRD_PARTY.md)
 
 ## Help improve Medal Sync

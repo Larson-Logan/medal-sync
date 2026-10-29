@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.1.0 — 2026-10-29
+
 - Release downloads carry a GitHub build provenance attestation. Check that a
   setup EXE or ZIP was built from the tagged source with
   `gh attestation verify FILE --repo Larson-Logan/medal-sync`.

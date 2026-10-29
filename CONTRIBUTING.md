@@ -61,6 +61,8 @@ need tests covering refusal and recovery as well as success. Unknown states
 must fail closed. See [getting started](docs/getting-started.md) for the safety
 model. Keep package lock files current and use locked restores. The shared
 version is in Directory.Build.props; record user-visible changes in CHANGELOG.md.
+A change to a file `format` or to supported Medal schemas follows
+[versions and schemas](docs/versioning.md).
 
 Build the setup EXE and portable ZIP when changing packaging:
 
