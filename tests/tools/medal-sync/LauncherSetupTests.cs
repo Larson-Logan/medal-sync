@@ -16,6 +16,8 @@ public sealed class LauncherSetupTests : IDisposable
         public void Show(string message) => Messages.Add(message);
         public void Notify(string message) => throw new InvalidOperationException("No session notifications during setup.");
         public bool ConfirmLibraryChanges(LibraryChangeReview review) => throw new InvalidOperationException("No library access during setup.");
+        public bool AcceptConfiguration { get; init; }
+        public bool OfferConfiguration(string message) { Messages.Add(message); return AcceptConfiguration; }
     }
 
     [Theory]
@@ -120,5 +122,19 @@ public sealed class LauncherSetupTests : IDisposable
         Assert.Contains("recover its original configuration", Assert.Single(ui.Messages), StringComparison.Ordinal);
         Assert.Equal("synthetic identity", File.ReadAllText(device));
         Assert.Equal("synthetic retained session", File.ReadAllText(session));
+    }
+
+    [Theory]
+    [InlineData(true, false, 0)]
+    [InlineData(false, false, 0)]
+    [InlineData(false, true, 1)]
+    public void ConfigurationWizardRequiresAnExplicitManualChoice(bool signIn, bool accepted, int opened)
+    {
+        var state = new LocalState(_fixture.PathFor("wizard-absent"));
+        var ui = new Ui { AcceptConfiguration = accepted };
+        int calls = 0;
+        Assert.Equal(1, Launcher.CheckConfiguration(new LauncherRequest(signIn, null), state, ui, target => { Assert.Same(state, target); calls++; }));
+        Assert.Equal(opened, calls);
+        Assert.False(Directory.Exists(state.Root));
     }
 }
