@@ -51,6 +51,27 @@ its disk is connected and suitable and adds up the clips' size. If the download
 would leave less than the minimum free space (`mount.minFreeGiB`) on that disk,
 launch refuses and downloads nothing.
 
+### Low disk space while recording
+
+While Medal records, Medal Sync checks the free space on the cache's disk and
+the persistent copy's disk every 30 seconds and shows a notice when it changes:
+
+- **Low disk space** when free space falls to the warning level. By default
+  that is twice `mount.minFreeGiB`, and at least 10 GiB above it. Set
+  `mount.spaceWarningGiB` to choose another level above `mount.minFreeGiB`.
+  The notice includes a rough time left at Medal's current bitrate.
+- **At the reserve** when free space falls to `mount.minFreeGiB` (at least
+  1 GiB). Medal may soon fail to save clips; free up space on that disk.
+- **Back to normal** once free space is clearly above the warning level again.
+
+A cache and persistent copy on one disk get one notice. A disk that hovers
+near a level is announced once, and the same notice is not repeated within 30
+minutes. If the free space cannot be read three times in a row (an unplugged or
+very slow disk), a notice says it could not be checked; that is never treated
+as enough space. These are warnings only: Medal Sync never deletes clips that
+have not been copied yet and never closes Medal. During Windows shutdown the
+notices are logged without being shown.
+
 ## Keep a local copy and upload to the server
 
 Add `--local-copy-root` to the configuration workflow in

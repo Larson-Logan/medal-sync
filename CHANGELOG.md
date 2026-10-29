@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Warn while recording when the cache's disk or the persistent copy's disk runs
+  low on space, again when it reaches the `mount.minFreeGiB` reserve, and when
+  space returns. Folders on one disk share a notice; hysteresis and a 30-minute
+  quiet period prevent repeats; a disk that cannot be measured is reported as
+  unknown. Checks run in the background so a slow disk cannot delay
+  supervision. The warning level defaults from the reserve and can be set with
+  the optional `mount.spaceWarningGiB`.
 - Add read-only `history list` and `history diff`. The list follows the
   committed head's ancestry, marks generations left by abandoned switches as
   uncommitted and reports damaged or missing history as incomplete. The diff

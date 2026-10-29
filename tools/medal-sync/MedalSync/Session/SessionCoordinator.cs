@@ -68,7 +68,8 @@ internal sealed class SessionCoordinator(
     SessionShutdown? shutdown = null,
     IStorageReplication? replication = null,
     ISessionCompatibility? compatibility = null,
-    Action<SessionProgress>? progress = null)
+    Action<SessionProgress>? progress = null,
+    SpacePressureMonitor? space = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
     private const string ActiveMessage = "Medal is active. Quit Medal normally from its tray icon when you want to switch PCs.";
@@ -681,6 +682,12 @@ internal sealed class SessionCoordinator(
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     Once("Clip storage is unreachable. Keep recording; uploads resume when it returns, and this PC keeps the library until then.");
+                }
+                if (space is not null)
+                {
+                    // Probes run in the background with a short wait, so a slow disk cannot hold up supervision.
+                    try { foreach (string notice in space.Check(clock.Now)) Send(notice); }
+                    catch (Exception) { /* Advisory only. */ }
                 }
                 var health = mount.Health();
                 if (health.Healthy)

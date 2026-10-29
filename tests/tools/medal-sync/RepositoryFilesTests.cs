@@ -31,6 +31,35 @@ public sealed class RepositoryFilesTests
         Assert.Equal(@"M:\Clips", config.Capture.Display);
     }
 
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData(60, true)]
+    [InlineData(21, true)]
+    [InlineData(20, false)]
+    [InlineData(5, false)]
+    [InlineData(1_000_001, false)]
+    public void SpaceWarning_IsOptionalAndMustBeAboveTheReserve(int? warning, bool valid)
+    {
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(ConfigFile("medal-sync.example.json")))!;
+        if (warning is not null) json["mount"]!["spaceWarningGiB"] = warning;
+        string path = Path.Combine(Path.GetTempPath(), "medal-sync-tests", Guid.NewGuid().ToString("N") + ".json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        try
+        {
+            File.WriteAllText(path, json.ToJsonString());
+            if (!valid)
+            {
+                Assert.Contains("mount.spaceWarningGiB", Assert.Throws<InvalidDataException>(() => MedalSyncConfig.Load(path)).Message, StringComparison.Ordinal);
+                return;
+            }
+            var config = MedalSyncConfig.Load(path);
+            Assert.Equal(warning, config.Mount.SpaceWarningGiB);
+            // An unset warning is not written back, so older builds can still read a saved configuration.
+            Assert.Equal(warning is not null, Util.Json.Serialize(config.Mount).AsSpan().IndexOf("spaceWarningGiB"u8) >= 0);
+        }
+        finally { File.Delete(path); }
+    }
+
     [Fact]
     public void SpikeTemplate_PointsAtADisposableRemote()
     {

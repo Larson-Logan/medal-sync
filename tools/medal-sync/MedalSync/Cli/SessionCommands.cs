@@ -492,6 +492,15 @@ internal static class SessionCommands
         }
     }
 
+    /// <summary>Watches the SSD cache and any persistent clip folder while Medal records.</summary>
+    private static SpacePressureMonitor SpaceMonitor(MedalSyncConfig config, double bitrate)
+    {
+        var (warning, critical) = SpacePressureMonitor.Thresholds(config.Mount.MinFreeGiB, config.Mount.SpaceWarningGiB);
+        List<WatchedFolder> folders = [new("SSD cache", config.CacheRoot)];
+        if (config.PersistentMediaRoot is { } persistent) folders.Add(new("persistent clip folder", persistent));
+        return new SpacePressureMonitor(folders, warning, critical, StorageVolume.Describe, bitrate);
+    }
+
     private static (SessionCoordinator, CoordinationStore, RcloneClipMount) Coordinator(Context context, bool acceptChanges,
         bool replaceLocal = false, Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
         string? launchLink = null, Action<SessionProgress>? progress = null)
@@ -523,7 +532,7 @@ internal static class SessionCommands
                 shutdown?.RequireTime();
                 if (new MedalProcess(context.Install).IsRunning())
                     throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
-            }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress), store, mount);
+            }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress, SpaceMonitor(context.Config, bitrate)), store, mount);
     }
 
     internal static string SaveReviewedChanges(string backupDirectory, LibraryChangeReview review)
