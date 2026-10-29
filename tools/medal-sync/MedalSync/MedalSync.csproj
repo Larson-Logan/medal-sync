@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <!-- 10.0.12 was published 2026-09-08 and bundles a SQLite build with JSONB support. -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>
