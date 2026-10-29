@@ -22,6 +22,9 @@ internal sealed class ShareAssetChecker(WindowsPath capture, WindowsPath serverC
 {
     public void RequireServer()
     {
+        var found = probe.Probe(serverCapture.Append(MedalSyncConfig.StorageMarker), WindowsPath.Parse(serverCapture.Root));
+        if (found.HasReparsePoint || found.IsDirectory)
+            throw new UnsafeOperationException("Primary storage contains a reparse point or invalid marker; verification was refused.");
         string marker = serverCapture.Append(MedalSyncConfig.StorageMarker).Display;
         string text;
         try

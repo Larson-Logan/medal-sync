@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Harden rclone primaries: cap listing output, refuse unsafe, linked or
+  duplicate remote file names, refuse a reparse-point SMB marker, keep
+  pending-replica evidence when a later target fails, and fix `config create`
+  and configuration review for rclone primaries. Add a cloud primary example
+  config and real-rclone integration checks.
+
 - Allow primary media storage on a named rclone remote (OneDrive, Google Drive,
   Dropbox, S3-compatible, or a personal server over SFTP/WebDAV) as well as an
   SMB share. An rclone primary records to `localCopyRoot`; the ownership

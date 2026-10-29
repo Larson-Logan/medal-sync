@@ -70,6 +70,8 @@ folders cannot provide the ownership lock.
   --out "$HOME/medal-sync-candidate.json"
 ```
 
+See the [cloud primary example](../tools/medal-sync/config/medal-sync.cloud.example.json).
+
 ### Switch primaries
 
 Primaries are interchangeable. Startup downloads only the clips that the
@@ -202,7 +204,8 @@ Remote outages are waits, not errors:
 
 - **Optional cloud replicas.** If a replica cannot be reached or fails, the
   primary's verified copy still lets the library hand off. The target is
-  recorded in `replication/pending.json`. `status`, the tray panel and the
+  recorded in `replication/pending.json` with its first failure and latest
+  attempt. `status`, the tray panel and the
   finish result name it, and the next finish retries it. Any failure is
   deferred, including a conflicting destination file, so check `status` for
   long-pending targets. Medal reopening and Windows shutdown still stop the

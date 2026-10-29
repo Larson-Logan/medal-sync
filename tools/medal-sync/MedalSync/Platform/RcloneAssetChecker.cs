@@ -15,6 +15,7 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
     Action? requireTime = null) : IAssetChecker
 {
     private Dictionary<string, long>? _listing;
+    private bool _hasEntries;
 
     private string Credentials => Environment.ExpandEnvironmentVariables(config.Replication!.RcloneConfigPath!);
 
@@ -42,7 +43,7 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
             throw new StorageOfflineException($"Primary storage ({config.PrimaryCapture}) cannot be reached right now.", ex);
         }
         if (text.Trim() != config.LibraryId) throw new UnsafeOperationException($"Primary storage {config.PrimaryCapture} does not identify library {config.LibraryId}.");
-        _listing = List();
+        _listing = null;
     }
 
     public AssetReport ThroughMount(LibrarySnapshot snapshot) =>
@@ -50,6 +51,7 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
 
     public AssetReport OnServer(LibrarySnapshot snapshot)
     {
+        RequireServer();
         _listing = List();
         return AssetInventory.Check(AssetInventory.Collect(snapshot), [config.Capture], new ListingProbe(config.Capture, _listing));
     }
@@ -67,7 +69,8 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
             return;
         }
         catch (UnsafeOperationException) when (!MarkerPresent()) { }
-        if (!allowExistingMedia && List().Count > 0) throw new UnsafeOperationException($"Primary storage {config.PrimaryCapture} already contains files but no marker; choose an empty dedicated folder.");
+        _ = List(allowMissing: true);
+        if (!allowExistingMedia && _hasEntries) throw new UnsafeOperationException($"Primary storage {config.PrimaryCapture} already contains files but no marker; choose an empty dedicated folder.");
         Directory.CreateDirectory(state.Root);
         string local = Path.Combine(state.Root, "primary-marker-" + Guid.NewGuid().ToString("N"));
         try
@@ -85,27 +88,41 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
         catch (RcloneFailedException ex) when (ex.ExitCode is 3 or 4) { return false; }
     }
 
-    private Dictionary<string, long> List()
+    private Dictionary<string, long> List(bool allowMissing = false)
     {
         string json;
-        try { json = Run(Common("lsjson", config.PrimaryCapture, "--recursive", "--files-only", "--no-mimetype")); }
-        catch (RcloneFailedException ex) when (ex.ExitCode == 3) { return new(StringComparer.OrdinalIgnoreCase); }
+        _hasEntries = false;
+        try { json = Run(Common("lsjson", config.PrimaryCapture, "--recursive", "--no-mimetype")); }
+        catch (RcloneFailedException ex) when (allowMissing && ex.ExitCode == 3) { return new(StringComparer.OrdinalIgnoreCase); }
         catch (IOException ex) when (ex is not StorageOfflineException)
         {
             throw new StorageOfflineException($"Primary storage ({config.PrimaryCapture}) cannot be listed right now.", ex);
         }
         var files = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             using var document = JsonDocument.Parse(json);
             foreach (var item in document.RootElement.EnumerateArray())
-                if (item.TryGetProperty("Path", out var path) && path.ValueKind == JsonValueKind.String
-                    && !(item.TryGetProperty("IsDir", out var dir) && dir.ValueKind == JsonValueKind.True))
-                    files[path.GetString()!] = item.TryGetProperty("Size", out var size) && size.TryGetInt64(out long bytes) ? bytes : 0;
+            {
+                _hasEntries = true;
+                if (!item.TryGetProperty("Path", out var path) || path.ValueKind != JsonValueKind.String
+                    || path.GetString() is not { } relative || relative.Contains('\\') || relative.StartsWith('/')
+                    || relative.Split('/').Any(segment => string.IsNullOrEmpty(segment) || segment is "." or "..")
+                    || !WindowsPath.TryParse(config.Capture.Display + "\\" + relative.Replace('/', '\\'), out var parsed, out _)
+                    || !parsed.IsWithin(config.Capture) || parsed.Equals(config.Capture)
+                    || item.TryGetProperty("IsLink", out var link) && link.ValueKind == JsonValueKind.True)
+                    throw new UnsafeOperationException("Primary storage returned an unsafe file identity; verification was refused.");
+                if (!identities.Add(relative)) throw new UnsafeOperationException("Primary storage returned an ambiguous file identity; verification was refused.");
+                if (item.TryGetProperty("IsDir", out var dir) && dir.ValueKind == JsonValueKind.True) continue;
+                if (!item.TryGetProperty("Size", out var size) || !size.TryGetInt64(out long bytes) || bytes < 0
+                    || !files.TryAdd(relative, bytes))
+                    throw new UnsafeOperationException("Primary storage returned an ambiguous file identity; verification was refused.");
+            }
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
-            throw new StorageOfflineException("rclone returned an unreadable listing for primary storage; nothing was assumed missing.", ex);
+            throw new UnsafeOperationException("rclone returned an unreadable listing for primary storage; nothing was assumed missing.");
         }
         return files;
     }

@@ -65,11 +65,13 @@ internal sealed record MedalSyncConfig(
 
     public WindowsPath DriveRoot => WindowsPath.Parse(Capture.Root);
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public WindowsPath RemoteRoot => PrimaryIsRclone
         ? throw new UnsafeOperationException("This command needs a folder primary; primary storage is the rclone remote " + Remote + ".")
         : WindowsPath.Parse(Remote);
 
     /// <summary>The capture folder as seen on the server, outside the mount.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public WindowsPath ServerCapture => Capture.Rebase(DriveRoot, RemoteRoot);
 
     public string LibraryCoordinationDirectory => WindowsPath.Parse(CoordinationRoot).Append(LibraryId).Display;

@@ -144,6 +144,15 @@ internal static class SessionCommands
         args.RequireAllUsed();
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
+        using var instance = SingleInstance();
+        if (Directory.Exists(config.LibraryCoordinationDirectory)
+            && CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId).ReadJournal().State != OwnershipState.Clean)
+            throw new UnsafeOperationException("Finish the existing session before initializing another primary.");
+        return WritePrimaryInitialization(config, state, apply, output);
+    }
+
+    internal static int WritePrimaryInitialization(MedalSyncConfig config, LocalState state, bool apply, TextWriter output)
+    {
         if (config.StorageMode != StorageMode.Server) throw new UnsafeOperationException("Local mode keeps media in its own folder; there is no primary to initialize.");
         if (config.Replication?.LocalCopyRoot is null)
             throw new UnsafeOperationException("Switching primaries requires replication.localCopyRoot, so this PC holds every clip to upload.");
@@ -160,6 +169,7 @@ internal static class SessionCommands
             if (Directory.Exists(folder) && !File.Exists(Path.Combine(folder, MedalSyncConfig.StorageMarker)) && Directory.EnumerateFileSystemEntries(folder).Any())
                 throw new UnsafeOperationException($"{folder} already contains files but no marker; choose an empty dedicated folder.");
             StorageIdentity.Initialize(folder, config.LibraryId);
+            PrimaryStorage.Checker(config, state).RequireServer();
         }
         output.WriteLine("Primary storage is ready. The next finish uploads and verifies every referenced clip from this PC's local copy.");
         return 0;
@@ -222,17 +232,22 @@ internal static class SessionCommands
             context.Log.Write($"launch: the server was still unreachable after {wait.TotalSeconds:0} s");
         }
         if (shutdown.Ending) return 3;
-        if (!Directory.Exists(context.Config.CoordinationRoot))
-        {
-            // An outage is a wait, never an error: nothing was acquired or changed.
-            status.Report(new SessionProgress(SessionPhase.WaitingForStorage,
-                "Waiting for storage: the shared library's server cannot be reached. Open Medal again once it is back.", IsOutcome: true));
-            Report(context, output, "launch: Waiting: the shared library's server cannot be reached right now; nothing was changed.");
-            return 3;
-        }
+        if (!Directory.Exists(context.Config.CoordinationRoot)) return WaitForStorage(context, output, status);
         GuardStartup(context);
-        var (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report);
-        var journal = store.ReadJournal();
+        SessionCoordinator coordinator;
+        CoordinationStore store;
+        RcloneClipMount mount;
+        OwnershipRecord journal;
+        try
+        {
+            (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report);
+            journal = store.ReadJournal();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The share dropped between the check and the journal read.
+            return WaitForStorage(context, output, status);
+        }
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
         var outcome = coordinator.Launch();
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
@@ -450,6 +465,15 @@ internal static class SessionCommands
             review.Changes, AcceptedAt = DateTimeOffset.UtcNow,
         }));
         return directory;
+    }
+
+    /// <summary>An outage is a wait, never an error: nothing was acquired or changed.</summary>
+    private static int WaitForStorage(Context context, TextWriter output, DesktopStatusPublisher status)
+    {
+        status.Report(new SessionProgress(SessionPhase.WaitingForStorage,
+            "Waiting for storage: the shared library's server cannot be reached. Open Medal again once it is back.", IsOutcome: true));
+        Report(context, output, "launch: Waiting: the shared library's server cannot be reached right now; nothing was changed.");
+        return 3;
     }
 
     private static void Report(Context context, TextWriter output, string message)

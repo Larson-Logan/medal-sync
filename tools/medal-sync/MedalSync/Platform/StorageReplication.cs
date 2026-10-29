@@ -41,7 +41,8 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             Report(SessionPhase.Starting, "Primary storage is offline. Recording to this PC's local copy; clips upload when storage returns.", "Persistent local media");
             return;
         }
-        var onPrimary = media.Where(m => _primary.ExistsOnServer(CapturePath(m.Relative))).Select(m => m.Relative).ToList();
+        // Only files this PC lacks are probed and downloaded.
+        var onPrimary = missing.Where(m => _primary.ExistsOnServer(CapturePath(m.Relative))).Select(m => m.Relative).ToList();
         var nowhere = missing.Where(m => m.Required && !onPrimary.Contains(m.Relative, StringComparer.OrdinalIgnoreCase)).ToList();
         if (nowhere.Count > 0)
             throw new IOException($"Referenced media is missing on this PC and on primary storage, for example {nowhere[0].Relative}; replication was refused.");
@@ -73,6 +74,10 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             }
         }
         List<string> verified = [], deferred = [];
+        // Evidence is saved after every target, so a later required failure or shutdown keeps earlier deferrals.
+        var pending = Pending(state, config.LibraryId).Select(p => p.Name)
+            .Where(name => replication.Targets.Any(t => !t.Required && t.Name == name)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Directory.CreateDirectory(Path.Combine(state.Root, "replication"));
         foreach (var target in replication.Targets)
         {
             requireIdle();
@@ -80,13 +85,16 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             {
                 CopyAndCheck(source.Display, ReplicationPlan.Destination(target, config.LibraryId), files, credentials: true, versionConflicts: version, replica: target.Name);
                 verified.Add(target.Name);
+                pending.Remove(target.Name);
             }
             catch (RcloneFailedException) when (!target.Required)
             {
                 // Primary storage already holds a verified copy. An optional provider outage never holds the library.
                 deferred.Add(target.Name);
+                pending.Add(target.Name);
                 Report(SessionPhase.Verifying, $"Cloud copy '{target.Name}' is unavailable; it will be retried on the next finish.", target.Name);
             }
+            RecordPending([.. pending], DateTimeOffset.UtcNow);
         }
         requireIdle();
         RequireMarker(source);
@@ -98,7 +106,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             files = files.Count, localCopy = replication.LocalCopyRoot is not null, primary = config.PrimaryCapture,
             targets = verified.ToArray(), deferred = deferred.ToArray(),
         }));
-        RecordPending(deferred, DateTimeOffset.UtcNow);
+        RecordPending([.. pending], DateTimeOffset.UtcNow);
         return new ReplicationResult(deferred);
     }
 
@@ -110,7 +118,10 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         try
         {
             var pending = Json.ReadFile<PendingReplicas>(path, "pending replicas");
-            return pending.Format == 1 && pending.LibraryId == libraryId && pending.Targets is not null ? pending.Targets : [];
+            if (pending.Format != 1 || pending.LibraryId != libraryId || pending.Targets is null
+                || pending.Targets.Any(t => t is null || string.IsNullOrWhiteSpace(t.Name) || t.LastAttempt < t.Since)
+                || pending.Targets.Select(t => t.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != pending.Targets.Count) return [];
+            return pending.Targets;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { return []; }
     }
