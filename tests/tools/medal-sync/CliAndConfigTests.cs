@@ -120,6 +120,55 @@ public sealed class CliAndConfigTests : IDisposable
     }
 
     [Theory]
+    [InlineData("account")]
+    [InlineData("version")]
+    [InlineData("fingerprint")]
+    [InlineData("columns")]
+    [InlineData("definitions")]
+    public void AuditAndRepairRefuseUnrelatedCheckpointsBeforePlanning(string mismatch)
+    {
+        string db = _fixture.CreateLibrary("pc");
+        string clip = _fixture.PathFor("existing.mp4");
+        File.WriteAllBytes(clip, [1, 2, 3]);
+        MedalFixture.AddContent(db, "same-id", video: clip);
+        var snapshot = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+        var tables = snapshot.Tables.Select(t => mismatch switch
+        {
+            "columns" when t.Name == "contents" => t with
+            {
+                Columns = t.Columns.Select(c => c == "video_path" ? "other_path" : c).ToArray(),
+            },
+            "definitions" when t.Name == "content_counts" => t with
+            {
+                Rows = t.Rows.Select(r => TableSnapshot.Text(r[t.ColumnIndex("key")]) == MedalSchema.DefinitionsVersionKey
+                    ? (IReadOnlyList<Cell?>)r.Select((cell, i) => i == t.ColumnIndex("count") ? new IntegerCell(999) : cell).ToArray()
+                    : r).ToArray(),
+            },
+            _ => t,
+        });
+        var checkpoint = LibrarySnapshot.Create(mismatch == "account" ? "67890" : snapshot.AccountId,
+            snapshot.SchemaVersion + (mismatch == "version" ? 1 : 0),
+            mismatch == "fingerprint" ? new string('0', 64) : snapshot.SchemaFingerprint, tables);
+        string file = _fixture.PathFor("checkpoint.json");
+        File.WriteAllBytes(file, checkpoint.ToCanonicalJson());
+        using (var connection = MedalFixture.Open(db)) MedalFixture.Execute(connection, "UPDATE contents SET video_path = NULL");
+        string before = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId).Digest();
+        string settings = MedalFixture.Settings(db);
+
+        foreach (string[] command in new[] { new[] { "audit" }, new[] { "repair" }, new[] { "repair", "--apply" } })
+        {
+            var result = Run(command.Concat(["--checkpoint", file, "--db", db]).ToArray());
+            Assert.Equal(1, result.Code);
+            Assert.Contains(mismatch == "account" ? "account" : mismatch == "columns" ? "columns" : mismatch == "definitions" ? "counter definitions" : "schema",
+                result.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(result.Output);
+            Assert.Equal(before, LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId).Digest());
+            Assert.Equal(settings, MedalFixture.Settings(db));
+            Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(db)!, "medal-sync-backups")));
+        }
+    }
+
+    [Theory]
     [InlineData(new[] { "snapshot", "export" }, 2)]
     [InlineData(new[] { "snapshot", "export", "--out" }, 2)]
     [InlineData(new[] { "audit", "--checkpoint", "x", "--bogus" }, 2)]

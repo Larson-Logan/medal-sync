@@ -140,6 +140,10 @@ that generation over its known older committed library, keeping a rollback backu
 and its own device settings. Unshared local changes still require explicit review
 before replacement.
 
+Audit and repair checkpoints must match this library's account, supported
+schema, columns and counter definitions. Mismatches refuse both preview and
+apply before planning changes.
+
 Windows shutdown gives the existing finish worker up to 25 seconds. Incomplete
 work remains owned and resumes on the next launch. An automatic update check
 never installs during shutdown or interrupts this recovery path.
