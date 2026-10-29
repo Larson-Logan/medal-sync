@@ -11,6 +11,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private const string MutexName = @"Local\LarsonServer.MedalSync.StatusView";
     private const string OpenEventName = @"Local\LarsonServer.MedalSync.OpenStatus";
     private readonly NotifyIcon _icon;
+    private readonly AppIcons _icons;
     private readonly Form _panel;
     private readonly TextBox _status;
     private readonly Button _retry;
@@ -56,9 +57,10 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         _readStatus = readStatus ?? SessionCommands.ReadDesktopStatus;
         _runFinish = runFinish ?? RunFinish;
         _open = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
+        _icons = new AppIcons();
         _panel = new StatusForm(() => _ending = true)
         {
-            Text = "Medal Sync status", AccessibleName = "Medal Sync status",
+            Text = "Medal Sync status", AccessibleName = "Medal Sync status", Icon = _icons.Window,
             StartPosition = FormStartPosition.CenterScreen, MinimumSize = new Size(520, 370), Size = new Size(600, 420),
             AutoScaleMode = AutoScaleMode.Dpi,
         };
@@ -101,7 +103,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         menu.Items.Add("&Configure", null, (_, _) => StartLauncher("--configure"));
         menu.Items.Add("Check for &updates", null, (_, _) => StartLauncher("--check-updates"));
         menu.Items.Add("Exit status &view (supervision continues)", null, (_, _) => ExitThread());
-        _icon = new NotifyIcon { Icon = SystemIcons.Application, Text = "Medal Sync: Unknown", Visible = true, ContextMenuStrip = menu };
+        _icon = new NotifyIcon { Icon = _icons.For(SessionPhase.Unknown), Text = "Medal Sync: Unknown", Visible = true, ContextMenuStrip = menu };
         _icon.DoubleClick += (_, _) => ShowPanel();
         _timer = new System.Windows.Forms.Timer { Interval = 1000 };
         _timer.Tick += (_, _) => Poll();
@@ -126,12 +128,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         string? lastResult = _finishFailure ?? status.LastResult;
         _retry.Enabled = !_finishing && status.CanRetry;
         _icon.Text = "Medal Sync: " + status.Title;
-        _icon.Icon = status.Phase switch
-        {
-            SessionPhase.Ready => SystemIcons.Information,
-            SessionPhase.RecoveryNeeded or SessionPhase.Unknown => SystemIcons.Warning,
-            _ => SystemIcons.Application,
-        };
+        var icon = _icons.For(status.Phase);
+        if (!ReferenceEquals(_icon.Icon, icon)) _icon.Icon = icon;
         string text = $"{status.Title}\r\n\r\nNext action: {status.NextAction}\r\n\r\n"
             + $"Queued files: {status.QueuedFiles?.ToString() ?? "unavailable"}\r\n"
             + $"Queued bytes: {status.QueuedBytes?.ToString() ?? "unavailable"}\r\n"
@@ -210,7 +208,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _timer.Dispose(); _icon.ContextMenuStrip?.Dispose(); _icon.Dispose(); _panel.Dispose(); _open.Dispose(); }
+        if (disposing) { _timer.Dispose(); _icon.ContextMenuStrip?.Dispose(); _icon.Dispose(); _panel.Dispose(); _icons.Dispose(); _open.Dispose(); }
         base.Dispose(disposing);
     }
 

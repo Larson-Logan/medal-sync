@@ -11,3 +11,4 @@
 *.md text eol=lf
 *.yml text eol=lf
 *.conf text eol=lf
+*.ico binary

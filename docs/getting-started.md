@@ -222,7 +222,11 @@ Open **Medal Sync Status** from the Start menu, double-click its notification-ar
 icon, or run `medal-sync-launch.exe --status`. A configured desktop launch starts
 the tray view automatically. Starting, Recording / Active, Uploading, Verifying,
 Ready, Waiting for another PC, Recovery needed and Unknown / unreachable are
-distinct states. The panel shows available queued files and bytes, the current
+distinct states. The notification-area icon carries a colored dot for the
+state: green for Ready, red while recording, blue while starting, uploading or
+verifying, gray while waiting for another PC or for storage, and amber when
+recovery is needed or the state is unknown. Hover over it for the state's name.
+The panel shows available queued files and bytes, the current
 required replica, last confirmation time and the next action. Unavailable counts
 stay unavailable; an empty queue alone never means Ready. Ready requires the
 committed, released journal state after the supervisor's checks.

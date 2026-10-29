@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Medal Sync has its own icon on its program, shortcuts, uninstall entry and
+  windows. The notification-area icon replaces the generic Windows icons and
+  shows a colored dot for the current state (green Ready, red recording, blue
+  working, gray waiting, amber attention needed). The icon is drawn by
+  `scripts/generate-icon.py`.
 - Warn while recording when the cache's disk or the persistent copy's disk runs
   low on space, again when it reaches the `mount.minFreeGiB` reserve, and when
   space returns. Folders on one disk share a notice; hysteresis and a 30-minute
