@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add read-only `history list` and `history diff`. The list follows the
+  committed head's ancestry, marks generations left by abandoned switches as
+  uncommitted and reports damaged or missing history as incomplete. The diff
+  counts added, removed and changed clips, deletion records and changed fields
+  between two generations of the same schema; per-clip titles and paths are
+  written only to a new file named with `--out`.
 - `status --json` now prints a documented, versioned status document (format 1)
   instead of the raw ownership journal: the tray's phase and next step,
   `safeToSwitch`, the journal without device IDs, switch requests with their

@@ -14,7 +14,7 @@ internal static class CommandRunner
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config",
-        "--from", "--wait-for-server", "--state-root", "--medal-link",
+        "--from", "--to", "--limit", "--before", "--wait-for-server", "--state-root", "--medal-link",
         "--local-copy-root", "--cloud-remote", "--rclone-config",
         "--storage-mode",
         "--replica-conflicts",
@@ -36,6 +36,9 @@ internal static class CommandRunner
           capacity --bitrate MBPS --hours H --free-gb GB [--reserve-gb GB]
           mount-plan                             Show the reviewed rclone command (no secrets)
           status [--json]                        Who holds the shared library; --json is documented for scripts
+          history list [--json] [--limit N] [--before N]  Committed generations, newest first
+          history diff --from N --to M [--json] [--out FILE]  Count changes between generations;
+                                                 --out writes per-clip titles and paths to a new private file
           enroll --out DIRECTORY [--apply]       Preview/review a lossless union with this PC, then enroll it
           enroll recover --out DIRECTORY [--apply]  Recover an exact native-backup rollback after enrollment
 
@@ -126,6 +129,8 @@ internal static class CommandRunner
             "inspect" => SessionCommands.Inspect(args, output),
             "compatibility" => SessionCommands.Compatibility(args, output),
             "status" => SessionCommands.Status(args, output),
+            "history list" => HistoryCommands.List(args, output),
+            "history diff" => HistoryCommands.Diff(args, output),
             "mount-plan" => SessionCommands.MountPlanCommand(args, output),
             "init" => SessionCommands.Init(args, output),
             "storage init-primary" => SessionCommands.InitPrimary(args, output),

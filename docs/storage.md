@@ -339,6 +339,36 @@ After the entire reviewed file set verifies again, the journal returns to Ready;
 open Medal through Medal Sync normally. An explicit abandon remains an operator
 recovery decision and does not reconcile local media.
 
+### Library history
+
+Every switch that changes the library publishes a new numbered generation on
+the server. Two read-only commands show that history. They never take
+ownership, hold the server lock, restore anything or delete anything, so they
+are safe while another PC records:
+
+```powershell
+medal-sync history list [--json] [--limit 20] [--before N]
+medal-sync history diff --from N --to M [--json] [--out C:\Private\changes.json]
+```
+
+`history list` starts at the committed head, newest first, and shows each
+generation's parent, time, PC, Medal Sync and Medal versions and row counts.
+Use `--before` with the number it prints to see older pages. Generations that
+are not in the head's ancestry are marked *uncommitted*: an abandoned or
+unfinished switch left them, and they are not part of the shared history. If a
+generation in the ancestry is missing or damaged, the list says the history is
+incomplete and marks older folders *unknown* instead of guessing.
+
+`history diff` prints counts only: clips added, removed with and without a
+deletion record, changed, and which file paths and metadata fields changed. It
+says whether `--from` is an ancestor of `--to`. It refuses damaged generations
+and generations from different Medal schemas. `--out` writes each clip's ID,
+title and paths to a new file; it never replaces an existing file. That file is
+private: keep it on this PC.
+
+Both commands report the committed head they read. A switch that finishes while
+they run appears the next time. They exit 3 when the server cannot be reached.
+
 Cloud folders cannot replace the SMB ownership journal: consumer sync does
 not provide the locking used by this companion. An rclone primary holds media
 only. Cloud-only coordination and
