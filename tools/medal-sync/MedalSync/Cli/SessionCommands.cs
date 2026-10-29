@@ -276,6 +276,31 @@ internal static class SessionCommands
         return finished.Status is FinishStatus.Published or FinishStatus.Unchanged ? 0 : finished.Status == FinishStatus.Pending ? 3 : 1;
     }
 
+    public static int RecoverStart(Arguments args, TextWriter output)
+    {
+        string session = args.Required("--session");
+        bool apply = args.Flag("--apply");
+        args.RequireAllUsed();
+        if (!CoordinationStore.IsValidId(session)) throw new UsageException("--session must be 32 lowercase hex characters.");
+        using var instance = SingleInstance();
+        var state = LocalState.ForCurrentUser();
+        string fingerprint = Hashing.Sha256File(state.ConfigPath);
+        var config = MedalSyncConfig.Load(state.ConfigPath);
+        var device = state.ExistingDevice();
+        var install = MedalEnvironment.Locate();
+        if (install.AccountId != config.AccountId) throw new IncompatibleLibraryException("Medal's account differs from this configuration.");
+        var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        var recovery = new AbortedStartRecovery(config, state, store, () =>
+        {
+            if (Hashing.Sha256File(state.ConfigPath) != fingerprint || state.ExistingDevice() != device)
+                throw new UnsafeOperationException("Configuration or device identity changed; review recovery again.");
+            if (new MedalProcess(install).IsRunning() || Directory.Exists(config.DriveRoot.Display))
+                throw new UnsafeOperationException("Quit Medal normally and stop its clip drive through session recovery before recovering an orphan login.");
+        });
+        output.WriteLine(recovery.Run(session, apply));
+        return 0;
+    }
+
     /// <summary><c>abandon --session ID --reason TEXT --apply</c>: explicit recovery when the owner PC is lost.</summary>
     public static int Abandon(Arguments args, TextWriter output)
     {

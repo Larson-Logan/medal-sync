@@ -60,6 +60,9 @@ internal interface IClipMount
 
     /// <summary>Removes a finished, fully uploaded session's cache folder and control login.</summary>
     void Forget(string session);
+
+    /// <summary>Retains a verified stopped pre-launch session's login and cache as recovery evidence, without deleting bytes.</summary>
+    void RetainAbortedStart(string session);
 }
 
 /// <summary>Checks a library's files through the mount and directly on the server.</summary>

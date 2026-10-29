@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Retain stopped aborted-start logins separately from unfinished sessions, keeping
+  unverified cache bytes intact so recovered startup failures no longer block setup.
+  `finish` recovers STARTING without launching; `recover-start` previews and
+  explicitly retains older orphan logins only when their cache is absent or empty.
 - Fix `mount-plan` refusing its own `<session>` placeholder. The plan is
   validated with a sample session ID, then shown with the placeholder and a
   quoted rclone path when it contains spaces.

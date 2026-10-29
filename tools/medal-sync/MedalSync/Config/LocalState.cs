@@ -120,7 +120,10 @@ internal sealed class LocalState(string root)
     {
         if (!CoordinationStore.IsValidId(session)) throw new ArgumentException("Invalid session ID.", nameof(session));
         string path = Path.Combine(SessionsDirectory, session + ".json");
-        if (File.Exists(path)) return Json.ReadFile<SessionSecret>(path, "Session login");
+        if (File.Exists(path)) return ReadLogin(path, session);
+        string retained = Path.Combine(Root, "aborted-starts", session, "login.json");
+        // A crash between retaining evidence and releasing STARTING must reuse the original control login.
+        if (File.Exists(retained)) return ReadLogin(retained, session);
         Directory.CreateDirectory(SessionsDirectory);
         var secret = new SessionSecret(1, session, "medal-sync", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(24)), now);
         AtomicFile.CreateNew(path, Json.Serialize(secret));
@@ -132,5 +135,54 @@ internal sealed class LocalState(string root)
         if (!CoordinationStore.IsValidId(session)) return;
         string path = Path.Combine(SessionsDirectory, session + ".json");
         if (File.Exists(path)) File.Delete(path);
+    }
+
+    /// <summary>Only after a verified stop; the cache is deliberately left at its original location.</summary>
+    internal string RetainAbortedStart(string session, string libraryId, string cache, DateTimeOffset now, bool legacyEmptyCache = false)
+    {
+        if (!CoordinationStore.IsValidId(session) || !CoordinationStore.IsValidId(libraryId))
+            throw new InvalidDataException("Invalid aborted-start identity.");
+        string folder = Path.Combine(Root, "aborted-starts", session);
+        RequireOrdinary(folder);
+        string source = Path.Combine(SessionsDirectory, session + ".json");
+        RequireOrdinary(source);
+        Directory.CreateDirectory(folder);
+        string receipt = Path.Combine(folder, "recovery.json");
+        RequireOrdinary(receipt);
+        if (File.Exists(receipt))
+        {
+            var saved = Json.ReadFile<AbortedStartEvidence>(receipt, "Aborted-start recovery evidence");
+            if (saved.Format != 1 || saved.Session != session || saved.LibraryId != libraryId || saved.Cache != cache)
+                throw new InvalidDataException("Aborted-start recovery evidence differs from this session; keep it and investigate.");
+        }
+        else AtomicFile.CreateNew(receipt, Json.Serialize(new AbortedStartEvidence(1, libraryId, session, cache, now,
+            legacyEmptyCache ? "Stopped legacy orphan with absent or empty cache. No upload-success claim."
+                : "Mount verified stopped before Medal launch. Cache retained without an upload-success claim.")));
+        string target = Path.Combine(folder, "login.json");
+        RequireOrdinary(target);
+        if (File.Exists(source))
+        {
+            _ = ReadLogin(source, session);
+            File.Move(source, target, overwrite: false);
+        }
+        return folder;
+    }
+
+    private sealed record AbortedStartEvidence(int Format, string LibraryId, string Session, string Cache, DateTimeOffset StoppedAt, string Detail);
+
+    private static SessionSecret ReadLogin(string path, string session)
+    {
+        RequireOrdinary(path);
+        var login = Json.ReadFile<SessionSecret>(path, "Session login");
+        if (login.Format != 1 || login.Session != session || string.IsNullOrEmpty(login.User) || string.IsNullOrEmpty(login.Password))
+            throw new InvalidDataException("The retained session login is invalid; recovery was refused.");
+        return login;
+    }
+
+    private static void RequireOrdinary(string path)
+    {
+        for (string? current = Path.GetFullPath(path); current is not null; current = Path.GetDirectoryName(current))
+            if ((File.Exists(current) || Directory.Exists(current)) && File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+                throw new IOException("Aborted-start evidence contains a reparse point; recovery was refused.");
     }
 }

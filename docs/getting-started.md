@@ -157,6 +157,22 @@ unknown upload state is never success. Device settings and logins stay local.
 If startup cannot verify that its clip drive stopped, ownership stays on this
 PC. Open Medal Library here again to retry cleanup before switching PCs.
 
+After a stopped aborted start, its control login and recovery receipt are
+retained under `aborted-starts/SESSION/` in this PC's resolved state folder.
+The session's cache stays at its original location, even when upload state is
+unknown; retained evidence is not a successful-upload receipt. Setup checks
+still refuse an active process, unfinished login or non-Ready journal. Run
+`finish` on the owning PC to recover an interrupted STARTING session without
+launching Medal; a failed stop or evidence write keeps ownership for retry.
+
+An older build may have left an orphan `sessions/SESSION.json` after returning
+to Ready. With Medal quit and its clip drive stopped, preview
+`recover-start --session SESSION`, then add `--apply` to retain that exact login.
+This conservative legacy path requires Ready and an absent or empty session
+cache. A nonempty or uncertain older cache refuses and remains blocked for
+upload recovery; never delete its login or cache to bypass setup. These files
+contain private credentials and paths and must stay local.
+
 Finish rechecks the library after server verification and drive shutdown; a
 change retains the session and cache until a successful retry. Live
 `repair --apply` and `relocate --apply` need exclusive access: if the companion

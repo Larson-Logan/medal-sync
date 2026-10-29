@@ -52,6 +52,7 @@ internal static class CommandRunner
           launch [--replace-local-library] [--wait-for-server SECONDS] [--medal-link URL]
                                                  Start Medal through medal-sync and hand off on exit
           finish [--accept-library-changes]      Finish this PC's interrupted session
+          recover-start --session ID [--apply]  Review/recover an older orphan login only when its cache is empty
           repair --checkpoint FILE [--apply] [--db DB]   Put back clips Medal dropped (Medal quit)
           relocate --from DIR [--config FILE] [--apply]  Move library files left outside the clip folder (Medal quit)
           promote --spike-config FILE --config FILE --server-ignore FILE [--apply]
@@ -128,6 +129,7 @@ internal static class CommandRunner
             "enroll recover" => EnrollmentCommands.Recover(args, output),
             "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown),
             "finish" => SessionCommands.Finish(args, output),
+            "recover-start" => SessionCommands.RecoverStart(args, output),
             "abandon" => SessionCommands.Abandon(args, output),
             "relocate" => LibraryCommands.Relocate(args, output),
             "promote" => PromotionCommands.Run(args, output),
