@@ -295,9 +295,11 @@ After a warning, quit Medal normally. Uploads can drain, but an incompatible
 build keeps ownership and cache on this PC. Run `compatibility --json`, check
 for a Medal Sync update, then retry `finish` after compatibility passes.
 Matching database schemas alone do not verify Medal's native backup behavior;
-unknown app/recorder builds remain blocked. Enrollment allows the two reviewed
-app builds 2643.583.1 and 2644.591.1 with recorder 2643.3040.1 to differ between
-PCs when their supported schemas match.
+unknown app/recorder builds remain blocked. The reviewed pairs are app
+2643.583.1 or 2644.591.1 with recorder 2643.3040.1, and app 2644.604.1 with
+recorder 2644.3209.1. Each app build is accepted only with its reviewed
+recorder. Enrollment allows PCs to run different reviewed pairs when their
+supported schemas match.
 
 ## Recovery rules
 

@@ -171,6 +171,20 @@ public sealed class DiagnosticSummaryTests : IDisposable
         Assert.Contains("cloud-copy-pending", report["refusals"]!.AsArray().Select(r => (string)r!));
     }
 
+    [Theory]
+    [InlineData("2644.604.1", "2644.3209.1", true)]
+    [InlineData("2644.604.1", "2643.3040.1", false)]
+    public void TheBuildReviewIsReportedForTheExactAppAndRecorderPair(string app, string recorder, bool reviewed)
+    {
+        var report = Parse(DiagnosticSummary.Build(Full() with
+        {
+            Compatibility = new MedalCompatibilityReport(new(app, recorder), true, 4, 3, new string('a', 64), true, []),
+        }));
+
+        Assert.Equal(reviewed, (bool)report["medal"]!["buildReviewed"]!);
+        Assert.Equal(!reviewed, report["refusals"]!.AsArray().Select(r => (string)r!).Contains("medal-build-unreviewed"));
+    }
+
     [Fact]
     public void AnUnsupportedSchemaAndUnreviewedBuildAreRefusalCodes()
     {

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Verified native-backup compatibility for Medal 2644.604.1 with recorder
+  2644.3209.1, which uses the reviewed schema. Reviewed app builds are now
+  accepted only with the recorder they were reviewed with; unknown pairs
+  remain refused.
 - `SUPPORT.md` now asks for a `diagnostics` summary in reports. The exporter
   was checked on a real Windows PC with an active library; its preview held no
   paths, names or IDs and saved nothing.
