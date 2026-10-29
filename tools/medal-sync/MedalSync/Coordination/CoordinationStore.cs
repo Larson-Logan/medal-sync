@@ -46,7 +46,7 @@ internal sealed partial class CoordinationStore
 
     private string RequestsPath => Path.Combine(Root, "requests");
 
-    public static bool IsValidId(string value) => IdPattern().IsMatch(value);
+    public static bool IsValidId(string? value) => value is not null && IdPattern().IsMatch(value);
 
     /// <summary>Opens an existing coordination directory and checks its identity.</summary>
     public static CoordinationStore Open(string root, string expectedLibraryId, string expectedAccountId)
