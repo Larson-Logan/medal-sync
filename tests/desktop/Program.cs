@@ -90,8 +90,20 @@ internal static class Program
         Check(ReferenceEquals(panel.Icon, icons.Window), "The status window uses the Medal Sync icon");
         Check(new[] { SessionPhase.Ready, SessionPhase.Active, SessionPhase.Uploading, SessionPhase.Waiting, SessionPhase.RecoveryNeeded }
             .Select(AppIcons.DotColor).Distinct().Count() == 5, "Ready, recording, working, waiting and attention have distinct dots");
-        using (var large = new Icon(icons.Window, new Size(256, 256)))
-            Check(large.Width == 256, "The embedded icon includes a 256 px image for Explorer and shortcuts");
+        // System.Drawing's size matching ignores 256 px entries (stored as 0), so read the icon file's own directory.
+        using (var stream = typeof(AppIcons).Assembly.GetManifestResourceStream("MedalSync.Launch.medal-sync.ico")!)
+        using (var reader = new BinaryReader(stream))
+        {
+            reader.ReadUInt16();
+            Check(reader.ReadUInt16() == 1, "The embedded resource is an icon file");
+            var sizes = Enumerable.Range(0, reader.ReadUInt16()).Select(_ =>
+            {
+                int width = reader.ReadByte();
+                reader.ReadBytes(15);
+                return width == 0 ? 256 : width;
+            }).ToArray();
+            Check(new[] { 16, 20, 24, 32, 48, 256 }.All(sizes.Contains), "The embedded icon has tray sizes and a 256 px image for Explorer and shortcuts");
+        }
         foreach (var size in new[] { 16, 20, 24, 32 })
         {
             using var scaled = new AppIcons(new Size(size, size));
