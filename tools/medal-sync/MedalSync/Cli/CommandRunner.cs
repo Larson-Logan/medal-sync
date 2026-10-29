@@ -145,16 +145,29 @@ internal static class CommandRunner
 
     private static int Capacity(Arguments args, TextWriter output)
     {
-        double Number(string name) =>
-            double.TryParse(args.Required(name), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v)
-                ? v
-                : throw new UsageException($"{name} must be a number.");
-        double bitrate = Number("--bitrate");
-        double hours = Number("--hours");
-        double free = Number("--free-gb");
-        double reserve = args.Value("--reserve-gb") is null ? 20 * 1.073741824 : Number("--reserve-gb");
+        // Bounds keep every conversion and byte count in range: hours match the config's maxSessionHours,
+        // and gigabyte values stay well inside a long once converted to bytes.
+        double Number(string name, double min, bool minAllowed, double max)
+        {
+            if (!double.TryParse(args.Required(name), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v)
+                || !double.IsFinite(v))
+            {
+                throw new UsageException($"{name} must be a finite number.");
+            }
+            if (v < min || (v == min && !minAllowed) || v > max)
+            {
+                throw new UsageException($"{name} must be {(minAllowed ? "at least" : "more than")} {min} and at most {max}.");
+            }
+            return v;
+        }
+        double bitrate = Number("--bitrate", 0, minAllowed: false, max: 10_000);
+        double hours = Number("--hours", 0, minAllowed: false, max: 24);
+        double free = Number("--free-gb", 0, minAllowed: true, max: 1_000_000);
+        double reserve = args.Value("--reserve-gb") is null ? 20 * 1.073741824 : Number("--reserve-gb", 0, minAllowed: true, max: 1_000_000);
         args.RequireAllUsed();
-        var verdict = CapacityAdmission.Evaluate(new CapacityInputs((long)(free * 1e9), (long)(reserve * 1e9), bitrate, TimeSpan.FromHours(hours), 0));
+        var session = TimeSpan.FromHours(hours);
+        if (session <= TimeSpan.Zero) throw new UsageException("--hours is too small to measure.");
+        var verdict = CapacityAdmission.Evaluate(new CapacityInputs((long)(free * 1e9), (long)(reserve * 1e9), bitrate, session, 0));
         output.WriteLine(verdict.Summary);
         return verdict.Admitted ? 0 : 1;
     }

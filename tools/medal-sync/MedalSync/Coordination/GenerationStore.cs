@@ -179,6 +179,6 @@ internal sealed partial class GenerationStore(string directory, string libraryId
         return bytes;
     }
 
-    [GeneratedRegex("^[0-9]{10}$")]
+    [GeneratedRegex(@"\A[0-9]{10}\z")]
     private static partial Regex NumberedName();
 }

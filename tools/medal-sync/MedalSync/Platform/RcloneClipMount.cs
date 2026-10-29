@@ -103,7 +103,7 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
                 || !document.RootElement.TryGetProperty("fs", out var fs) || fs.ValueKind != JsonValueKind.String
                 || !VfsStatus.SameRemote(fs.GetString()!, config.MountRemote))
             {
-                return new MountHealth(false, $"{DriveRoot} is not serving {config.Remote}.");
+                return new MountHealth(false, ClipDriveText.NotServing(config));
             }
         }
         catch (JsonException)
@@ -116,7 +116,7 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
             return new MountHealth(false, $"{marker} does not identify library {config.LibraryId}.");
         }
         if (!Directory.Exists(config.Capture.Display)) return new MountHealth(false, $"{config.Capture.Display} is missing.");
-        return new MountHealth(true, $"{DriveRoot} serves {config.Remote}.");
+        return new MountHealth(true, ClipDriveText.Serving(config));
     }
 
     public DrainVerdict Drain()
@@ -181,4 +181,18 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
         _control = null;
         _session = session;
     }
+}
+
+/// <summary>
+/// Clip drive health wording. The drive serves <see cref="MedalSyncConfig.MountRemote"/>, which is the
+/// local copy when one is set, so messages name that and mention the primary only when it differs.
+/// </summary>
+internal static class ClipDriveText
+{
+    public static string Serving(MedalSyncConfig config) => $"{config.DriveRoot.Display} serves {config.MountRemote}{Primary(config)}.";
+
+    public static string NotServing(MedalSyncConfig config) => $"{config.DriveRoot.Display} is not serving {config.MountRemote}{Primary(config)}.";
+
+    private static string Primary(MedalSyncConfig config) =>
+        config.MountRemote == config.Remote ? "" : $" (the local copy of primary storage {config.Remote})";
 }

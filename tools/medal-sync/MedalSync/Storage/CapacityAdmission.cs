@@ -42,7 +42,7 @@ internal static class CapacityAdmission
 
     public static CapacityVerdict Evaluate(CapacityInputs inputs)
     {
-        if (inputs.BitrateMbps <= 0 || double.IsNaN(inputs.BitrateMbps) || inputs.MaxSession <= TimeSpan.Zero)
+        if (!double.IsFinite(inputs.BitrateMbps) || inputs.BitrateMbps <= 0 || inputs.MaxSession <= TimeSpan.Zero)
         {
             throw new ArgumentException("Bitrate and session length must be positive.", nameof(inputs));
         }

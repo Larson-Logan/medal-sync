@@ -62,21 +62,37 @@ internal static class SessionCommands
         bool json = args.Flag("--json");
         args.RequireAllUsed();
         var context = Load();
-        if (!json && !Directory.Exists(context.Config.CoordinationRoot))
+        return WriteStatus(context.Config, context.State, context.Device, json, output);
+    }
+
+    /// <summary>
+    /// Exit 3 when the coordination root or journal cannot be reached, in both text and JSON,
+    /// so scripts can tell an outage from a refusal. A different library or a damaged journal stays exit 1.
+    /// </summary>
+    internal static int WriteStatus(MedalSyncConfig config, LocalState state, DeviceIdentity device, bool json, TextWriter output)
+    {
+        CoordinationStore store;
+        OwnershipRecord journal;
+        try
         {
-            output.WriteLine("Waiting for storage: the shared library's server cannot be reached right now. Clips and any session stay on this PC.");
+            if (!Directory.Exists(config.CoordinationRoot)) throw new StorageOfflineException("The coordination root is missing.");
+            store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+            journal = store.ReadJournal();
+        }
+        catch (IOException)
+        {
+            const string waiting = "Waiting for storage: the shared library's server cannot be reached right now. Clips and any session stay on this PC.";
+            output.WriteLine(json ? JsonSerializer.Serialize(new { storage = "unreachable", message = waiting }, Json.Options) : waiting);
             return 3;
         }
-        var store = CoordinationStore.Open(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, context.Config.AccountId);
-        var journal = store.ReadJournal();
         if (json)
         {
             output.WriteLine(JsonSerializer.Serialize(journal, Json.Options));
             return 0;
         }
-        output.WriteLine(StatusText.For(journal, context.Device, Directory.Exists(context.Config.DriveRoot.Display)));
+        output.WriteLine(StatusText.For(journal, device, Directory.Exists(config.DriveRoot.Display)));
         foreach (var request in store.PendingRequests()) output.WriteLine($"Waiting to switch: {request.Device.DisplayName} since {request.RequestedAt:yyyy-MM-dd HH:mm} UTC.");
-        foreach (var replica in StorageReplication.Pending(context.State, context.Config.LibraryId))
+        foreach (var replica in StorageReplication.Pending(state, config.LibraryId))
             output.WriteLine($"Cloud copy '{replica.Name}' is pending since {replica.Since:yyyy-MM-dd HH:mm} UTC; it retries on the next finish.");
         return 0;
     }
@@ -376,8 +392,19 @@ internal static class SessionCommands
         var context = Load();
         using var instance = SingleInstance();
         var store = CoordinationStore.Open(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, context.Config.AccountId);
+        return WriteAbandon(store, context.Device, session, reason, apply, output, context.Log.Write);
+    }
+
+    /// <summary>
+    /// The preview runs the same checks as apply, so it refuses exactly when apply would.
+    /// Apply checks again under the writer lock.
+    /// </summary>
+    internal static int WriteAbandon(CoordinationStore store, DeviceIdentity device, string session, string reason, bool apply,
+        TextWriter output, Action<string> log)
+    {
         var journal = store.ReadJournal();
-        output.WriteLine(StatusText.For(journal, context.Device));
+        output.WriteLine(StatusText.For(journal, device));
+        _ = Ownership.Abandon(journal, device, session, reason, DateTimeOffset.UtcNow);
         output.WriteLine($"Abandoning returns the library to generation {journal.CommittedGeneration}. Clips and edits made in session {journal.SessionId} "
             + $"that were not published stay only on {journal.Owner?.DisplayName ?? "that PC"} and its cache, and must be reconciled by hand.");
         if (!apply)
@@ -385,8 +412,8 @@ internal static class SessionCommands
             output.WriteLine("Preview only; add --apply to abandon.");
             return 0;
         }
-        var next = store.Update(r => Ownership.Abandon(r, context.Device, session, reason, DateTimeOffset.UtcNow), TimeSpan.FromSeconds(10));
-        context.Log.Write($"abandon: {next.Reason}");
+        var next = store.Update(r => Ownership.Abandon(r, device, session, reason, DateTimeOffset.UtcNow), TimeSpan.FromSeconds(10));
+        log($"abandon: {next.Reason}");
         output.WriteLine($"Done: {next.Reason}");
         return 0;
     }
