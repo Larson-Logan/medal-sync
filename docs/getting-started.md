@@ -222,7 +222,11 @@ Open **Medal Sync Status** from the Start menu, double-click its notification-ar
 icon, or run `medal-sync-launch.exe --status`. A configured desktop launch starts
 the tray view automatically. Starting, Recording / Active, Uploading, Verifying,
 Ready, Waiting for another PC, Recovery needed and Unknown / unreachable are
-distinct states. The panel shows available queued files and bytes, the current
+distinct states. The notification-area icon carries a colored dot for the
+state: green for Ready, red while recording, blue while starting, uploading or
+verifying, gray while waiting for another PC or for storage, and amber when
+recovery is needed or the state is unknown. Hover over it for the state's name.
+The panel shows available queued files and bytes, the current
 required replica, last confirmation time and the next action. Unavailable counts
 stay unavailable; an empty queue alone never means Ready. Ready requires the
 committed, released journal state after the supervisor's checks.
@@ -249,6 +253,31 @@ time. After Ready, exit the status view before running setup or uninstall, since
 those operations require all Medal Sync programs to be closed. Setup guidance
 and update checks are also available from the panel. Shutdown closes the view
 without interactive prompts while the supervisor keeps its existing finish budget.
+
+### Status for scripts
+
+`medal-sync status --json` prints one JSON document for scripts, dashboards and
+Stream Deck buttons. It only reads: it never creates this PC's identity, writes
+a switch request or starts anything. Exit code 0 means status was read, 3 means
+the shared library could not be reached (a JSON body is still printed), and 1
+is a refusal such as a different library's marker or a damaged journal, with
+the reason on standard error.
+
+| Field | Meaning |
+| --- | --- |
+| `format` | `1`. Later versions of format 1 only add fields. |
+| `libraryId` | This PC's configured library. |
+| `storage` | `"reachable"` or `"unreachable"`; `message` explains the second. |
+| `journal` | `null` when unreachable. Otherwise `state` (`CLEAN`, `STARTING`, `ACTIVE`, `DRAINING`, `PUBLISHING`, `RECOVERY_REQUIRED`), `owner` (display name or `null`), `ownedByThisPc`, `sessionId`, `committedGeneration`, `revision`, `updatedAt` and `reason`. |
+| `phase`, `title`, `nextAction` | The same phase, title and next step as the tray (`READY`, `STARTING`, `ACTIVE`, `UPLOADING`, `VERIFYING`, `WAITING`, `RECOVERY_NEEDED`, `UNKNOWN`, `WAITING_FOR_STORAGE`). A stale or unreadable progress feed is `UNKNOWN`, never `READY`. |
+| `safeToSwitch` | `true` only when the journal is `CLEAN` and the phase is `READY`. |
+| `handoffRequests` | `null` when unreachable. Each has `device`, `requestedAt`, `ageSeconds` and `stale` (older than six hours, no longer prompting). |
+| `pendingCloudCopies` | Optional cloud copies waiting for a retry: `name`, `firstFailure`, `lastAttempt`. |
+| `lastVerifiedAt` | When this PC last verified primary storage and its cloud copies, or `null`. |
+| `observedAt` | When this report was made. |
+
+Times are UTC in ISO 8601. The document has no device IDs, credentials or file
+paths; owner and requesting PCs appear by display name only.
 
 The desktop launcher passes `medal://` links through the same ownership and
 storage checks. A first launch opens the link as part of starting Medal; an

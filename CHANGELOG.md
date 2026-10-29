@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Medal Sync has its own icon on its program, shortcuts, uninstall entry and
+  windows. The notification-area icon replaces the generic Windows icons and
+  shows a colored dot for the current state (green Ready, red recording, blue
+  working, gray waiting, amber attention needed). The icon is drawn by
+  `scripts/generate-icon.py`.
+- Warn while recording when the cache's disk or the persistent copy's disk runs
+  low on space, again when it reaches the `mount.minFreeGiB` reserve, and when
+  space returns. Folders on one disk share a notice; hysteresis and a 30-minute
+  quiet period prevent repeats; a disk that cannot be measured is reported as
+  unknown. Checks run in the background so a slow disk cannot delay
+  supervision. The warning level defaults from the reserve and can be set with
+  the optional `mount.spaceWarningGiB`.
+- Add read-only `history list` and `history diff`. The list follows the
+  committed head's ancestry, marks generations left by abandoned switches as
+  uncommitted and reports damaged or missing history as incomplete. The diff
+  counts added, removed and changed clips, deletion records and changed fields
+  between two generations of the same schema; per-clip titles and paths are
+  written only to a new file named with `--out`.
+- `status --json` now prints a documented, versioned status document (format 1)
+  instead of the raw ownership journal: the tray's phase and next step,
+  `safeToSwitch`, the journal without device IDs, switch requests with their
+  age, pending cloud copies and the last verification time. When storage is
+  unreachable it still prints this document, with exit code 3. `status` no
+  longer looks up Medal or creates this PC's identity.
 - A finish that fails at primary storage or a required replica is retried with
   backoff (30 seconds up to 10 minutes) instead of every few seconds, so a
   conflict or full quota no longer restarts copy and verification continuously.

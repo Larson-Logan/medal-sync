@@ -56,6 +56,31 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
     public DesktopStatus At(DateTimeOffset now) => ConfirmedAt is { } time && now - time <= TimeSpan.FromSeconds(20)
         && time <= now + TimeSpan.FromSeconds(5) ? this : Unknown(ConfirmedAt);
 
+    /// <summary>Matches no owner: the view of a PC that has no identity yet.</summary>
+    internal static readonly DeviceIdentity NoDevice = new("", "this PC");
+
+    /// <summary>
+    /// The tray's phase: the journal, this PC's supervisor heartbeat and a recent notice. An unreadable heartbeat
+    /// while a supervisor runs is an explicit Unknown, never Ready.
+    /// </summary>
+    internal static DesktopStatus Read(LocalState state, string libraryId, OwnershipRecord journal, DeviceIdentity? device,
+        bool supervisorRunning, DateTimeOffset now)
+    {
+        ProgressEnvelope? report = null;
+        try { report = Json.ReadFile<ProgressEnvelope>(Path.Combine(state.Root, "desktop-status.json"), "Desktop progress"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Explicit unknown below. */ }
+        var status = Resolve(journal, device ?? NoDevice, report, supervisorRunning, now);
+        try
+        {
+            var notice = Json.ReadFile<DesktopNotice>(Path.Combine(state.Root, "desktop-notice.json"), "Desktop notice");
+            if (now - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
+        if (status.Notice is null && StorageReplication.Pending(state, libraryId) is { Count: > 0 } pending)
+            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending and retries on the next finish." };
+        return status;
+    }
+
     internal static DesktopStatus Resolve(OwnershipRecord journal, DeviceIdentity device, ProgressEnvelope? report,
         bool supervisorRunning, DateTimeOffset now)
     {

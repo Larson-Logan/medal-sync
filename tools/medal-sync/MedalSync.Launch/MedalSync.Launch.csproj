@@ -18,7 +18,13 @@
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Shown on the exe, so the installer's shortcuts and its uninstall entry use it too. Redraw with scripts/generate-icon.py. -->
+    <ApplicationIcon>medal-sync.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="medal-sync.ico" LogicalName="MedalSync.Launch.medal-sync.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\MedalSync\MedalSync.csproj" />

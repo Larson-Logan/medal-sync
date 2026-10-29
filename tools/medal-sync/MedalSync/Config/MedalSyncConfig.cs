@@ -12,7 +12,15 @@ internal sealed record MountConfig(
     int CachePollSeconds,
     int DirCacheHours,
     int Transfers,
-    int ControlPort);
+    int ControlPort)
+{
+    /// <summary>
+    /// Optional early warning, in GiB free, while recording. It must be above <see cref="MinFreeGiB"/>, which is the
+    /// level reported as critical. When absent, twice the reserve and at least 10 GiB above it.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? SpaceWarningGiB { get; init; }
+}
 
 /// <summary>A Syncthing folder that overlaps the clip destination and must ignore it.</summary>
 internal sealed record SyncExclusion(string FolderId, string Pattern);
@@ -147,6 +155,8 @@ internal sealed record MedalSyncConfig(
         if (Mount is null) problems.Add("mount settings are required");
         else if (Mount.DirCacheHours < 1 || Mount.DirCacheHours > TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerHour)
             problems.Add("mount.dirCacheHours must be a positive duration within the supported range");
+        if (Mount?.SpaceWarningGiB is { } warning && (warning <= Mount.MinFreeGiB || warning > 1_000_000))
+            problems.Add("mount.spaceWarningGiB must be more than mount.minFreeGiB and at most 1000000");
         if (SyncExclusions is null) problems.Add("syncExclusions must be an array");
         else
             foreach (var exclusion in SyncExclusions)

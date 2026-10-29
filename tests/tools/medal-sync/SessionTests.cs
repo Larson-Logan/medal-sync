@@ -192,7 +192,7 @@ public sealed class SessionTests : IDisposable
 
     private Pc Computer(DeviceIdentity device, string machine, bool acceptChanges = false, bool replaceLocal = false, string? database = null, Action? prepareNativeBackup = null,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null,
-        ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null)
+        ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null, SpacePressureMonitor? space = null)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
@@ -200,7 +200,7 @@ public sealed class SessionTests : IDisposable
         var options = new SessionOptions(device, WindowsPath.Parse(@"M:\Clips"), Versions,
             TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal);
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
-        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress));
+        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space));
     }
 
     [Fact]
@@ -401,6 +401,32 @@ public sealed class SessionTests : IDisposable
         Assert.Equal(FinishStatus.Pending, result.Status);
         Assert.Equal(3, compatibility.Checks);
         Assert.Single(messages);
+        Assert.True(pc.Medal.Running);
+        Assert.True(pc.Mount.IsRunning);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void SupervisionWarnsAboutLowDiskSpaceWithoutStoppingMedalOrTheMount()
+    {
+        long free = 100L << 30;
+        var space = new SpacePressureMonitor([new("SSD cache", @"E:\MedalCache")], 40L << 30, 20L << 30,
+            _ => new VolumeInfo(@"E:\", "volume-e", VolumeKind.Fixed, "NTFS", free -= 30L << 30, 500L << 30));
+        var pc = Computer(FirstPc, "first", space: space);
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        using var cancel = new CancellationTokenSource();
+        int polls = 0;
+        _clock.OnSleep = () => { if (++polls == 12) cancel.Cancel(); };
+        var messages = new List<string>();
+
+        Assert.Equal(FinishStatus.Pending, pc.Coordinator.Supervise(session, messages.Add, cancel.Token).Status);
+
+        // 70 GB, then 40 GB (low), then 10 GB (at the reserve): one notice for each change, none for the first check.
+        Assert.Equal(2, messages.Count);
+        Assert.StartsWith("Low disk space on E:\\ (SSD cache)", messages[0], StringComparison.Ordinal);
+        Assert.Contains("reserve", messages[1], StringComparison.Ordinal);
         Assert.True(pc.Medal.Running);
         Assert.True(pc.Mount.IsRunning);
         Assert.Empty(pc.Mount.Forgotten);

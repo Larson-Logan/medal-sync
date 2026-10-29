@@ -54,6 +54,7 @@ internal sealed class WindowsConfigurationWizard : Form
         _acquireGuard = acquireGuard ?? AcquireGuard;
         _existing = File.Exists(state.ConfigPath) ? MedalSyncConfig.Load(state.ConfigPath) : null;
         Text = "Medal Sync configuration";
+        Icon = AppIcons.LoadApplicationIcon();
         AccessibleName = Text;
         AutoScaleMode = AutoScaleMode.Dpi;
         Size = new Size(850, 760);
