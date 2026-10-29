@@ -110,6 +110,8 @@ internal static class SessionCommands
             output.WriteLine($"Old switch request from {request.Device.DisplayName} ({request.RequestedAt:yyyy-MM-dd HH:mm} UTC) is ignored; the next session removes it.");
         foreach (var replica in StorageReplication.Pending(state, config.LibraryId))
             output.WriteLine($"Cloud copy '{replica.Name}' is pending since {replica.Since:yyyy-MM-dd HH:mm} UTC; it retries on the next finish.");
+        foreach (var item in StorageCheckReport.Outstanding(state, config.LibraryId))
+            output.WriteLine($"Storage needs attention: {item.Detail} Run 'medal-sync storage check' after fixing it.");
         return 0;
     }
 
@@ -260,7 +262,8 @@ internal static class SessionCommands
         OwnershipRecord journal;
         try
         {
-            (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report);
+            (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report,
+                StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null);
             journal = store.ReadJournal();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -503,7 +506,7 @@ internal static class SessionCommands
 
     private static (SessionCoordinator, CoordinationStore, RcloneClipMount) Coordinator(Context context, bool acceptChanges,
         bool replaceLocal = false, Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
-        string? launchLink = null, Action<SessionProgress>? progress = null)
+        string? launchLink = null, Action<SessionProgress>? progress = null, Func<LaunchPreflight>? preflight = null)
     {
         var clock = new SystemClock();
         var store = CoordinationStore.Open(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, context.Config.AccountId);
@@ -532,7 +535,44 @@ internal static class SessionCommands
                 shutdown?.RequireTime();
                 if (new MedalProcess(context.Install).IsRunning())
                     throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
-            }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress, SpaceMonitor(context.Config, bitrate)), store, mount);
+            }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress, SpaceMonitor(context.Config, bitrate), preflight), store, mount);
+    }
+
+    /// <summary>
+    /// Runs before ownership is taken. Never throws: a check that cannot run is logged and launch continues,
+    /// because finish still verifies every required copy.
+    /// </summary>
+    private static LaunchPreflight CheckStorageBeforeLaunch(Context context, SessionShutdown shutdown)
+    {
+        try
+        {
+            var report = StorageCheck.Run(context.Config, DateTimeOffset.UtcNow, requireTime: shutdown.RequireTime);
+            report.Save(context.State);
+            foreach (var item in report.Remotes.Where(r => r.Result != StorageCheckResult.Ok))
+                context.Log.Write($"storage check: {item.Label}: {item.Result}");
+            return StorageCheck.Verdict(report, context.Config.Replication?.CredentialCheck ?? CredentialCheckPolicy.Warn);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException or AggregateException)
+        {
+            context.Log.Write("storage check: skipped (" + ex.GetType().Name + ")");
+            return LaunchPreflight.Proceed;
+        }
+    }
+
+    /// <summary>
+    /// <c>storage check [--json]</c>: read-only sign-in check of every rclone remote. Exit 0 when all answered,
+    /// 1 when one needs the user, 3 when the only problem is an outage. Never changes ownership, media or configuration.
+    /// </summary>
+    public static int CheckStorage(Arguments args, TextWriter output)
+    {
+        bool json = args.Flag("--json");
+        args.RequireAllUsed();
+        var state = LocalState.ForCurrentUser();
+        var config = MedalSyncConfig.Load(state.ConfigPath);
+        var report = StorageCheck.Run(config, DateTimeOffset.UtcNow);
+        if (report.Remotes.Count > 0) report.Save(state);
+        output.WriteLine(json ? JsonSerializer.Serialize(report, Json.Options) : report.ToText());
+        return report.ExitCode;
     }
 
     internal static string SaveReviewedChanges(string backupDirectory, LibraryChangeReview review)

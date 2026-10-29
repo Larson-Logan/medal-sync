@@ -35,6 +35,7 @@ internal static class CommandRunner
           audit --checkpoint FILE [--db DB]      Find clips Medal dropped since a checkpoint
           capacity --bitrate MBPS --hours H --free-gb GB [--reserve-gb GB]
           mount-plan                             Show the reviewed rclone command (no secrets)
+          storage check [--json]                 Check each rclone remote's sign-in and folder; never writes there
           status [--json]                        Who holds the shared library; --json is documented for scripts
           history list [--json] [--limit N] [--before N]  Committed generations, newest first
           history diff --from N --to M [--json] [--out FILE]  Count changes between generations;
@@ -134,6 +135,7 @@ internal static class CommandRunner
             "mount-plan" => SessionCommands.MountPlanCommand(args, output),
             "init" => SessionCommands.Init(args, output),
             "storage init-primary" => SessionCommands.InitPrimary(args, output),
+            "storage check" => SessionCommands.CheckStorage(args, output),
             "enroll" => EnrollmentCommands.Run(args, output),
             "enroll recover" => EnrollmentCommands.Recover(args, output),
             "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown),

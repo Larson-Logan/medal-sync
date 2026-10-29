@@ -57,6 +57,7 @@ PC to update before the next switch.
 | `config.json` | Storage, cache, replica and mount settings. Every field is listed in the [configuration reference](configuration.md). |
 | `device.json` | This PC's identity and display name. Never shared. |
 | `replication/pending.json` | Optional cloud copies waiting for a retry. |
+| `replication/storage-check.json` | The latest `storage check` result for each rclone remote, without rclone's error text. |
 | `desktop-status.json` | Progress the supervisor publishes for the tray. |
 | `setup-layout.json` | Marker that the programs were installed by Windows setup. |
 | Enrollment, refresh and recovery receipts | Reviewed plans and evidence kept while an operation is in progress. |
