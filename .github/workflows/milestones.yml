@@ -1,12 +1,12 @@
 name: Release milestones
 # Each release has a milestone titled with its version (MAJOR.MINOR.PATCH).
-# A pull request merged to main, and every issue it closes, joins the earliest
+# A pull request merged to dev, and every issue it closes, joins the earliest
 # open milestone newer than the latest published release, so a milestone lists
-# what its release ships. Publishing a release closes its milestone once
+# what its release ships. Promotions from dev to main are not work items. Publishing a release closes its milestone once
 # nothing in it is still open. No code is checked out or run.
 on:
   push:
-    branches: [main]
+    branches: [dev]
   release:
     types: [published]
 permissions: {}
@@ -34,7 +34,7 @@ jobs:
           newer() { [ -z "$2" ] || { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]; }; }
 
           prs="$(gh api "repos/$REPO/commits/$SHA/pulls" \
-            --jq '.[] | select(.merged_at != null and .base.ref == "main") | "\(.number)\t\(.milestone.title // "")"')"
+            --jq '.[] | select(.merged_at != null and .base.ref == "dev") | "\(.number)\t\(.milestone.title // "")"')"
           if [ -z "$prs" ]; then
             echo "No merged pull request for $SHA; nothing to add."
             exit 0
@@ -72,8 +72,8 @@ jobs:
               echo "Renamed milestone $(cut -f 1 <<<"$first") to $version" >>"$GITHUB_STEP_SUMMARY"
             fi
           else
-            # A bumped but unpublished version is already built into its draft
-            # release, so later work goes to the milestone after it.
+            # A bumped but unpublished version is promoted to main and drafted
+            # next, so later work goes to the milestone after it.
             floor="$released"
             if grep -Eqx "$semver" <<<"$version" && newer "$version" "$floor"; then floor="$version"; fi
             first="$(upcoming "$floor" | sed -n 1p)"

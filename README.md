@@ -92,10 +92,12 @@ synthetic libraries and named local test remotes. Native installation can also
 be tested with `scripts/test-windows-installer-isolated.ps1`, which gives setup
 its own registration, shortcuts and synthetic readiness probe.
 
-Builds and packages go into ignored `.medal-sync-dist/`. Windows CI validates
-pull requests and main, builds the installer, and checks native installation,
-repair and uninstall on an ephemeral runner. Merging a version bump to main
-creates a draft release for maintainer review.
+Builds and packages go into ignored `.medal-sync-dist/`. Work lands on the
+`dev` branch first, and only `dev` merges into `main`, so `main` always works.
+Windows CI validates pull requests, `dev` and `main`, builds the installer, and
+checks native installation, repair and uninstall on an ephemeral runner.
+Promoting a version bump to `main` creates a draft release for maintainer
+review; releases are built only from `main`.
 
 - [Contributing](CONTRIBUTING.md), [local development](docs/local-development.md),
   [tests](tests/README.md) and [changelog](CHANGELOG.md)
@@ -111,7 +113,7 @@ and keep private library files out of reports. The [support guide](SUPPORT.md)
 explains which details help maintainers reproduce a problem safely.
 
 For a code or documentation change, read [contributing](CONTRIBUTING.md), open
-a focused PR against `main`, and include validation results. Maintainers follow
+a focused PR against `dev`, and include validation results. Maintainers follow
 the [triage and review guide](docs/triage.md). Please follow the
 [code of conduct](CODE_OF_CONDUCT.md) in project conversations.
 

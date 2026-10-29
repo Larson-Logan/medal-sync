@@ -26,6 +26,16 @@
   with the game. The limit switches through rclone's control API; a failed
   switch is reported and never blocks recording or finishing. `mount-plan`
   shows the `--bwlimit` flag.
+- Work now lands on a new default `dev` branch, which may be briefly broken.
+  Only `dev` merges into `main`, after every Windows suite passes, so `main`
+  always works and is the only branch releases are built from. Branch and tag
+  rulesets are kept in `.github/rulesets` and applied with
+  `scripts/setup-github-rulesets.ps1`.
+- `public-source.json` now records which Windows CI suites each file affects.
+  Pull requests into `dev` run only those suites, so a documentation change
+  runs none and a unit-test change runs only the unit tests.
+  `python scripts/update-source-manifest.py --affected origin/dev` shows what a
+  branch needs.
 - Releases no longer need a hand-made release or tag. Merging a version bump to
   main builds, verifies and attests that commit and creates one draft release
   targeting it. Publishing the draft creates the tag.

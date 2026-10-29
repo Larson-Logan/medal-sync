@@ -11,5 +11,6 @@
   { "name": "area: storage", "color": "1d76db", "description": "Local media, server copies, cloud replicas or handoff" },
   { "name": "area: setup", "color": "1d76db", "description": "Windows installation, configuration, updates or removal" },
   { "name": "area: library", "color": "1d76db", "description": "Medal schema, library restore or reconciliation" },
-  { "name": "area: ci", "color": "1d76db", "description": "Validation, packaging or contributor CI" }
+  { "name": "area: ci", "color": "1d76db", "description": "Validation, packaging or contributor CI" },
+  { "name": "promotion", "color": "0e8a16", "description": "Promotes dev to main; left out of release notes" }
 ]

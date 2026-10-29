@@ -65,7 +65,7 @@ class SourceHygieneTests(unittest.TestCase):
     def test_source_archive_manifest_cannot_include_agent_instructions(self):
         (self.root / 'AGENTS.md').write_text('synthetic', encoding='utf-8')
         (self.root / 'public-source.json').write_text(json.dumps({
-            'format': 1, 'files': ['global.json', 'AGENTS.md', 'scripts/check-repository.py']
+            'format': 2, 'files': {'global.json': [], 'AGENTS.md': [], 'scripts/check-repository.py': []}
         }), encoding='utf-8')
         refused = self.check()
         self.assertNotEqual(0, refused.returncode)
