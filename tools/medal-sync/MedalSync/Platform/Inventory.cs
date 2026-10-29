@@ -166,12 +166,19 @@ internal static class Inventory
     private static IReadOnlyDictionary<string, string> Dependencies(MedalSyncConfig? config)
     {
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        string? winfsp = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\WinFsp")?.GetValue("InstallDir") as string;
-        result["WinFsp"] = winfsp is not null && File.Exists(Path.Combine(winfsp, "bin", "winfsp-x64.dll")) ? $"installed at {winfsp}" : "not installed";
+        string? winfsp = WinFspDirectory();
+        result["WinFsp"] = winfsp is not null ? $"installed at {winfsp}" : "not installed";
         string rclone = config?.ExpandedRclonePath
             ?? Cli.ConfigCommands.DefaultRclonePath();
         result["rclone"] = File.Exists(rclone) ? $"present at {rclone} (sha256 {Hashing.Sha256File(rclone)})" : $"not present at {rclone}";
         return result;
+    }
+
+    /// <summary>WinFsp's install folder when its x64 driver library is present; otherwise null.</summary>
+    internal static string? WinFspDirectory()
+    {
+        string? winfsp = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\WinFsp")?.GetValue("InstallDir") as string;
+        return winfsp is not null && File.Exists(Path.Combine(winfsp, "bin", "winfsp-x64.dll")) ? winfsp : null;
     }
 
     private static IReadOnlyDictionary<string, string> Server(MedalSyncConfig? config)

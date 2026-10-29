@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `diagnostics [--out FILE]`, a privacy-safe summary to share when asking
+  for help. It reports versions, schema compatibility, installation and
+  storage mode, coarse free space, ownership state and refusal codes, built
+  only from allowlisted fields. Library IDs, PCs and cloud copies become
+  per-export tokens; paths, names, remotes, clips, configuration, credentials,
+  logs and error messages are left out, and every value is checked against
+  this PC's private values before it is shown. It works without configuration
+  or storage, prints a preview, and saves the same summary to a new file only
+  with `--out`. Nothing is uploaded.
 - Add read-only `storage check [--json]`, which checks each rclone remote's
   sign-in before you record: the credential file opens without a prompt and
   one short listing or marker read succeeds. Each remote is reported as OK,
