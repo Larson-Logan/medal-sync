@@ -57,7 +57,12 @@ MinVersion=10.0
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 WizardStyle=modern dynamic windows11
+#ifdef IsolatedTestId
+; Disposable test setups compress fast; the decoder and every installed byte are unchanged.
+Compression=lzma2/fast
+#else
 Compression=lzma2
+#endif
 SolidCompression=yes
 CloseApplications=no
 RestartApplications=no

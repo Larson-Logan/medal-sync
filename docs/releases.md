@@ -47,11 +47,20 @@ recompiles setup from an already verified matching ZIP.
 
 ## GitHub pipeline
 
-Pull requests and pushes to main run Windows validation, build both distribution
-formats and test native install, in-place upgrade, active-session refusal,
-registration, shortcuts and uninstall on an ephemeral hosted runner. The native
-integration test uses a temporary per-user program folder and refuses to run
-on an ordinary desktop or over an existing installation.
+Pull requests and pushes to main run [validation](../.github/workflows/validate.yml)
+on standard GitHub-hosted runners, which cost no Actions minutes for this public
+repository; never move these jobs to larger runners, which are always billed.
+A Linux job audits source and history, checks the inventory and links and lints
+the workflows. Three Windows jobs then run in parallel: .NET unit tests; the
+desktop checks, script tests, both distribution formats and native install,
+in-place upgrade, active-session refusal, registration, shortcuts and uninstall;
+and the real rclone/WinFsp storage suite. The `validate` job passes only when
+every suite passed. A pull request that changes only documentation or GitHub
+issue templates skips the Windows suites; main always runs everything. NuGet
+packages and the pinned build tools are cached between runs, and cached
+downloads are re-checked against their SHA-256 pins. The native integration
+test uses a temporary per-user program folder and refuses to run on an ordinary
+desktop or over an existing installation.
 
 `scripts/test-windows-installer-isolated.ps1` provides a separate test on an
 ordinary Windows PC: it compiles a unique test identity, shortcut group, mutexes
@@ -75,9 +84,17 @@ git push origin v1.0.0
 
 The release workflow checks tag/version equality and main ancestry, runs tests,
 builds both packages, verifies native installation and creates a **draft** GitHub
-release with setup EXE, portable ZIP, checksums and generated notes. Only this
-job has contents-write permission. Existing releases cause failure rather than
-replacement.
+release with setup EXE, portable ZIP, checksums and generated notes. It uses no
+caches. Only this job has contents-write permission. Existing releases cause
+failure rather than replacement.
+
+The release job also records a signed [build provenance attestation](https://docs.github.com/en/actions/concepts/security/artifact-attestations)
+for the setup EXE and portable ZIP. Anyone can check that a download was built
+by this workflow from the tagged commit:
+
+```powershell
+gh attestation verify medal-sync-1.0.0-setup-win-x64.exe --repo Larson-Logan/medal-sync
+```
 
 Generated notes use [.github/release.yml](../.github/release.yml) to group PRs
 by their type labels. Label merged work accurately; notes include a catch-all

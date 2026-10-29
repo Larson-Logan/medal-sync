@@ -1,7 +1,9 @@
 # Tests
 
 Run `pwsh -File scripts/validate.ps1` on Windows with the SDK pinned in
-global.json, PowerShell 7, Node 24 and Python 3.11+.
+global.json, PowerShell 7, Node 24 and Python 3.11+. To rerun one area, pass
+`-Part` with `Unit`, `Desktop`, `Scripts` or `Repository` (for example
+`-Part Unit, Desktop`); CI runs these as parallel jobs.
 
 - .NET tests use synthetic SQLite fixtures and cover ownership, restoration,
   upload verification, configuration, library review, shutdown and release checks.
