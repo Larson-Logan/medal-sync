@@ -304,6 +304,36 @@ file names; only the kind of problem is kept. The last verification receipt is
 `replication/last-verified.json` under the configured state root; it lists
 verified and deferred targets.
 
+### Check sign-in before recording
+
+Provider sign-ins do not last forever. Some providers expire a sign-in that
+has not been used for a while, and Google expires it after seven days for an
+OAuth client left in *Testing* status. Check every rclone remote without
+recording a session:
+
+```powershell
+medal-sync storage check
+```
+
+For an rclone primary it reads the library marker; for each cloud target it
+lists the configured folder one level deep. Each remote is reported as OK,
+offline, *sign in again* (with the `rclone config reconnect` command to run),
+a configuration problem (missing credential file, or one that asks for a
+password or does not define the remote), folder missing, marker missing, or
+another library's folder. A missing target folder is fine: the next finish
+creates it. The check never writes to a destination, never stores rclone's
+error text and never changes ownership, media or configuration.
+
+Launch runs the same check before taking ownership, when the configuration has
+any rclone remote. Outages are ignored there: recording does not depend on
+the network. A problem with an optional target shows as a notice. For an rclone
+primary or a required target, `replication.credentialCheck` decides: `"WARN"`
+(the default) starts Medal with a notice, and `"REFUSE"` keeps Medal closed and
+the library Ready until it is fixed. The latest result is kept in
+`replication/storage-check.json` under the state root. `status` and the tray
+panel show remaining problems until the next check, or until a later finish
+verifies that destination.
+
 ### Offline storage
 
 Remote outages are waits, not errors:

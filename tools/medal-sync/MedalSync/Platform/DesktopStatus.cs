@@ -78,6 +78,9 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
         if (status.Notice is null && StorageReplication.Pending(state, libraryId) is { Count: > 0 } pending)
             status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending and retries on the next finish." };
+        if (status.Notice is null && StorageCheckReport.Outstanding(state, libraryId) is { Count: > 0 } problems)
+            status = status with { Notice = "Storage needs attention: " + string.Join(" ", problems.Select(p => p.Detail))
+                + " Run 'medal-sync storage check' after fixing it." };
         return status;
     }
 

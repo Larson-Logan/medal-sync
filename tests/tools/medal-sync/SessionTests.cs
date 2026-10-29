@@ -202,7 +202,8 @@ public sealed class SessionTests : IDisposable
 
     private Pc Computer(DeviceIdentity device, string machine, bool acceptChanges = false, bool replaceLocal = false, string? database = null, Action? prepareNativeBackup = null,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null,
-        ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null, SpacePressureMonitor? space = null)
+        ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null, SpacePressureMonitor? space = null,
+        Func<LaunchPreflight>? preflight = null)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
@@ -210,7 +211,7 @@ public sealed class SessionTests : IDisposable
         var options = new SessionOptions(device, WindowsPath.Parse(@"M:\Clips"), Versions,
             TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal);
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
-        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space));
+        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space, preflight));
     }
 
     [Fact]
@@ -307,6 +308,53 @@ public sealed class SessionTests : IDisposable
         Assert.Empty(pc.Mount.Starts);
         Assert.Empty(pc.Mount.Forgotten);
         Assert.Equal(0, pc.Medal.Launches);
+    }
+
+    [Fact]
+    public void StorageCheckRefusalBlocksBeforeAcquisitionRestoreOrMount()
+    {
+        int checks = 0;
+        var pc = Computer(FirstPc, "first", preflight: () =>
+        {
+            checks++;
+            return new LaunchPreflight(null, "Synthetic sign-in refused.");
+        });
+        string before = LibraryDatabase.ReadSnapshot(pc.Database, MedalFixture.AccountId).Digest();
+        var journal = _store.ReadJournal();
+
+        var outcome = pc.Coordinator.Launch();
+
+        Assert.Equal(1, checks);
+        Assert.Equal(LaunchStatus.Blocked, outcome.Status);
+        Assert.Equal("Synthetic sign-in refused.", outcome.Message);
+        Assert.Equal(journal, _store.ReadJournal());
+        Assert.Equal(before, LibraryDatabase.ReadSnapshot(pc.Database, MedalFixture.AccountId).Digest());
+        Assert.Empty(pc.Mount.Starts);
+        Assert.Equal(0, pc.Medal.Launches);
+    }
+
+    [Fact]
+    public void StorageCheckWarningStartsMedalWithANotice()
+    {
+        var pc = Computer(FirstPc, "first", preflight: () => new LaunchPreflight("Synthetic sign-in expired.", null),
+            replication: new FakeReplication { Warning = "Synthetic primary warning." });
+
+        var outcome = pc.Coordinator.Launch();
+
+        Assert.Equal(LaunchStatus.Started, outcome.Status);
+        Assert.Equal("Synthetic sign-in expired. Synthetic primary warning.", outcome.Warning);
+        Assert.Equal(1, pc.Medal.Launches);
+        Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void StorageCheckIsNotRunWhenAnotherPcOwnsTheLibrary()
+    {
+        var first = Computer(FirstPc, "first");
+        Assert.Equal(LaunchStatus.Started, first.Coordinator.Launch().Status);
+        var second = Computer(SecondPc, "second", preflight: () => throw new InvalidOperationException("Must not check while waiting."));
+
+        Assert.Equal(LaunchStatus.Waiting, second.Coordinator.Launch().Status);
     }
 
     [Fact]

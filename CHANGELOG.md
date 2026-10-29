@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add read-only `storage check [--json]`, which checks each rclone remote's
+  sign-in before you record: the credential file opens without a prompt and
+  one short listing or marker read succeeds. Each remote is reported as OK,
+  offline, sign in again (naming the `rclone config reconnect` command),
+  configuration problem, folder missing, marker missing or another library.
+  Launch runs the same check before taking ownership; outages are ignored and
+  problems show as a notice in the status panel and `status`. Set the optional
+  `replication.credentialCheck` to `"REFUSE"` to keep Medal closed while an
+  rclone primary or required target needs attention (default `"WARN"`).
 - Limit the clip drive's upload speed with `mount.bandwidthLimitMiB` while
   Medal runs and `mount.finishBandwidthLimitMiB` after it exits (both optional,
   1 to 10000 MiB/s, unlimited by default), so uploads over a VPN do not compete

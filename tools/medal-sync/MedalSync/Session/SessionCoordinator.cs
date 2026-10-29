@@ -17,6 +17,15 @@ internal enum LaunchStatus
 /// <param name="Warning">Medal started, but something the user must fix will stop the handoff; shown as a passive notice.</param>
 internal sealed record LaunchOutcome(LaunchStatus Status, string Message, string? Session = null, bool StorageOffline = false, string? Warning = null);
 
+/// <summary>
+/// The result of a read-only check that runs before ownership is taken. <paramref name="Refusal"/> keeps Medal closed
+/// and the library Ready; <paramref name="Warning"/> starts Medal with a passive notice.
+/// </summary>
+internal sealed record LaunchPreflight(string? Warning, string? Refusal)
+{
+    public static readonly LaunchPreflight Proceed = new(null, null);
+}
+
 internal enum FinishStatus
 {
     Published,
@@ -69,7 +78,8 @@ internal sealed class SessionCoordinator(
     IStorageReplication? replication = null,
     ISessionCompatibility? compatibility = null,
     Action<SessionProgress>? progress = null,
-    SpacePressureMonitor? space = null)
+    SpacePressureMonitor? space = null,
+    Func<LaunchPreflight>? preflight = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
     private const string ActiveMessage = "Medal is active. Quit Medal normally from its tray icon when you want to switch PCs.";
@@ -171,6 +181,10 @@ internal sealed class SessionCoordinator(
         {
             return new LaunchOutcome(LaunchStatus.Blocked, ex.Message);
         }
+        // Read-only provider checks: a refusal here changes nothing, and the library stays Ready.
+        var checkedStorage = preflight?.Invoke() ?? LaunchPreflight.Proceed;
+        if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, "Windows is shutting down; Medal was not started.");
+        if (checkedStorage.Refusal is { } refusal) return new LaunchOutcome(LaunchStatus.Blocked, refusal);
         string session = NewId();
         OwnershipRecord journal;
         try
@@ -204,7 +218,7 @@ internal sealed class SessionCoordinator(
             // authorizes replacing this PC's old entries, with a backup.
             restored = library.Restore(generation.Snapshot, allowEmptyReplacement: true);
             RequireCaptureFolder();
-            warning = replication?.Prepare(generation.Snapshot);
+            warning = Join(checkedStorage.Warning, replication?.Prepare(generation.Snapshot));
             mount.Start(session, forRecording: true);
             var health = mount.Health();
             if (!health.Healthy) throw new UnsafeOperationException(health.Detail);
@@ -245,6 +259,9 @@ internal sealed class SessionCoordinator(
         return new LaunchOutcome(LaunchStatus.Started, "Medal started with the shared library." + backup + (warning is null ? "" : " " + warning), session,
             Warning: warning);
     }
+
+    private static string? Join(string? first, string? second) =>
+        first is null ? second : second is null ? first : first + " " + second;
 
     private string GiveBackStart(string session, string reason)
     {
