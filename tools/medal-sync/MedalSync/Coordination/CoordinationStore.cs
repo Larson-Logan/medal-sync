@@ -191,6 +191,6 @@ internal sealed partial class CoordinationStore
         if (File.Exists(path)) File.Delete(path);
     }
 
-    [GeneratedRegex("^[0-9a-f]{32}$")]
+    [GeneratedRegex(@"\A[0-9a-f]{32}\z")]
     private static partial Regex IdPattern();
 }

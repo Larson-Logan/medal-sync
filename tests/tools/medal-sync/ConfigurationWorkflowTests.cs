@@ -20,6 +20,20 @@ public sealed class ConfigurationWorkflowTests : IDisposable
     private string[] Options(string name = "config.json") => ["config", "create", "--account-id", "12345", "--cache-root", @"E:\Cache",
         "--remote", @"\\server\Data\Media\Videos", "--coordination-root", @"\\server\Data\AppData\MedalSync", "--out", _fixture.PathFor(name)];
 
+    /// <summary>The base options with <paramref name="extra"/> appended; an option already present takes the new value, since the CLI refuses repeats.</summary>
+    private string[] With(params string[] extra)
+    {
+        var merged = Options().ToList();
+        var rest = new List<string>();
+        for (int i = 0; i < extra.Length; i++)
+        {
+            int at = merged.IndexOf(extra[i]);
+            if (at >= 0 && extra[i].StartsWith("--", StringComparison.Ordinal) && i + 1 < extra.Length) merged[at + 1] = extra[++i];
+            else rest.Add(extra[i]);
+        }
+        return [.. merged, .. rest];
+    }
+
     [Fact]
     public void PreviewWritesNothingAndApplyCreatesAValidatedReusableIdentity()
     {
@@ -50,7 +64,7 @@ public sealed class ConfigurationWorkflowTests : IDisposable
     [InlineData(new string[] { "--new-library", "--remote", @"E:\Videos" }, 1)]
     public void InvalidConfigurationDoesNotWrite(string[] extra, int code)
     {
-        Assert.Equal(code, Run([.. Options(), .. extra, "--apply"]).Code);
+        Assert.Equal(code, Run([.. With(extra), "--apply"]).Code);
         Assert.False(File.Exists(_fixture.PathFor("config.json")));
     }
 
@@ -58,7 +72,7 @@ public sealed class ConfigurationWorkflowTests : IDisposable
     public void SpikeRequiresItsOwnRemoteAndControlPort()
     {
         Assert.Equal(2, Run([.. Options(), "--new-library", "--spike", "--apply"]).Code);
-        Assert.Equal(0, Run([.. Options(), "--new-library", "--spike", "--remote", @"\\server\Data\AppData\MedalSync-spike", "--apply"]).Code);
+        Assert.Equal(0, Run(With("--new-library", "--spike", "--remote", @"\\server\Data\AppData\MedalSync-spike", "--apply")).Code);
         var config = MedalSyncConfig.Load(_fixture.PathFor("config.json"));
         Assert.Equal(53683, config.Mount.ControlPort);
         Assert.Empty(config.SyncExclusions);
@@ -139,9 +153,9 @@ public sealed class ConfigurationWorkflowTests : IDisposable
     [Fact]
     public void LocalCloudConfigurationNeedsNoSmbServer()
     {
-        var result = Run([.. Options(), "--new-library", "--storage-mode", "local", "--remote", @"E:\MedalLibrary",
+        var result = Run(With("--new-library", "--storage-mode", "local", "--remote", @"E:\MedalLibrary",
             "--coordination-root", @"C:\MedalState\coordination", "--cloud-remote", "dropbox:MedalSync",
-            "--rclone-config", @"C:\Private\rclone.conf", "--apply"]);
+            "--rclone-config", @"C:\Private\rclone.conf", "--apply"));
         Assert.True(result.Code == 0, result.Error);
         var config = MedalSyncConfig.Load(_fixture.PathFor("config.json"));
         Assert.Equal(StorageMode.Local, config.StorageMode);

@@ -1,6 +1,9 @@
 namespace MedalSync.Cli;
 
-/// <summary>A tiny, strict parser: unknown options are errors, never ignored.</summary>
+/// <summary>
+/// A tiny, strict parser: unknown or repeated options are errors, never ignored,
+/// and an option's value cannot itself start with "--".
+/// </summary>
 internal sealed class Arguments
 {
     private readonly Dictionary<string, string?> _options = new(StringComparer.Ordinal);
@@ -22,19 +25,18 @@ internal sealed class Arguments
                 words.Add(arg);
                 continue;
             }
-            if (flags.Contains(arg))
+            if (!flags.Contains(arg) && !valued.Contains(arg)) throw new UsageException($"Unknown option {arg}.");
+            if (parsed._options.ContainsKey(arg)) throw new UsageException($"{arg} was given more than once.");
+            string? value = null;
+            if (valued.Contains(arg))
             {
-                parsed._options[arg] = null;
+                if (i + 1 >= args.Count || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                {
+                    throw new UsageException($"{arg} needs a value.");
+                }
+                value = args[++i];
             }
-            else if (valued.Contains(arg))
-            {
-                if (i + 1 >= args.Count) throw new UsageException($"{arg} needs a value.");
-                parsed._options[arg] = args[++i];
-            }
-            else
-            {
-                throw new UsageException($"Unknown option {arg}.");
-            }
+            parsed._options[arg] = value;
         }
         return parsed;
     }

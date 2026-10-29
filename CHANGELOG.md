@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Tighten command-line checks. A repeated option, or an option given another
+  option as its value (`--reason --apply`), is now a usage error that names it.
+  Session, device and library IDs must be exactly 32 lowercase hex characters
+  with nothing after them, so `recover-start` reports a usage error instead of
+  crashing on an ID ending in a newline. `capacity` rejects zero, negative, NaN,
+  infinite and oversized numbers as usage errors.
+- `status --json` exits 3 with `{"storage":"unreachable",...}` when the shared
+  storage or journal cannot be reached, as plain `status` does, so scripts can
+  tell an outage from a refusal.
+- `abandon` previews now refuse exactly when `--apply` would: on a Ready
+  library, a mistyped session ID or a blank reason.
+- Clip drive health messages name the folder the drive actually serves (the
+  local copy when one is set) instead of the primary storage.
 - Measure free space on the disk that actually holds the cache and persistent
   copy, so disks mounted inside folders, `subst` letters and second letters for
   one disk are budgeted correctly. Refuse a FAT/FAT32 cache or persistent copy
