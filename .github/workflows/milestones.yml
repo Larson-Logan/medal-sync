@@ -102,6 +102,8 @@ jobs:
             gh api --method PATCH "repos/$REPO/issues/$1" -F "milestone=$number" --silent </dev/null
             echo "- #$1 → $title" >>"$GITHUB_STEP_SUMMARY"
           }
+          # GraphQL variables, not shell ones.
+          # shellcheck disable=SC2016
           closing='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:50){nodes{number repository{nameWithOwner} milestone{title}}}}}}'
           while IFS=$'\t' read -r pr current; do
             assign "$pr" "$current"
