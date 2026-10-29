@@ -264,7 +264,7 @@
     "tests/tools/medal-sync/ReleaseUpdateTests.cs": "92cd08f242732fef58840f3c467660c15cfc555737b75e759c0bd3b896bbe221",
     "tests/tools/medal-sync/ReplicationTests.cs": "c1b7baae6f7cbd7d133d1afafaa780d41e513db7ea42392984520b7157de661e",
     "tests/tools/medal-sync/RepositoryFilesTests.cs": "cfabfe6a0a58ba9267a8515acd0e0355794c903b4c227225fd5c8ececaa1158f",
-    "tests/tools/medal-sync/SessionTests.cs": "bcc3681d316977303d6b3b0ed35f1bff7024d10eb75def23f2e76b8e51e425bd",
+    "tests/tools/medal-sync/SessionTests.cs": "d44a3ea453bf1a6b68f06f36284d0dece22f497aa6700a940a26f7a1d3e8d593",
     "tests/tools/medal-sync/StoragePromotionTests.cs": "1e58ca95fd3d7a00c09dbdff0655a8988ea05314c89e22ad1288df93467f1dbd",
     "tests/tools/medal-sync/StorageTests.cs": "55cf9d97f24dcde1d629ec65e70ce466caf9f8e5729259104ba8ad5075ac7f6c",
     "tests/tools/medal-sync/WindowsPathTests.cs": "07a945e787521c378020ca65525be3de247f4c7be9d0ace1b623ebfb61a76798",

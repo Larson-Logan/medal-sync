@@ -194,10 +194,11 @@ public sealed class SessionTests : IDisposable
     public void StatusReadyIsEmittedOnlyAfterVerifiedPublicationAndRelease()
     {
         List<SessionProgress> reports = [];
+        List<OwnershipState> readyStates = [];
         var pc = Computer(FirstPc, "first", progress: report =>
         {
             reports.Add(report);
-            if (report.Phase == SessionPhase.Ready) Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+            if (report.Phase == SessionPhase.Ready) readyStates.Add(_store.ReadJournal().State);
         });
         AssertStarted(pc.Coordinator.Launch());
         Record(pc, "new-recording");
@@ -210,6 +211,7 @@ public sealed class SessionTests : IDisposable
         Assert.Contains(reports, p => p.Phase == SessionPhase.Uploading && p.QueuedFiles == 2 && p.QueuedBytes == 8192);
         Assert.Contains(reports, p => p.Phase == SessionPhase.Verifying);
         Assert.Equal(SessionPhase.Ready, reports[^1].Phase);
+        Assert.Equal(new[] { OwnershipState.Clean }, readyStates);
     }
 
     [Fact]
