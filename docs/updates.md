@@ -35,7 +35,7 @@ library operations are blocked.
 Executables go under the chosen program folder's `bin` directory. Settings,
 device identity, logs and backups stay in your user profile. The installed app
 reuses an existing `$HOME/.medal-sync` configuration first, then a legacy
-`%LOCALAPPDATA%/LarsonServer/MedalSync` configuration. A new setup uses
+`%LOCALAPPDATA%/MedalSync` or `%LOCALAPPDATA%/LarsonServer/MedalSync` configuration. A new setup uses
 `$HOME/.medal-sync`; setup does not generate an account, configuration or identity.
 Recordings, caches and shared library files remain in their existing locations.
 

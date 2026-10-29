@@ -37,8 +37,9 @@ It does not enroll a library, mount storage or change Medal's startup entries.
 
 Configuration and identity stay in your profile, separate from Program Files.
 The managed installation reuses an existing `$HOME/.medal-sync` configuration,
-then an older `%LOCALAPPDATA%/LarsonServer/MedalSync` configuration. Fresh
-installations use `$HOME/.medal-sync`. Existing portable installations continue
+then an older `%LOCALAPPDATA%/MedalSync` or `%LOCALAPPDATA%/LarsonServer/MedalSync`
+configuration. Fresh installations use `$HOME/.medal-sync`; see
+[where settings are read from](commands.md#where-settings-are-read-from). Existing portable installations continue
 using adjacent state. No identity or library data is copied by setup.
 
 An unconfigured desktop launch shows the expected configuration path and offers
@@ -184,6 +185,8 @@ $cli = "$env:ProgramFiles/Medal Sync/bin/medal-sync.exe"
   --out "$HOME/medal-sync-candidate.json"
 ```
 
+Every `config create` option is listed in the [command reference](commands.md#config-create-options),
+and every field it writes in the [configuration reference](configuration.md).
 Use `--apply` only after reviewing the preview; it creates a new candidate file
 and refuses to overwrite an existing file. Validate it with
 `config validate --config FILE`. Validation checks syntax and paths, not

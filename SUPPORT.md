@@ -7,6 +7,7 @@ GitHub issues as time permits; there is no guaranteed response time.
 | --- | --- |
 | Installing and configuring a library | [Getting started](docs/getting-started.md) and the included Medal Sync Setup Guide |
 | Server, persistent local storage or cloud copies | [Storage guide](docs/storage.md) |
+| A command, exit code or `config.json` setting | [Command reference](docs/commands.md) and [configuration reference](docs/configuration.md) |
 | Updating, reinstalling, removing or recovering an update | [Updates and removal](docs/updates.md) |
 | Building or contributing | [Contributing](CONTRIBUTING.md) and [tests](tests/README.md) |
 | A possible vulnerability | [Security policy](SECURITY.md) |

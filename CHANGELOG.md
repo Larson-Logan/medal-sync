@@ -11,6 +11,9 @@
 - Releases no longer need a hand-made release or tag. Merging a version bump to
   main builds, verifies and attests that commit and creates one draft release
   targeting it. Publishing the draft creates the tag.
+- New [command reference](docs/commands.md) and
+  [configuration reference](docs/configuration.md) list every command, exit
+  code, `config.json` field, default and limit in one place.
 
 ## 1.1.0 — 2026-10-29
 

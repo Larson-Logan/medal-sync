@@ -32,7 +32,7 @@ External USB disks work for the cache and the persistent copy. If the disk that
 holds either one is unplugged, launch reports *Waiting for storage* and changes
 nothing. Reconnect it and open Medal again.
 
-The setup wizard and launch refuse these, and `inventory` lists them as blockers:
+The setup wizard and launch refuse these, and `inspect` lists them as blockers:
 
 | Folder | Refused on | Why |
 | --- | --- | --- |
