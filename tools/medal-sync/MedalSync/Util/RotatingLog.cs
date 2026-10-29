@@ -17,6 +17,7 @@ internal sealed class RotatingLog(string directory, string name = "medal-sync", 
 
     private readonly object _gate = new();
     private readonly Queue<string> _held = new();
+    private string? _mutexName;
 
     /// <summary>Lines waiting for a later write because the last attempt failed.</summary>
     internal int Held
@@ -38,7 +39,8 @@ internal sealed class RotatingLog(string directory, string name = "medal-sync", 
                 string current = Path.Combine(directory, name + ".log");
                 try
                 {
-                    if (File.Exists(current) && new FileInfo(current).Length >= maxBytes) Rotate(current);
+                    var file = new FileInfo(current);
+                    if (file.Exists && file.Length >= maxBytes) Rotate(current);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -89,8 +91,10 @@ internal sealed class RotatingLog(string directory, string name = "medal-sync", 
         Mutex mutex;
         try
         {
-            string key = Path.GetFullPath(Path.Combine(directory, name)).ToUpperInvariant();
-            mutex = new Mutex(false, @"Local\MedalSync.Log." + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..32]);
+            // Fixed for this log, so it is worked out once rather than on every line.
+            _mutexName ??= @"Local\MedalSync.Log." + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                Path.GetFullPath(Path.Combine(directory, name)).ToUpperInvariant())))[..32];
+            mutex = new Mutex(false, _mutexName);
         }
         catch (Exception)
         {

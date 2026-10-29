@@ -10,6 +10,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 {
     private const string MutexName = @"Local\LarsonServer.MedalSync.StatusView";
     private const string OpenEventName = @"Local\LarsonServer.MedalSync.OpenStatus";
+    private static readonly TimeSpan VisibleReadInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan HiddenReadInterval = TimeSpan.FromSeconds(5);
     private readonly NotifyIcon _icon;
     private readonly AppIcons _icons;
     private readonly Form _panel;
@@ -18,6 +20,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private readonly System.Windows.Forms.Timer _timer;
     private readonly EventWaitHandle _open;
     private Task<DesktopStatus>? _read;
+    private DateTime _nextRead;
     private DesktopStatus _last = DesktopStatus.Unknown();
     private bool _finishing;
     private bool _ending;
@@ -121,8 +124,15 @@ internal sealed class WindowsTrayStatus : ApplicationContext
             _last = _read.IsCompletedSuccessfully ? _read.Result : DesktopStatus.Unknown(_last.ConfirmedAt);
             _read = null;
         }
-        // At most one read: a hung SMB connection cannot accumulate workers or block the UI.
-        _read ??= Task.Run(_readStatus);
+        // At most one read: a hung SMB connection cannot accumulate workers or block the UI. Each read loads the
+        // configuration and reaches the share, so it runs every second only while the panel is open. The supervisor's
+        // heartbeat stays fresh for 20 seconds, so the slower background pace never shows a live session as stale.
+        var now = DateTime.UtcNow;
+        if (_read is null && now >= _nextRead)
+        {
+            _read = Task.Run(_readStatus);
+            _nextRead = now + (_panel.Visible ? VisibleReadInterval : HiddenReadInterval);
+        }
         var status = _last.At(DateTimeOffset.UtcNow);
         if (status.Phase is SessionPhase.Ready or SessionPhase.Active or SessionPhase.Waiting) _finishFailure = null;
         string? lastResult = _finishFailure ?? status.LastResult;
@@ -143,6 +153,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private void ShowPanel()
     {
         if (_ending) return;
+        _nextRead = default; // Show current status as soon as the panel opens.
         _panel.Show();
         _panel.WindowState = FormWindowState.Normal;
         _panel.Activate();
@@ -163,7 +174,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         {
             _finishFailure = "Could not start finish. Keep this PC's session and cache; check the installation and retry here.";
         }
-        finally { _finishing = false; }
+        finally { _finishing = false; _nextRead = default; }
     }
 
     private static async Task<FinishCommandResult> RunFinish()

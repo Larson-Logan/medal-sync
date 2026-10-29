@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Security.Cryptography;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using MedalSync.Util;
@@ -8,7 +9,15 @@ namespace MedalSync.Library;
 /// <summary>One stored value. A null cell is represented by a C# null.</summary>
 internal abstract record Cell;
 
-internal sealed record IntegerCell(long Value) : Cell;
+internal sealed record IntegerCell(long Value) : Cell
+{
+    private const int CachedMin = -16;
+    private const int CachedMax = 1023;
+    private static readonly IntegerCell[] Small = Enumerable.Range(CachedMin, CachedMax - CachedMin + 1).Select(v => new IntegerCell(v)).ToArray();
+
+    /// <summary>A shared cell for small values (flags, counts, enums), which make up most integers in a library; cells are immutable.</summary>
+    public static IntegerCell Of(long value) => value is >= CachedMin and <= CachedMax ? Small[value - CachedMin] : new IntegerCell(value);
+}
 
 internal sealed record TextCell(string Value) : Cell;
 
@@ -38,7 +47,7 @@ internal sealed class LibrarySnapshot
 {
     public const int FormatVersion = 1;
 
-    private byte[]? _canonical;
+    private string? _digest;
 
     private LibrarySnapshot(string accountId, long schemaVersion, string schemaFingerprint, IReadOnlyList<TableSnapshot> tables)
     {
@@ -86,45 +95,100 @@ internal sealed class LibrarySnapshot
             throw new InvalidDataException($"{table.Name} lists a column twice.");
         }
         int key = table.ColumnIndex(MedalSchema.NaturalKey(table.Name));
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // Rows read from SQLite or a canonical file are normally already in key order. Strictly ascending keys
+        // are also unique, so the duplicate set and the sort are only needed when the order is off.
+        bool ordered = true;
+        string? previous = null;
         foreach (var row in table.Rows)
         {
             if (row.Count != table.Columns.Count) throw new InvalidDataException($"A {table.Name} row has {row.Count} values for {table.Columns.Count} columns.");
             string id = TableSnapshot.Text(row[key]) ?? throw new InvalidDataException($"A {table.Name} row has no {table.Columns[key]}.");
-            if (!seen.Add(id)) throw new InvalidDataException($"{table.Name} contains '{id}' twice.");
+            if (ordered && previous is not null && string.CompareOrdinal(previous, id) >= 0) ordered = false;
+            previous = id;
         }
-        var rows = table.Rows
-            .OrderBy(r => TableSnapshot.Text(r[key]), StringComparer.Ordinal)
-            .Select(r => (IReadOnlyList<Cell?>)r.ToArray())
-            .ToArray();
+        IEnumerable<IReadOnlyList<Cell?>> source = table.Rows;
+        if (!ordered)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var row in table.Rows)
+            {
+                string id = TableSnapshot.Text(row[key])!;
+                if (!seen.Add(id)) throw new InvalidDataException($"{table.Name} contains '{id}' twice.");
+            }
+            source = table.Rows.OrderBy(r => TableSnapshot.Text(r[key]), StringComparer.Ordinal);
+        }
+        // Rows are copied: callers edit their own row arrays, and a snapshot must never change after its digest.
+        var rows = new IReadOnlyList<Cell?>[table.Rows.Count];
+        int i = 0;
+        foreach (var row in source) rows[i++] = row.ToArray();
         return table with { Columns = table.Columns.ToArray(), Rows = rows };
     }
 
     /// <summary>Deterministic UTF-8 JSON. JSONB cells are embedded as their raw JSON text.</summary>
-    public byte[] ToCanonicalJson() => (byte[])Canonical().Clone();
-
-    public string Digest() => Hashing.Sha256Hex(Canonical());
-
-    private byte[] Canonical()
+    public byte[] ToCanonicalJson()
     {
-        if (_canonical is not null) return _canonical;
         var buffer = new ArrayBufferWriter<byte>();
+        WriteCanonical(buffer);
+        byte[] bytes = buffer.WrittenSpan.ToArray();
+        _digest ??= Hashing.Sha256Hex(bytes);
+        return bytes;
+    }
+
+    /// <summary>
+    /// SHA-256 of <see cref="ToCanonicalJson"/>. Computed once by hashing the JSON as it is written, so a
+    /// snapshot never holds a second, serialized copy of the library in memory.
+    /// </summary>
+    public string Digest()
+    {
+        if (_digest is not null) return _digest;
+        using var hasher = new HashingWriter();
+        WriteCanonical(hasher);
+        return _digest = hasher.Finish();
+    }
+
+    private void WriteCanonical(IBufferWriter<byte> output)
+    {
         // Relaxed escaping only changes how characters are spelled; the output is
         // never embedded in HTML, and it is still deterministic.
-        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+        using var writer = new Utf8JsonWriter(output, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        writer.WriteStartObject();
+        writer.WriteNumber("format", FormatVersion);
+        writer.WriteString("accountId", AccountId);
+        writer.WriteNumber("schemaVersion", SchemaVersion);
+        writer.WriteString("schemaFingerprint", SchemaFingerprint);
+        writer.WriteStartArray("tables");
+        foreach (var table in Tables) WriteTable(writer, table);
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+    }
+
+    /// <summary>Hashes what the JSON writer hands back and reuses one pooled buffer.</summary>
+    private sealed class HashingWriter : IBufferWriter<byte>, IDisposable
+    {
+        private readonly IncrementalHash _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        private byte[] _buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+
+        public void Advance(int count) => _hash.AppendData(_buffer, 0, count);
+
+        public Memory<byte> GetMemory(int sizeHint = 0)
         {
-            writer.WriteStartObject();
-            writer.WriteNumber("format", FormatVersion);
-            writer.WriteString("accountId", AccountId);
-            writer.WriteNumber("schemaVersion", SchemaVersion);
-            writer.WriteString("schemaFingerprint", SchemaFingerprint);
-            writer.WriteStartArray("tables");
-            foreach (var table in Tables) WriteTable(writer, table);
-            writer.WriteEndArray();
-            writer.WriteEndObject();
+            if (sizeHint > _buffer.Length)
+            {
+                ArrayPool<byte>.Shared.Return(_buffer);
+                _buffer = ArrayPool<byte>.Shared.Rent(sizeHint);
+            }
+            return _buffer;
         }
-        _canonical = buffer.WrittenSpan.ToArray();
-        return _canonical;
+
+        public Span<byte> GetSpan(int sizeHint = 0) => GetMemory(sizeHint).Span;
+
+        public string Finish() => Convert.ToHexStringLower(_hash.GetHashAndReset());
+
+        public void Dispose()
+        {
+            _hash.Dispose();
+            ArrayPool<byte>.Shared.Return(_buffer);
+        }
     }
 
     private static void WriteTable(Utf8JsonWriter writer, TableSnapshot table)
@@ -160,11 +224,14 @@ internal sealed class LibrarySnapshot
         writer.WriteEndObject();
     }
 
-    public static LibrarySnapshot FromCanonicalJson(ReadOnlySpan<byte> utf8)
+    public static LibrarySnapshot FromCanonicalJson(ReadOnlySpan<byte> utf8) => FromCanonicalJson(utf8.ToArray());
+
+    /// <summary>Parses <paramref name="utf8"/> in place, without copying it.</summary>
+    public static LibrarySnapshot FromCanonicalJson(byte[] utf8)
     {
         try
         {
-            using var document = JsonDocument.Parse(utf8.ToArray(), new JsonDocumentOptions { MaxDepth = 256 });
+            using var document = JsonDocument.Parse(utf8, new JsonDocumentOptions { MaxDepth = 256 });
             var root = document.RootElement;
             int format = root.GetProperty("format").GetInt32();
             if (format != FormatVersion) throw new InvalidDataException($"Snapshot format {format} is not supported (expected {FormatVersion}).");
@@ -191,7 +258,7 @@ internal sealed class LibrarySnapshot
     private static Cell? ReadCell(JsonElement value) => value.ValueKind switch
     {
         JsonValueKind.Null => null,
-        JsonValueKind.Number when value.TryGetInt64(out long number) => new IntegerCell(number),
+        JsonValueKind.Number when value.TryGetInt64(out long number) => IntegerCell.Of(number),
         JsonValueKind.String => new TextCell(value.GetString()!),
         JsonValueKind.Object when value.EnumerateObject().Count() == 1 && value.TryGetProperty("jsonb", out JsonElement json) =>
             new JsonbCell(json.GetRawText()),

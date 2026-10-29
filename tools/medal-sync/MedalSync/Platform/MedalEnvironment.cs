@@ -94,27 +94,88 @@ internal sealed class MedalProcess(MedalInstall install, string? launchLink = nu
 {
     private static readonly string[] Names = ["Medal", "MedalEncoder", "Update"];
 
+    private readonly object _gate = new();
+    private Process? _seen;
+
+    /// <summary>
+    /// Called every few seconds while Medal runs. The Medal process found last time is checked first, through
+    /// a handle held since it was found (so a reused process ID cannot pass for it); every other process on
+    /// the PC is listed only when that one has exited.
+    /// </summary>
     public bool IsRunning()
     {
-        string folder = Path.GetFullPath(install.InstallDirectory).TrimEnd('\\') + "\\";
-        foreach (var process in Process.GetProcesses())
+        lock (_gate)
         {
-            using (process)
+            if (_seen is not null)
             {
-                if (!Names.Any(n => process.ProcessName.StartsWith(n, StringComparison.OrdinalIgnoreCase))) continue;
-                try
+                if (StillRunning(_seen)) return true;
+                _seen.Dispose();
+                _seen = null;
+            }
+            string folder = Path.GetFullPath(install.InstallDirectory).TrimEnd('\\') + "\\";
+            var processes = Process.GetProcesses();
+            Process? found = null;
+            try
+            {
+                foreach (var process in processes)
                 {
-                    string? path = process.MainModule?.FileName;
-                    if (path is null ? IsMedalNamed(process) : path.StartsWith(folder, StringComparison.OrdinalIgnoreCase)) return true;
+                    if (IsMedal(process, folder))
+                    {
+                        found = process;
+                        break;
+                    }
                 }
-                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+                if (found is null) return false;
+                if (Hold(found)) _seen = found;
+                return true;
+            }
+            finally
+            {
+                // Each Process is finalizable; disposing them all keeps a poll from feeding the finalizer queue.
+                foreach (var process in processes)
                 {
-                    // An unreadable Medal-named process might be Medal; assume it is.
-                    if (IsMedalNamed(process)) return true;
+                    if (!ReferenceEquals(process, _seen)) process.Dispose();
                 }
             }
         }
-        return false;
+    }
+
+    private static bool IsMedal(Process process, string folder)
+    {
+        if (!Names.Any(n => process.ProcessName.StartsWith(n, StringComparison.OrdinalIgnoreCase))) return false;
+        try
+        {
+            string? path = process.MainModule?.FileName;
+            return path is null ? IsMedalNamed(process) : path.StartsWith(folder, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // An unreadable Medal-named process might be Medal; assume it is.
+            return IsMedalNamed(process);
+        }
+    }
+
+    /// <summary>Opens and keeps the process handle. Without one, the next poll lists every process again.</summary>
+    private static bool Hold(Process process)
+    {
+        try
+        {
+            _ = process.SafeHandle;
+            return true;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool StillRunning(Process process)
+    {
+        try { return !process.HasExited; }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static bool IsMedalNamed(Process process) => process.ProcessName.StartsWith("Medal", StringComparison.OrdinalIgnoreCase);
