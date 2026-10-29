@@ -28,6 +28,7 @@ jobs:
     # Write access is needed only to see existing drafts. No code is checked out.
     permissions:
       contents: write
+      issues: read
     outputs:
       version: ${{ steps.plan.outputs.version }}
       release: ${{ steps.plan.outputs.release }}
@@ -52,6 +53,16 @@ jobs:
             echo "A release for v$version already exists, so nothing was built: $existing" >>"$GITHUB_STEP_SUMMARY"
           else
             echo "release=true" >>"$GITHUB_OUTPUT"
+            # Publishing closes the milestone, so list anything still open in it now.
+            export VERSION="$version"
+            milestone="$(gh api --paginate "repos/$REPO/milestones?state=open&per_page=100" --jq '.[] | select(.title == env.VERSION) | .number')"
+            if [ -n "$milestone" ]; then
+              remaining="$(gh api --paginate "repos/$REPO/issues?milestone=$milestone&state=open&per_page=100" --jq '.[] | "- #\(.number) \(.title)"')"
+              if [ -n "$remaining" ]; then
+                echo "::warning::Milestone $version still has open items. Finish or move them before publishing."
+                { echo "Open in milestone $version:"; echo "$remaining"; } >>"$GITHUB_STEP_SUMMARY"
+              fi
+            fi
           fi
 
   release:

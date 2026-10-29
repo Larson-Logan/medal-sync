@@ -76,6 +76,12 @@ validation has read-only repository permissions. Dependabot proposes monthly
 action and NuGet updates, grouping minor and patch versions while keeping major
 upgrades separate. See [maintainer triage](triage.md) for review and labels.
 
+Plan each release with its milestone, titled with the version; see
+[milestones](triage.md#milestones). Merged pull requests and the issues they
+close join it automatically, so before raising the version check the project's
+Releases view for anything still open in that milestone and finish it or move
+it to the next one.
+
 Update the version and changelog in a pull request and merge it to main. The
 [release workflow](../.github/workflows/release.yml) starts on its own when a
 push to main changes `Directory.Build.props`, or from **Run workflow** on the
@@ -106,6 +112,9 @@ gh attestation verify medal-sync-1.1.0-setup-win-x64.exe --repo Larson-Logan/med
 Generated notes use [.github/release.yml](../.github/release.yml) to group PRs
 by their type labels. Label merged work accurately; notes include a catch-all
 for uncategorized changes and still require maintainer review.
+
+The draft's run summary also lists any item still open in the version's
+milestone. Publishing the release closes that milestone once it is empty.
 
 Review assets, versions, hashes and release notes before publishing the draft.
 Drafts and prereleases are invisible to automatic update checks. A published

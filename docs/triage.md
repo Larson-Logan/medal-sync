@@ -51,6 +51,74 @@ foreach ($label in $labels) {
 Apply the labels before merging issue forms that reference them. GitHub only
 applies a form's default labels if those labels already exist.
 
+## Milestones
+
+Each release has a milestone titled with its version, such as `1.2.0`. Add an
+issue to a milestone once it is planned for that release; leave other accepted
+work without one. A milestone is a plan, not a promise or a date, so leave its
+due date empty unless a date has been announced.
+
+The [milestones workflow](../.github/workflows/milestones.yml) keeps release
+milestones accurate without manual bookkeeping:
+
+- A pull request merged to main, and every issue it closes, joins the earliest
+  open version milestone newer than the latest published release. A milestone
+  that is not a version, such as `Backlog`, is left alone. If no version
+  milestone is open, the workflow creates the next patch version; rename it for
+  a minor or major release.
+- The pull request that raises the version joins that version's milestone, and
+  an earlier planned milestone is renamed to match. Work merged while that
+  release's draft waits for publishing joins the following milestone. If you
+  rebuild the draft to include a later fix, move the fix back by hand.
+- Publishing a release closes its milestone. If anything in it is still open,
+  the milestone stays open and the run warns; the draft's run summary lists the
+  same items before you publish.
+
+## Project board
+
+The **Medal Sync** project is owned by the maintainer account and linked to the
+repository, so it appears on the repository's Projects tab. Its fields and views
+are defined in [project.json](../.github/project.json). Milestone, labels,
+assignees and linked pull requests come from each issue; the project adds:
+
+| Field | Values |
+| --- | --- |
+| Status | Todo, In Progress, Done (GitHub's default) |
+| Priority | P0 data integrity, broken release or security fix; P1 needed for the current milestone; P2 worth doing |
+| Size | S one focused change; M several files or a new command; L storage, schema or ownership work |
+
+| View | Shows |
+| --- | --- |
+| Board | Every item by Status |
+| Triage | Open items labeled `needs triage` |
+| Releases | Open items grouped by milestone, highest priority first |
+| Pull requests | Open pull requests with reviewers and milestone |
+
+New issues and pull requests are added automatically with Status Todo. Work
+through the Triage view: set Priority and Size, add a milestone if the work is
+planned, then remove `needs triage`. Move an item to In Progress when work
+starts. Closing an issue or merging a pull request sets Done, and closed items
+are archived after 30 days. Plan a release from the Releases view.
+
+To create or repair the project, sign the GitHub CLI in to the owner account
+with the project scope and run the setup script from the repository root. It
+reuses an existing project, adds missing fields and views and adds every open
+issue and pull request; it never deletes or renames anything:
+
+```powershell
+gh auth refresh -s project
+pwsh -File scripts/setup-github-project.ps1
+```
+
+Then turn on these built-in workflows in the project's **Workflows** settings,
+which have no API:
+
+- **Auto-add to project**: this repository, filter `is:issue,pr is:open`.
+- **Item added to project**: set Status to Todo.
+- **Item closed** and **Pull request merged**: set Status to Done.
+- **Item reopened**: set Status to In Progress.
+- **Auto-archive items**: filter `is:closed updated:<@today-30d`.
+
 ## Pull request review
 
 Confirm the problem, scope, linked issue and test evidence. Check that only
