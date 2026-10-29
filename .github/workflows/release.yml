@@ -1,22 +1,63 @@
 name: Release Medal Sync
-# Runs on a standard GitHub-hosted runner, which is free for this public
+# Runs on standard GitHub-hosted runners, which are free for this public
 # repository. Release builds deliberately use no caches.
+#
+# Merging a version bump to main builds and verifies that commit, then creates
+# a draft release targeting it. Publishing the draft creates the v* tag as the
+# maintainer, so the admin-only tag ruleset stays in force.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: [Directory.Build.props]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 env:
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
   NUGET_XMLDOC_MODE: skip
 jobs:
+  plan:
+    name: Decide whether this version needs a release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Write access is needed only to see existing drafts. No code is checked out.
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          props="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/Directory.Build.props?ref=$SHA")"
+          version="$(sed -n 's:.*<VersionPrefix>\([^<]*\)</VersionPrefix>.*:\1:p' <<<"$props")"
+          if ! grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' <<<"$version"; then
+            echo "::error::VersionPrefix '$version' is not MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          export TAG="v$version"
+          existing="$(gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.tag_name == env.TAG) | .html_url')"
+          if [ -n "$existing" ]; then
+            echo "release=false" >>"$GITHUB_OUTPUT"
+            echo "A release for v$version already exists, so nothing was built: $existing" >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "release=true" >>"$GITHUB_OUTPUT"
+          fi
+
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Build, verify and draft release
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     permissions:
@@ -40,16 +81,21 @@ jobs:
       - name: Audit public source and reachable Git history
         shell: pwsh
         run: python scripts/check-repository.py --history
-      - name: Verify release tag and main ancestry
+      - name: Verify version, main ancestry and any existing tag
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.VersionPrefix
-          if ($env:RELEASE_TAG -cne "v$version") { throw 'Tag must match Directory.Build.props.' }
+          if ($version -cne $env:VERSION) { throw 'Checked-out version differs from the planned version.' }
           git merge-base --is-ancestor HEAD origin/main
           if ($LASTEXITCODE -ne 0) { throw 'Release commit must be on main.' }
+          $tagged = git rev-parse --verify --quiet "refs/tags/v$version^{commit}"
+          if ($tagged -and $tagged -ne (git rev-parse HEAD)) {
+            throw "Tag v$version already exists on another commit. Raise the version instead."
+          }
+          $global:LASTEXITCODE = 0
       - name: Validate
         shell: pwsh
         run: ./scripts/validate.ps1
@@ -69,11 +115,18 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.VersionPrefix
+          $version = $env:VERSION
+          $tag = $env:TAG = "v$version"
+          # Re-check just before creating, so a draft made meanwhile is never duplicated.
+          $existing = gh api --paginate "repos/$env:GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == env.TAG) | .html_url'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list releases.' }
+          if ($existing) { throw "A release for $tag already exists: $existing" }
           $archive = ".medal-sync-dist/medal-sync-$version-win-x64.zip"
           $setup = ".medal-sync-dist/medal-sync-$version-setup-win-x64.exe"
-          gh release create $env:RELEASE_TAG $setup "$setup.sha256" $archive "$archive.sha256" --verify-tag --draft --generate-notes --title "Medal Sync $version"
+          # The draft targets this exact commit. Publishing it creates the tag.
+          $url = gh release create $tag $setup "$setup.sha256" $archive "$archive.sha256" --target $env:GITHUB_SHA --draft --generate-notes --title "Medal Sync $version"
           if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed; existing releases are never overwritten.' }
+          "Draft release ready to review and publish: $url" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY

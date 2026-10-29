@@ -76,23 +76,28 @@ validation has read-only repository permissions. Dependabot proposes monthly
 action and NuGet updates, grouping minor and patch versions while keeping major
 upgrades separate. See [maintainer triage](triage.md) for review and labels.
 
-Update the version and changelog, merge validated changes to main, then tag
-that commit and push the exact version tag. For version 1.1.0:
+Update the version and changelog in a pull request and merge it to main. The
+[release workflow](../.github/workflows/release.yml) starts on its own when a
+push to main changes `Directory.Build.props`, or from **Run workflow** on the
+Actions tab. It does nothing when a release, draft or published, already exists
+for that version, so other edits to the file never rebuild a release.
 
-```powershell
-git tag -a v1.1.0 -m 'Medal Sync 1.1.0'
-git push origin v1.1.0
-```
+Otherwise it checks the version format and main ancestry, refuses a `v*` tag
+that already points at a different commit, runs tests, builds both packages,
+verifies native installation and creates a **draft** GitHub release with setup
+EXE, portable ZIP, checksums and generated notes. The run summary links the
+draft. It uses no caches. Only the release jobs have contents-write permission.
+Existing releases cause failure rather than replacement.
 
-The release workflow checks tag/version equality and main ancestry, runs tests,
-builds both packages, verifies native installation and creates a **draft** GitHub
-release with setup EXE, portable ZIP, checksums and generated notes. It uses no
-caches. Only this job has contents-write permission. Existing releases cause
-failure rather than replacement.
+The draft targets the exact commit that was built; no tag exists yet. Publishing
+the draft creates the version tag on that commit as the maintainer who
+publishes, so tag creation stays limited to administrators. Do not create a
+release or push a tag by hand. To rebuild, delete the draft and choose **Run
+workflow**.
 
 The release job also records a signed [build provenance attestation](https://docs.github.com/en/actions/concepts/security/artifact-attestations)
 for the setup EXE and portable ZIP. Anyone can check that a download was built
-by this workflow from the tagged commit:
+by this workflow from the released commit:
 
 ```powershell
 gh attestation verify medal-sync-1.1.0-setup-win-x64.exe --repo Larson-Logan/medal-sync
