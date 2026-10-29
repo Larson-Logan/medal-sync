@@ -12,17 +12,29 @@ internal sealed record ReplicaTarget(string Name, string Remote)
 
 internal enum ReplicaConflictPolicy { Stop, Version }
 
+/// <summary>What a launch does when an rclone primary or a required target fails its sign-in check.</summary>
+internal enum CredentialCheckPolicy { Warn, Refuse }
+
 internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneConfigPath, IReadOnlyList<ReplicaTarget> Targets)
 {
     public int TimeoutMinutes { get; init; } = 240;
     public int? BandwidthLimitMiB { get; init; }
     public ReplicaConflictPolicy ConflictPolicy { get; init; } = ReplicaConflictPolicy.Stop;
 
+    /// <summary>
+    /// Launch checks every rclone remote's sign-in before taking ownership. <c>WARN</c> (the default) shows a notice and
+    /// starts Medal; <c>REFUSE</c> keeps Medal closed when an rclone primary or a required target needs attention.
+    /// Optional targets and outages only ever produce a notice.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public CredentialCheckPolicy CredentialCheck { get; init; } = CredentialCheckPolicy.Warn;
+
     public IEnumerable<string> Problems(MedalSyncConfig config)
     {
         if (TimeoutMinutes is < 1 or > 1440) yield return "replication timeoutMinutes must be 1 to 1440";
         if (BandwidthLimitMiB is < 1 or > 10000) yield return "bandwidthLimitMiB must be 1 to 10000, or null for unlimited";
         if (!Enum.IsDefined(ConflictPolicy)) yield return "replication conflictPolicy is not supported";
+        if (!Enum.IsDefined(CredentialCheck)) yield return "replication credentialCheck must be \"WARN\" or \"REFUSE\"";
         WindowsPath.TryParse(config.CaptureFolder, out var capture, out _);
         if (Targets is null) { yield return "replication targets must be an array"; yield break; }
         if (Targets.Count > 8) yield return "at most 8 replication targets are supported";
