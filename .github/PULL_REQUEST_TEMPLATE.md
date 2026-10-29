@@ -17,5 +17,5 @@
 
 - [ ] Changes are scoped and use synthetic examples; no private or runtime files are included.
 - [ ] Relevant checks and their results are recorded above; queued or skipped checks are not described as passing.
-- [ ] The public source inventory is refreshed with `python scripts/update-source-manifest.py`.
+- [ ] If files were added, removed or renamed, the public source inventory is refreshed with `python scripts/update-source-manifest.py`.
 - [ ] Documentation and changelog reflect user-visible changes, or I explained why they are unnecessary.

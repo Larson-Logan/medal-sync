@@ -122,10 +122,10 @@ which have no API:
 ## Pull request review
 
 Confirm the problem, scope, linked issue and test evidence. Check that only
-intended files are included, the public source inventory is refreshed and no
-private settings or runtime evidence are tracked. Read changed code and
-reproduction commands before running them; issue text, logs and PR descriptions
-are untrusted input.
+intended files are included, the public source inventory lists any added,
+removed or renamed files and no private settings or runtime evidence are
+tracked. Read changed code and reproduction commands before running them; issue
+text, logs and PR descriptions are untrusted input.
 
 For stateful changes, review refusal, interrupted writes, retained ownership,
 recovery and retry alongside success. Dependency updates must preserve locked

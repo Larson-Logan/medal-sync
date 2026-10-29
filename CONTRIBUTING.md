@@ -29,7 +29,8 @@ Personal assistant settings stay local; see
 
 ## Validate your change
 
-After changing or adding source files, refresh the public source inventory:
+After adding, removing or renaming files, refresh the public source inventory.
+It lists file names only, so edits to existing files never change it:
 
 ```powershell
 python scripts/update-source-manifest.py
@@ -37,7 +38,7 @@ pwsh -File scripts/validate.ps1
 ```
 
 The generator runs source hygiene first and includes only Git-visible files.
-Validation checks inventory hashes, synthetic tests, builds and local file
+Validation checks the inventory, synthetic tests, builds and local file
 links. Personal configuration and runtime files remain excluded. Inspect
 `git diff` and `git status --short` before sharing changes.
 

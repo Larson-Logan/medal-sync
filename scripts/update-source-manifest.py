@@ -1,7 +1,11 @@
-"""Refresh or verify the public source inventory using only Git-visible safe files."""
+"""Refresh or verify the public source inventory using only Git-visible safe files.
+
+The inventory lists file names only, so it changes only when files are added,
+removed or renamed. Git already content-addresses every file, and release
+assets carry their own SHA-256 sidecars and attestations.
+"""
 from pathlib import Path
 import argparse
-import hashlib
 import json
 import subprocess
 import sys
@@ -18,15 +22,7 @@ def main():
         ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], cwd=ROOT,
     ).decode('utf-8').split('\0')
     files = sorted({name for name in names if name and name != 'public-source.json'})
-    manifest = {
-        'format': 1,
-        'files': files,
-        'hashesDescribe': 'Git blob bytes; text is normalized to LF, independent of checkout line endings',
-        'sha256': {
-            name: hashlib.sha256((ROOT / name).read_bytes().replace(b'\r\n', b'\n')).hexdigest()
-            for name in files
-        },
-    }
+    manifest = {'format': 1, 'files': files}
     expected = json.dumps(manifest, indent=2, ensure_ascii=False) + '\n'
     target = ROOT / 'public-source.json'
     if args.check:
