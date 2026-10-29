@@ -14,7 +14,13 @@
   handoff continues. Set `"required": true` on a target to keep it blocking.
 - Report storage outages as a calm "Waiting for storage" state with backoff
   retries instead of an unknown or error state. Ownership and media stay on the PC.
-
+- Add a native configuration wizard with local/SMB storage, optional persistent
+  copies and cloud replicas, exact configuration review and explicit saving.
+  Existing setups retain their identity and require Ready; changes receive a
+  verified backup and atomic replacement. Enrollment remains a separate review.
+- Fix `mount-plan` refusing its own `<session>` placeholder. The plan is
+  validated with a sample session ID, then shown with the placeholder and a
+  quoted rclone path when it contains spaces.
 - Add a native tray status panel with supervisor progress, available upload
   counts, required replica, confirmation time and safe finish retry. Stale or
   unreachable status is explicit; closing the view leaves supervision intact.

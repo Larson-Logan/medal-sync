@@ -21,6 +21,9 @@ internal interface ILauncherUi
 
     /// <summary>Explicit review of every suspect removal, only with Medal stopped.</summary>
     bool ConfirmLibraryChanges(LibraryChangeReview review);
+
+    /// <summary>Offer the native configuration flow on an explicit, unconfigured launch.</summary>
+    bool OfferConfiguration(string message) { Show(message); return false; }
 }
 
 internal sealed record LauncherRequest(bool AtSignIn, string? Link);
@@ -106,23 +109,25 @@ internal static partial class Launcher
     private static partial Regex StatusPrefix();
 
     /// <summary>Explain missing setup before probing Medal; never create state or interrupt sign-in.</summary>
-    internal static int? CheckConfiguration(LauncherRequest request, LocalState state, ILauncherUi ui)
+    internal static int? CheckConfiguration(LauncherRequest request, LocalState state, ILauncherUi ui, Action<LocalState>? configure = null)
     {
         if (File.Exists(state.ConfigPath)) return null;
         if (request.AtSignIn) return 1;
-        ui.Show($"Medal Sync needs to be configured before it can open Medal.\n\nOpen Medal Sync Setup Guide from the Start menu for the setup steps. If this PC was configured before, recover its original configuration.\n\nConfiguration location:\n{state.ConfigPath}");
+        string message = $"Medal Sync needs to be configured before it can open Medal.\n\nOpen Medal Sync Setup Guide from the Start menu for the setup steps. If this PC was configured before, recover its original configuration.\n\nConfiguration location:\n{state.ConfigPath}";
+        if (configure is null) ui.Show(message);
+        else if (ui.OfferConfiguration(message + "\n\nOpen the configuration wizard now?")) configure(state);
         return 1;
     }
 
     [SupportedOSPlatform("windows")]
-    public static int Run(string[] args, ILauncherUi ui)
+    public static int Run(string[] args, ILauncherUi ui, Action<LocalState>? configure = null)
     {
         LauncherRequest request;
         MedalProcess medal;
         try
         {
             request = Parse(args);
-            if (CheckConfiguration(request, LocalState.ForCurrentUser(), ui) is { } setupResult) return setupResult;
+            if (CheckConfiguration(request, LocalState.ForCurrentUser(), ui, configure) is { } setupResult) return setupResult;
             SetupMaintenance.RequireNotRunning();
             medal = new MedalProcess(MedalEnvironment.Locate());
         }
