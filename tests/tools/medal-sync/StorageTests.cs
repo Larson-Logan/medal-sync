@@ -89,6 +89,15 @@ public sealed class StorageTests
         Assert.DoesNotContain("--network-mode", line, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Mount_PassesTheUploadLimitOnlyWhenSet()
+    {
+        Assert.DoesNotContain("--bwlimit", MountPlan.Arguments(Settings()));
+        var limited = MountPlan.Arguments(Settings() with { BandwidthLimitMiB = 5 }).ToList();
+        Assert.Equal("5Mi", limited[limited.IndexOf("--bwlimit") + 1]);
+        Assert.Equal("off", MountPlan.Rate(null));
+    }
+
     [Theory]
     [InlineData("remote")]
     [InlineData("letter")]
@@ -97,6 +106,8 @@ public sealed class StorageTests
     [InlineData("port")]
     [InlineData("fraction")]
     [InlineData("tiny-cache")]
+    [InlineData("no-bandwidth")]
+    [InlineData("huge-bandwidth")]
     public void Mount_RefusesUnsafeSettings(string change)
     {
         var bad = change switch
@@ -107,6 +118,8 @@ public sealed class StorageTests
             "cache-on-mount" => Settings() with { CacheDirectory = @"M:\cache" },
             "port" => Settings() with { ControlPort = 80 },
             "fraction" => Settings() with { WriteBack = TimeSpan.FromMilliseconds(1500) },
+            "no-bandwidth" => Settings() with { BandwidthLimitMiB = 0 },
+            "huge-bandwidth" => Settings() with { BandwidthLimitMiB = 10001 },
             _ => Settings() with { CacheMaxBytes = 1024 },
         };
         Assert.Throws<ArgumentException>(() => MountPlan.Arguments(bad));

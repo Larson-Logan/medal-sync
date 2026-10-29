@@ -215,6 +215,33 @@ public sealed class CliAndConfigTests : IDisposable
     }
 
     [Theory]
+    [InlineData(null, null, true)]
+    [InlineData(5, null, true)]
+    [InlineData(null, 50, true)]
+    [InlineData(1, 10000, true)]
+    [InlineData(0, null, false)]
+    [InlineData(10001, null, false)]
+    [InlineData(null, 0, false)]
+    [InlineData(null, -1, false)]
+    public void Config_UploadLimitsAreOptionalAndBounded(int? recording, int? finishing, bool valid)
+    {
+        var config = Config() with { Mount = Config().Mount with { BandwidthLimitMiB = recording, FinishBandwidthLimitMiB = finishing } };
+        if (!valid)
+        {
+            Assert.Contains("BandwidthLimitMiB must be 1 to 10000", Assert.Throws<InvalidDataException>(config.Validate).Message, StringComparison.OrdinalIgnoreCase);
+            return;
+        }
+        config.Validate();
+        string session = new('1', 32);
+        Assert.Equal(recording, config.MountSettings(session, @"C:\log.txt").BandwidthLimitMiB);
+        Assert.Equal(finishing, config.MountSettings(session, @"C:\log.txt", forRecording: false).BandwidthLimitMiB);
+        // Unset limits are not written back, so older builds can still read a saved configuration.
+        string json = System.Text.Encoding.UTF8.GetString(Util.Json.Serialize(config.Mount));
+        Assert.Equal(recording is not null, json.Contains("\"bandwidthLimitMiB\"", StringComparison.Ordinal));
+        Assert.Equal(finishing is not null, json.Contains("finishBandwidthLimitMiB", StringComparison.Ordinal));
+    }
+
+    [Theory]
     [InlineData("root")]
     [InlineData("local-remote")]
     [InlineData("cache-on-mount")]

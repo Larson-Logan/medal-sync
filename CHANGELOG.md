@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Limit the clip drive's upload speed with `mount.bandwidthLimitMiB` while
+  Medal runs and `mount.finishBandwidthLimitMiB` after it exits (both optional,
+  1 to 10000 MiB/s, unlimited by default), so uploads over a VPN do not compete
+  with the game. The limit switches through rclone's control API; a failed
+  switch is reported and never blocks recording or finishing. `mount-plan`
+  shows the `--bwlimit` flag.
 - Releases no longer need a hand-made release or tag. Merging a version bump to
   main builds, verifies and attests that commit and creates one draft release
   targeting it. Publishing the draft creates the tag.

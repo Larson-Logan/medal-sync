@@ -20,6 +20,17 @@ internal sealed record MountConfig(
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? SpaceWarningGiB { get; init; }
+
+    /// <summary>Optional upload limit, in MiB/s, for the clip drive while Medal runs. Null is unlimited.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? BandwidthLimitMiB { get; init; }
+
+    /// <summary>Optional upload limit, in MiB/s, once Medal has exited and uploads are finishing. Null is unlimited.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? FinishBandwidthLimitMiB { get; init; }
+
+    /// <summary>The configured upload limit while recording, or while finishing uploads.</summary>
+    public int? UploadLimitMiB(bool recording) => recording ? BandwidthLimitMiB : FinishBandwidthLimitMiB;
 }
 
 /// <summary>A Syncthing folder that overlaps the clip destination and must ignore it.</summary>
@@ -92,11 +103,15 @@ internal sealed record MedalSyncConfig(
 
     public string ExpandedRclonePath => Environment.ExpandEnvironmentVariables(RclonePath);
 
-    public MountSettings MountSettings(string session, string logFile) => new(
+    /// <summary>The clip drive's settings. A drive started only to finish uploads uses the finishing upload limit.</summary>
+    public MountSettings MountSettings(string session, string logFile, bool forRecording = true) => new(
         MountRemote, Capture.Root[0], SessionCacheDirectory(session),
         TimeSpan.FromSeconds(Mount.WriteBackSeconds), (long)Mount.CacheMaxGiB << 30, (long)Mount.MinFreeGiB << 30,
         TimeSpan.FromSeconds(Mount.CacheMaxAgeSeconds), TimeSpan.FromSeconds(Mount.CachePollSeconds),
-        TimeSpan.FromHours(Mount.DirCacheHours), Mount.Transfers, Mount.ControlPort, "Medal Clips", logFile);
+        TimeSpan.FromHours(Mount.DirCacheHours), Mount.Transfers, Mount.ControlPort, "Medal Clips", logFile)
+    {
+        BandwidthLimitMiB = Mount.UploadLimitMiB(forRecording),
+    };
 
     public static MedalSyncConfig Load(string path)
     {
@@ -157,6 +172,10 @@ internal sealed record MedalSyncConfig(
             problems.Add("mount.dirCacheHours must be a positive duration within the supported range");
         if (Mount?.SpaceWarningGiB is { } warning && (warning <= Mount.MinFreeGiB || warning > 1_000_000))
             problems.Add("mount.spaceWarningGiB must be more than mount.minFreeGiB and at most 1000000");
+        if (Mount?.BandwidthLimitMiB is < MountPlan.MinimumBandwidthMiB or > MountPlan.MaximumBandwidthMiB)
+            problems.Add("mount.bandwidthLimitMiB must be 1 to 10000, or null for unlimited");
+        if (Mount?.FinishBandwidthLimitMiB is < MountPlan.MinimumBandwidthMiB or > MountPlan.MaximumBandwidthMiB)
+            problems.Add("mount.finishBandwidthLimitMiB must be 1 to 10000, or null for unlimited");
         if (SyncExclusions is null) problems.Add("syncExclusions must be an array");
         else
             foreach (var exclusion in SyncExclusions)

@@ -72,6 +72,36 @@ as enough space. These are warnings only: Medal Sync never deletes clips that
 have not been copied yet and never closes Medal. During Windows shutdown the
 notices are logged without being shown.
 
+### Limit upload speed while recording
+
+In server mode the clip drive uploads new clips while Medal records. Over a VPN
+or tunnel, those uploads can compete with the game. Limit them in the `mount`
+settings:
+
+```json
+"mount": {
+  "bandwidthLimitMiB": 5,
+  "finishBandwidthLimitMiB": null
+}
+```
+
+- `mount.bandwidthLimitMiB` applies while Medal runs.
+- `mount.finishBandwidthLimitMiB` applies once Medal exits and uploads finish.
+  Leave it `null` to finish at full speed, or set the same value as
+  `bandwidthLimitMiB` to keep one limit throughout.
+
+Each is 1 to 10000 MiB/s, or `null` (the default) for unlimited. The limit
+moves to the finishing value when Medal exits, and back if Medal reopens before
+the switch completes. If the drive does not accept a change, a notice says so
+and the session continues at the previous speed; the limit never blocks
+recording or finishing. `mount-plan` shows the recording limit as `--bwlimit`.
+
+A limit only changes speed. Uploads take longer, so more clips wait on the SSD
+cache, but launch already reserves room for a whole session as if nothing
+uploads, and the low disk space notices above still apply. Drain, verification
+and ownership work the same way. Cloud copies use `replication.bandwidthLimitMiB`
+instead.
+
 ## Keep a local copy and upload to the server
 
 Add `--local-copy-root` to the configuration workflow in

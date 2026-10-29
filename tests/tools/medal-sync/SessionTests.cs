@@ -112,6 +112,10 @@ public sealed class SessionTests : IDisposable
 
         public Action? OnDrain { get; set; }
 
+        public List<bool> UploadLimits { get; } = [];
+
+        public string? UploadLimitProblem { get; set; }
+
         public Action? OnStop { get; set; }
 
         public bool StopResult { get; set; } = true;
@@ -135,6 +139,12 @@ public sealed class SessionTests : IDisposable
         {
             OnDrain?.Invoke();
             return Verdicts.Count > 0 ? Verdicts.Dequeue() : Steady;
+        }
+
+        public string? UseUploadLimit(bool recording)
+        {
+            UploadLimits.Add(recording);
+            return UploadLimitProblem;
         }
 
         public bool Stop()
@@ -1324,6 +1334,35 @@ public sealed class SessionTests : IDisposable
 
         Assert.Equal(FinishStatus.Unchanged, outcome.Status);
         Assert.Single(messages, m => m.Contains("Second PC wants to use Medal", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Supervise_SwitchesUploadLimitsWhenMedalExitsAndAFailedSwitchNeverBlocksFinish()
+    {
+        var pc = Computer(FirstPc, "first");
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        pc.Mount.UploadLimitProblem = "Synthetic upload limit failure.";
+        int polls = 0;
+        var medal = pc.Medal;
+        using var cancel = new CancellationTokenSource();
+        var clock = new StoppingClock(_clock, () =>
+        {
+            if (++polls == 3) medal.Running = false;
+        });
+        var coordinator = new SessionCoordinator(_store,
+            new SqliteLocalLibrary(pc.Database, MedalFixture.AccountId, _fixture.PathFor("first", "backups"), _clock),
+            pc.Mount, medal, _assets, clock,
+            new SessionOptions(FirstPc, WindowsPath.Parse(@"M:\Clips"), Versions, TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10)));
+        var messages = new List<string>();
+
+        var outcome = coordinator.Supervise(session, messages.Add, cancel.Token);
+
+        Assert.Equal(FinishStatus.Unchanged, outcome.Status);
+        Assert.Single(messages, m => m == "Synthetic upload limit failure.");
+        Assert.True(pc.Mount.UploadLimits.Count(r => r) >= 2);
+        Assert.False(pc.Mount.UploadLimits[^1]);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
     }
 
     [Fact]
