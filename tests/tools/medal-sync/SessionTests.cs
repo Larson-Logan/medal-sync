@@ -655,7 +655,7 @@ public sealed class SessionTests : IDisposable
         // The second PC asks while the first is busy, without taking anything.
         var waiting = second.Coordinator.Launch();
         Assert.Equal(LaunchStatus.Waiting, waiting.Status);
-        Assert.Single(_store.PendingRequests());
+        Assert.Single(_store.PendingRequests(_clock.Now));
         Assert.Empty(second.Mount.Starts);
 
         first.Medal.Running = false;
@@ -665,7 +665,7 @@ public sealed class SessionTests : IDisposable
         Assert.False(first.Mount.IsRunning);
 
         AssertStarted(second.Coordinator.Launch());
-        Assert.Empty(_store.PendingRequests());
+        Assert.Empty(_store.PendingRequests(_clock.Now));
         var onSecond = LibraryDatabase.ReadSnapshot(second.Database, MedalFixture.AccountId);
         Assert.Equal(2, onSecond.RowCount("contents"));
         Assert.Contains("second-microphone", MedalFixture.Settings(second.Database), StringComparison.Ordinal);
@@ -1466,7 +1466,8 @@ public sealed class SessionTests : IDisposable
         public Action? OnPrepare { get; set; }
         public Action? OnPublish { get; set; }
         public int Published { get; private set; }
-        public void Prepare(LibrarySnapshot snapshot) => OnPrepare?.Invoke();
+        public string? Warning { get; set; }
+        public string? Prepare(LibrarySnapshot snapshot) { OnPrepare?.Invoke(); return Warning; }
         public IReadOnlyList<string> Deferred { get; set; } = [];
         public ReplicationResult Publish(LibrarySnapshot snapshot) { Published++; OnPublish?.Invoke(); return new(Deferred); }
     }
@@ -1641,6 +1642,186 @@ public sealed class SessionTests : IDisposable
         }
         finally { Directory.Move(offline, _store.Root); }
         Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    public static TheoryData<string, int> AlwaysFailingFinishes => new()
+    {
+        // Attempt starts in one hour: 30 s doubling to 10 minutes for failures, to 5 minutes for outages.
+        { "action", 10 },
+        { "failure", 10 },
+        { "offline", 16 },
+    };
+
+    [Theory]
+    [MemberData(nameof(AlwaysFailingFinishes))]
+    public void SupervisorBacksOffEveryFailedFinishAndStartsABoundedNumberOfAttemptsPerHour(string kind, int maxAttempts)
+    {
+        int attempts = 0;
+        var replication = new FakeReplication { OnPublish = () =>
+        {
+            attempts++;
+            throw kind switch
+            {
+                "action" => new StorageActionRequiredException("Primary storage onedrive:MedalSync already holds a different file at one of this library's clip paths."),
+                "failure" => new IOException("synthetic provider failure"),
+                _ => new StorageOfflineException("synthetic outage"),
+            };
+        } };
+        List<SessionProgress> reports = [];
+        var pc = Computer(FirstPc, "first", replication: replication, progress: reports.Add);
+        string session = pc.Coordinator.Launch().Session!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        var started = _clock.Now;
+        using var cancel = new CancellationTokenSource();
+        _clock.OnSleep = () => { if (_clock.Now - started >= TimeSpan.FromHours(1)) cancel.Cancel(); };
+        List<string> notices = [];
+
+        var outcome = pc.Coordinator.Supervise(session, notices.Add, cancel.Token);
+
+        Assert.Equal(FinishStatus.Pending, outcome.Status);
+        Assert.InRange(attempts, 5, maxAttempts);
+        Assert.Single(notices);
+        if (kind == "action")
+        {
+            Assert.StartsWith("Action needed before switching PCs: Primary storage onedrive:MedalSync already holds a different file", notices[0]);
+            Assert.Equal(SessionPhase.RecoveryNeeded, reports.Last(r => r.IsOutcome).Phase);
+        }
+        // Ownership, cache and generation stay with this PC throughout.
+        Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
+        Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
+        Assert.Empty(pc.Mount.Forgotten);
+    }
+
+    [Fact]
+    public void ActionNeededFinishSucceedsOnTheFirstRetryAfterTheCauseIsFixed()
+    {
+        bool broken = true;
+        var replication = new FakeReplication { OnPublish = () =>
+        {
+            if (broken) throw new StorageActionRequiredException("Primary storage onedrive:MedalSync did not accept rclone's sign-in.");
+        } };
+        var pc = Computer(FirstPc, "first", replication: replication);
+        string session = pc.Coordinator.Launch().Session!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        _clock.OnSleep = () => broken = false;
+
+        var outcome = pc.Coordinator.Supervise(session, _ => { }, CancellationToken.None);
+
+        Assert.Equal(FinishStatus.Published, outcome.Status);
+        Assert.Equal(2, replication.Published);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void ReopeningMedalWhileTheLastFinishNeedsActionNamesTheCauseInsteadOfWaiting()
+    {
+        var replication = new FakeReplication { OnPublish = () => throw new StorageActionRequiredException("Primary storage onedrive:MedalSync did not accept rclone's sign-in.") };
+        List<SessionProgress> reports = [];
+        var pc = Computer(FirstPc, "first", replication: replication, progress: reports.Add);
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        Assert.Equal(PendingCause.NeedsAction, pc.Coordinator.Finish(session).Cause);
+
+        var relaunch = pc.Coordinator.Launch();
+
+        Assert.Equal(LaunchStatus.Blocked, relaunch.Status);
+        Assert.Contains("Action needed before switching PCs: Primary storage onedrive:MedalSync did not accept", relaunch.Message, StringComparison.Ordinal);
+        Assert.Equal(SessionPhase.RecoveryNeeded, reports[^1].Phase);
+        Assert.Equal(1, pc.Medal.Launches);
+        Assert.Equal(session, _store.ReadJournal().SessionId);
+    }
+
+    [Fact]
+    public void MedalReopeningDuringFailureBackoffResumesSupervisionAtOnce()
+    {
+        var replication = new FakeReplication { OnPublish = () => throw new StorageActionRequiredException("synthetic conflict") };
+        List<SessionProgress> reports = [];
+        var pc = Computer(FirstPc, "first", replication: replication, progress: reports.Add);
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        using var cancel = new CancellationTokenSource();
+        int sleeps = 0;
+        _clock.OnSleep = () =>
+        {
+            if (++sleeps == 1) pc.Medal.Running = true;
+            if (sleeps == 3) cancel.Cancel();
+        };
+
+        pc.Coordinator.Supervise(session, _ => { }, cancel.Token);
+
+        Assert.Equal(1, replication.Published);
+        Assert.Equal(SessionPhase.Active, reports[^1].Phase);
+    }
+
+    [Fact]
+    public void FailingNoticesNeverEndSupervision()
+    {
+        var pc = Computer(FirstPc, "first");
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        _store.WriteRequest(new HandoffRequest(1, SecondPc, SessionCoordinator.NewId(), _clock.Now));
+        int polls = 0;
+        _clock.OnSleep = () => { if (++polls == 3) pc.Medal.Running = false; };
+        int notices = 0;
+
+        var outcome = pc.Coordinator.Supervise(session, _ =>
+        {
+            notices++;
+            throw new IOException("synthetic full disk while writing the log");
+        }, CancellationToken.None);
+
+        Assert.Equal(1, notices);
+        Assert.Equal(FinishStatus.Unchanged, outcome.Status);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void LaunchStartsMedalButWarnsWhenPrimaryStorageNeedsTheUser()
+    {
+        const string warning = "Medal started, but the switch to another PC cannot finish until this is fixed: synthetic sign-in problem";
+        List<SessionProgress> reports = [];
+        var pc = Computer(FirstPc, "first", replication: new FakeReplication { Warning = warning }, progress: reports.Add);
+
+        var outcome = pc.Coordinator.Launch();
+
+        AssertStarted(outcome);
+        Assert.Equal(warning, outcome.Warning);
+        Assert.Contains(warning, outcome.Message, StringComparison.Ordinal);
+        Assert.Equal(1, pc.Medal.Launches);
+        Assert.Contains(warning, reports[^1].NextAction, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SupervisorNotifiesFreshRequestsOnceEachAndRemovesStaleOnes()
+    {
+        var pc = Computer(FirstPc, "first");
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        var third = new DeviceIdentity("cccccccccccccccccccccccccccccccc", "Old PC");
+        var fourth = new DeviceIdentity("dddddddddddddddddddddddddddddddd", "Skewed PC");
+        _store.WriteRequest(new HandoffRequest(1, SecondPc, SessionCoordinator.NewId(), _clock.Now));
+        _store.WriteRequest(new HandoffRequest(1, third, SessionCoordinator.NewId(), _clock.Now - TimeSpan.FromHours(7)));
+        // A clock running a day ahead cannot keep an old request alive: the share's file time is old too.
+        _store.WriteRequest(new HandoffRequest(1, fourth, SessionCoordinator.NewId(), _clock.Now + TimeSpan.FromDays(1)));
+        File.SetLastWriteTimeUtc(Path.Combine(_store.Root, "requests", fourth.DeviceId + ".json"), (_clock.Now - TimeSpan.FromHours(7)).UtcDateTime);
+        int polls = 0;
+        using var cancel = new CancellationTokenSource();
+        _clock.OnSleep = () =>
+        {
+            // The second PC asks again: a new request notifies again, even with the same wording.
+            if (++polls == 2) _store.WriteRequest(new HandoffRequest(1, SecondPc, SessionCoordinator.NewId(), _clock.Now));
+            if (polls == 4) cancel.Cancel();
+        };
+        List<string> notices = [];
+
+        pc.Coordinator.Supervise(session, notices.Add, cancel.Token);
+
+        Assert.Equal(2, notices.Count(n => n == "Second PC wants to use Medal. Quit Medal from its tray icon to switch."));
+        Assert.DoesNotContain(notices, n => n.Contains("Old PC", StringComparison.Ordinal) || n.Contains("Skewed PC", StringComparison.Ordinal));
+        Assert.Empty(_store.StaleRequests(_clock.Now));
+        Assert.Equal(SecondPc, Assert.Single(_store.PendingRequests(_clock.Now)).Device);
     }
 
     private sealed class StoppingClock(IClock inner, Action onSleep) : IClock

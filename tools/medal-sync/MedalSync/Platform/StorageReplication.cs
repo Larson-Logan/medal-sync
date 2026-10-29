@@ -19,9 +19,9 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
     private readonly IAssetChecker _primary = primary ?? PrimaryStorage.Checker(config, state);
     private readonly Func<string, VolumeInfo?> _volumes = volumes ?? StorageVolume.Describe;
 
-    public void Prepare(LibrarySnapshot snapshot)
+    public string? Prepare(LibrarySnapshot snapshot)
     {
-        if (config.Replication?.LocalCopyRoot is not { } localRoot) return;
+        if (config.Replication?.LocalCopyRoot is not { } localRoot) return null;
         requireIdle();
         // An unplugged disk is an outage to wait for, not a folder to create; an unsuitable one is refused before any download.
         StorageVolume.RequireSuitable(StorageRole.Media, localRoot, StorageVolume.RequirePresent(localRoot, "persistent clip storage", _volumes));
@@ -44,7 +44,18 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             // Every required file is already here. Record locally; primary storage is verified before handoff.
             ClaimLocal();
             Report(SessionPhase.Starting, "Primary storage is offline. Recording to this PC's local copy; clips upload when storage returns.", "Persistent local media");
-            return;
+            return null;
+        }
+        catch (StorageActionRequiredException ex)
+        {
+            if (missing.Any(m => m.Required))
+                throw new StorageActionRequiredException($"{missing.Count(m => m.Required)} clip file(s) must be downloaded from primary storage first. {ex.Message} "
+                    + "Nothing was changed.", ex);
+            // Recording can go ahead locally, but the handoff cannot finish until this is fixed. Say so now, not after the session.
+            ClaimLocal();
+            string warning = $"Medal started, but the switch to another PC cannot finish until this is fixed: {ex.Message}";
+            Report(SessionPhase.Starting, warning, "Persistent local media");
+            return warning;
         }
         // Only files this PC lacks are probed and downloaded.
         var onPrimary = missing.Where(m => _primary.ExistsOnServer(CapturePath(m.Relative))).Select(m => m.Relative).ToList();
@@ -55,6 +66,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         ClaimLocal();
         // Files only this PC holds (for example after switching primaries) are uploaded and verified at finish.
         CopyAndCheck(config.PrimaryCapture, local.Display, onPrimary, credentials: config.PrimaryIsRclone, replica: "Persistent local media");
+        return null;
     }
 
     public ReplicationResult Publish(LibrarySnapshot snapshot)
@@ -73,10 +85,10 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             {
                 CopyAndCheck(source.Display, config.PrimaryCapture, files, credentials: config.PrimaryIsRclone, versionConflicts: version, replica: "Primary storage");
             }
-            catch (RcloneFailedException)
+            catch (RcloneFailedException ex)
             {
-                RequirePrimary(); // An outage becomes StorageOfflineException; anything else keeps the transfer failure.
-                throw;
+                RequirePrimary(); // An outage or a sign-in problem surfaces here with its own message.
+                throw Required(ex, $"Primary storage {config.PrimaryCapture}", config.PrimaryCapture, config.PrimaryIsRclone);
             }
         }
         List<string> verified = [], deferred = [];
@@ -93,7 +105,12 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
                 verified.Add(target.Name);
                 pending.Remove(target.Name);
             }
-            catch (RcloneFailedException) when (!target.Required)
+            catch (RcloneFailedException ex) when (target.Required)
+            {
+                string destination = ReplicationPlan.Destination(target, config.LibraryId);
+                throw Required(ex, $"Required cloud copy '{target.Name}' ({destination})", destination, credentials: true);
+            }
+            catch (RcloneFailedException)
             {
                 // Primary storage already holds a verified copy. An optional provider outage never holds the library.
                 deferred.Add(target.Name);
@@ -140,6 +157,16 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         if (targets.Length == 0) { File.Delete(path); return; }
         AtomicFile.Replace(path, Json.Serialize(new PendingReplicas(1, config.LibraryId, targets)));
     }
+
+    /// <summary>
+    /// A failure at a destination that must verify before handoff. Waiting may fix an outage, so it becomes a calm,
+    /// backed-off wait; anything else (sign-in, conflict, quota, failed verification) names its cause and next step.
+    /// </summary>
+    private IOException Required(RcloneFailedException ex, string where, string destination, bool credentials) =>
+        RcloneFailure.IsTransient(ex)
+            ? new StorageOfflineException($"{where} cannot be reached right now.", ex)
+            : new StorageActionRequiredException(RcloneFailure.Describe(ex, where, destination,
+                credentials ? Environment.ExpandEnvironmentVariables(config.Replication!.RcloneConfigPath!) : null), ex);
 
     private static string PendingPath(LocalState state) => Path.Combine(state.Root, "replication", "pending.json");
 
@@ -206,7 +233,8 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         }
         string configFile = credentials ? Environment.ExpandEnvironmentVariables(config.Replication!.RcloneConfigPath!)
             : Path.Combine(state.Root, "rclone-empty.conf");
-        if (credentials && !File.Exists(configFile)) throw new RcloneFailedException("The configured rclone credential file is missing; configure the provider before retrying finish.");
+        if (credentials && !File.Exists(configFile))
+            throw new RcloneFailedException($"The rclone credential file is missing at {configFile}. Copy it to this PC from the PC where you ran 'rclone config', or create it there again.");
         Directory.CreateDirectory(state.Root);
         string list = Path.Combine(state.Root, "replication-" + Guid.NewGuid().ToString("N") + ".txt");
         try

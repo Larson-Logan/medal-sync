@@ -168,12 +168,12 @@ public sealed class CoordinationTests : IDisposable
         File.WriteAllText(Path.Combine(store.Root, "requests", "not-a-device.json"), "{}");
         File.WriteAllText(Path.Combine(store.Root, "requests", First.DeviceId + ".json"), "{ half written");
 
-        var pending = store.PendingRequests();
+        var pending = store.PendingRequests(Now);
 
         Assert.Single(pending);
         Assert.Equal(Now.AddMinutes(1), pending[0].RequestedAt);
         store.RemoveRequest(Second);
-        Assert.Empty(store.PendingRequests());
+        Assert.Empty(store.PendingRequests(Now));
     }
 
     [Fact]

@@ -23,9 +23,17 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
     {
         requireTime?.Invoke();
         if (run is not null) return run(arguments);
-        if (!File.Exists(Credentials)) throw new IOException("The configured rclone credential file is missing; configure the provider before retrying.");
+        if (!File.Exists(Credentials))
+            throw new StorageActionRequiredException($"The rclone credential file for primary storage {config.PrimaryCapture} is missing at {Credentials}. "
+                + "Copy it to this PC from the PC where you ran 'rclone config', or create it there again.");
         return new RcloneRunner(config.ExpandedRclonePath).Run(arguments, TimeSpan.FromMinutes(5), requireTime, captureOutput: true);
     }
+
+    /// <summary>An outage is a calm wait; a sign-in, configuration or other definite refusal names its cause instead.</summary>
+    private IOException Unavailable(IOException ex, string outage) =>
+        ex is RcloneFailedException failed && !RcloneFailure.IsTransient(failed)
+            ? new StorageActionRequiredException(RcloneFailure.Describe(failed, $"Primary storage {config.PrimaryCapture}", config.PrimaryCapture, Credentials), ex)
+            : new StorageOfflineException($"Primary storage ({config.PrimaryCapture}) {outage}.", ex);
 
     private IReadOnlyList<string> Common(string command, params string[] rest) =>
         [command, .. rest, "--config", Credentials, "--retries", "1", "--low-level-retries", "2", "--contimeout", "10s", "--timeout", "60s"];
@@ -38,9 +46,9 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
         {
             throw new UnsafeOperationException($"Primary storage {config.PrimaryCapture} has no Medal Sync marker. Run 'medal-sync storage init-primary' to prepare it.");
         }
-        catch (IOException ex) when (ex is not StorageOfflineException)
+        catch (IOException ex) when (ex is not (StorageOfflineException or StorageActionRequiredException))
         {
-            throw new StorageOfflineException($"Primary storage ({config.PrimaryCapture}) cannot be reached right now.", ex);
+            throw Unavailable(ex, "cannot be reached right now");
         }
         if (text.Trim() != config.LibraryId) throw new UnsafeOperationException($"Primary storage {config.PrimaryCapture} does not identify library {config.LibraryId}.");
         _listing = null;
@@ -99,9 +107,9 @@ internal sealed class RcloneAssetChecker(MedalSyncConfig config, LocalState stat
         _hasEntries = false;
         try { json = Run(Common("lsjson", config.PrimaryCapture, "--recursive", "--no-mimetype")); }
         catch (RcloneFailedException ex) when (allowMissing && ex.ExitCode == 3) { return new(StringComparer.OrdinalIgnoreCase); }
-        catch (IOException ex) when (ex is not StorageOfflineException)
+        catch (IOException ex) when (ex is not (StorageOfflineException or StorageActionRequiredException))
         {
-            throw new StorageOfflineException($"Primary storage ({config.PrimaryCapture}) cannot be listed right now.", ex);
+            throw Unavailable(ex, "cannot be listed right now");
         }
         var files = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

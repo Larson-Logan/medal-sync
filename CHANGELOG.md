@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- A finish that fails at primary storage or a required replica is retried with
+  backoff (30 seconds up to 10 minutes) instead of every few seconds, so a
+  conflict or full quota no longer restarts copy and verification continuously.
+  Failures that waiting cannot fix (sign-in rejected, missing credential file,
+  unreadable rclone configuration, conflicting file, full quota, failed
+  verification) are reported as *Action needed* with the cause and the next
+  step, instead of *Waiting for storage* or "unreachable or busy". Launch still
+  starts Medal when every clip is local, and warns that the handoff will need
+  the fix.
+- Handoff requests older than six hours no longer prompt the owner PC. `status`
+  marks them as old, and the owner's next session removes them without ever
+  deleting a newer request from the same PC. Each new request notifies once.
+- A log write that fails (full disk, a file held by another program) no longer
+  ends session supervision while Medal runs. Unwritten lines are kept and
+  written later; several Medal Sync processes can now share and rotate the log
+  safely. When supervision stops while Medal is open, the launcher shows its
+  message as a passive notice instead of a dialog that takes focus.
+
 - Tighten command-line checks. A repeated option, or an option given another
   option as its value (`--reason --apply`), is now a usage error that names it.
   Session, device and library IDs must be exactly 32 lowercase hex characters

@@ -235,7 +235,11 @@ removals automatically. Interrupted startup cleanup instead requires reopening
 Medal Sync on this PC. A blocked finish shows its diagnostic and required recovery
 steps in **Last finish result**; follow those steps before retrying. The last
 supervisor refusal stays available when reopening status for that same session.
-Waiting for another PC does not start Medal automatically.
+Waiting for another PC does not start Medal automatically. When another PC asks
+to switch, the panel shows one notice per request. A request older than six
+hours no longer prompts; `status` lists it as old until the next session on the
+owning PC removes it. If supervision stops while Medal is still open, its last
+message also appears in the panel instead of a dialog that would take focus.
 
 The panel and tray menu support keyboard access and native accessibility APIs.
 Background notices are coalesced in the panel without popups or taking focus

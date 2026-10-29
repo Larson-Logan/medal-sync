@@ -91,7 +91,10 @@ internal static class SessionCommands
             return 0;
         }
         output.WriteLine(StatusText.For(journal, device, Directory.Exists(config.DriveRoot.Display)));
-        foreach (var request in store.PendingRequests()) output.WriteLine($"Waiting to switch: {request.Device.DisplayName} since {request.RequestedAt:yyyy-MM-dd HH:mm} UTC.");
+        var now = DateTimeOffset.UtcNow;
+        foreach (var request in store.PendingRequests(now)) output.WriteLine($"Waiting to switch: {request.Device.DisplayName} since {request.RequestedAt:yyyy-MM-dd HH:mm} UTC.");
+        foreach (var request in store.StaleRequests(now))
+            output.WriteLine($"Old switch request from {request.Device.DisplayName} ({request.RequestedAt:yyyy-MM-dd HH:mm} UTC) is ignored; the next session removes it.");
         foreach (var replica in StorageReplication.Pending(state, config.LibraryId))
             output.WriteLine($"Cloud copy '{replica.Name}' is pending since {replica.Since:yyyy-MM-dd HH:mm} UTC; it retries on the next finish.");
         return 0;
@@ -267,6 +270,8 @@ internal static class SessionCommands
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
         var outcome = coordinator.Launch();
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
+        // Recording can go ahead, but the user should learn now, not after the session, that the handoff will need them.
+        if (outcome.Warning is { } warning && !shutdown.SuppressUi) Notify(notify, warning);
         if (outcome.Status is not (LaunchStatus.Started or LaunchStatus.AlreadyRunning)) return outcome.Status == LaunchStatus.Waiting ? 3 : 1;
         // A recovered, already-running session must pass the coordinator's drive
         // and ownership checks before it receives a link.
@@ -285,7 +290,7 @@ internal static class SessionCommands
             finished = coordinator.Supervise(outcome.Session!, m =>
             {
                 Report(context, output, m);
-                if (!shutdown.SuppressUi) notify?.Invoke(m);
+                if (!shutdown.SuppressUi) Notify(notify, m);
             }, cancel.Token);
         }
         if (!shutdown.Ending) GuardStartup(context);
@@ -302,21 +307,36 @@ internal static class SessionCommands
     }
 
     /// <summary>Keeps the Run value and medal:// handler on the launcher once startup is rewired; never fails a launch.</summary>
-    private static void GuardStartup(Context context)
-    {
+    private static void GuardStartup(Context context) => GuardStartup(
         // Machine-wide setup owns its own shortcuts, not Medal's per-user hooks.
         // Keep the existing portable integration intact until explicitly migrated.
-        if (LocalState.IsManagedInstall(AppContext.BaseDirectory)) return;
-        string launcher = Path.Combine(AppContext.BaseDirectory, StartupEntries.LauncherFile);
+        () => LocalState.IsManagedInstall(AppContext.BaseDirectory),
+        () => StartupEntries.Enforce(context.State.Root, Path.Combine(AppContext.BaseDirectory, StartupEntries.LauncherFile)),
+        context.Log.Write);
+
+    /// <summary>
+    /// Never throws. It also runs on a timer thread, where an unhandled exception would end the supervisor
+    /// while Medal is still running, so the layout check, the repair and the log write are all guarded.
+    /// </summary>
+    internal static void GuardStartup(Func<bool> isManagedInstall, Func<IEnumerable<string>> enforce, Action<string> log)
+    {
         try
         {
-            foreach (string change in StartupEntries.Enforce(context.State.Root, launcher)) context.Log.Write("startup: " + change);
+            if (isManagedInstall()) return;
+            foreach (string change in enforce()) log("startup: " + change);
         }
         catch (Exception ex)
         {
-            // It also runs on a timer thread, where an unhandled exception would end the supervisor.
-            context.Log.Write("startup: check failed: " + ex.Message);
+            try { log("startup: check failed: " + ex.Message); }
+            catch (Exception) { /* Logging is advisory. */ }
         }
+    }
+
+    /// <summary>A notice is advisory: a failed view or write never ends supervision.</summary>
+    private static void Notify(Action<string>? notify, string message)
+    {
+        try { notify?.Invoke(message); }
+        catch (Exception) { /* Dropped; the session continues. */ }
     }
 
     /// <summary>True while another medal-sync on this PC (for example a supervising launcher) holds the instance lock.</summary>

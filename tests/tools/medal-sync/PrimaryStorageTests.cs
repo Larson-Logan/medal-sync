@@ -250,7 +250,7 @@ public sealed class PrimaryStorageTests : IDisposable
         Assert.Empty(StorageReplication.Pending(state, config.LibraryId));
         Assert.False(File.Exists(Path.Combine(state.Root, "replication", "pending.json")));
         var required = config with { Replication = config.Replication with { Targets = [new("backup", "cloud:Backup") { Required = true }] } };
-        Assert.Throws<RcloneFailedException>(() => new StorageReplication(required, state, () => { },
+        Assert.Throws<StorageOfflineException>(() => new StorageReplication(required, state, () => { },
             _ => throw new RcloneFailedException("outage", 5), primary: new Primary()).Publish(snapshot));
     }
 
