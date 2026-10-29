@@ -119,14 +119,16 @@ foreach ($view in $spec.views) {
     if ($view.sort_by) {
         $body.sort_by = @($view.sort_by | ForEach-Object { , @((Get-FieldId $fields $_[0]), $_[1]) })
     }
-    Invoke-Gh @('api', '--method', 'POST', "users/$($user.id)/projectsV2/$number/views") $body | Out-Null
+    # The docs name this parameter user_id, but GitHub answers 404 for the numeric ID; it takes the login.
+    Invoke-Gh @('api', '--method', 'POST', "users/$Owner/projectsV2/$number/views") $body | Out-Null
     Write-Output "Added view $($view.name)"
 }
 
-# Open issues and pull requests. Adding an item that is already present is a no-op.
+# Open issues and pull requests. GitHub refuses to add an item that is already present.
 if (-not $SkipItems) {
+    $present = @(Get-GhPages "users/$Owner/projectsV2/$number/items?per_page=100" | ForEach-Object { $_.content.html_url })
     $open = Get-GhPages "repos/$Owner/$Repository/issues?state=open&per_page=100"
-    foreach ($item in $open) {
+    foreach ($item in $open | Where-Object { $_.html_url -cnotin $present }) {
         $body = [ordered]@{
             type = if ($item.pull_request) { 'PullRequest' } else { 'Issue' }
             owner = $Owner
