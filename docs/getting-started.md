@@ -265,7 +265,7 @@ the reason on standard error.
 
 | Field | Meaning |
 | --- | --- |
-| `format` | `1`. Later versions of format 1 only add fields. |
+| `format` | `1`. Later versions of format 1 only add fields; see [versions and schemas](versioning.md). |
 | `libraryId` | This PC's configured library. |
 | `storage` | `"reachable"` or `"unreachable"`; `message` explains the second. |
 | `journal` | `null` when unreachable. Otherwise `state` (`CLEAN`, `STARTING`, `ACTIVE`, `DRAINING`, `PUBLISHING`, `RECOVERY_REQUIRED`), `owner` (display name or `null`), `ownedByThisPc`, `sessionId`, `committedGeneration`, `revision`, `updatedAt` and `reason`. |
