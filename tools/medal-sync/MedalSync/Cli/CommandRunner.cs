@@ -29,6 +29,7 @@ internal static class CommandRunner
           config validate --config FILE          Validate a candidate config without reading Medal or the share
           inspect [--json]                       Phase 0 inventory of this PC (Gate A evidence)
           compatibility [--json]                 Check installed Medal builds and schema without configuration
+          diagnostics [--out FILE]               Preview a privacy-safe summary for support; --out saves it to a new file
           snapshot export --out FILE [--db DB]   Write the library tables to a new private file
           snapshot verify --in FILE              Check a snapshot file and its schema
           dry-run-restore [--in FILE] [--db DB]  Restore into a disposable copy and verify it
@@ -107,7 +108,8 @@ internal static class CommandRunner
         Func<LibraryChangeReview, bool>? reviewLibraryChanges, Session.SessionShutdown? shutdown)
     {
         string command = string.Join(' ', args.Words);
-        if (command != "version" && command != "setup check") Platform.SetupMaintenance.RequireNotRunning();
+        // Read-only reports stay available while setup runs, which is often when help is needed.
+        if (command is not ("version" or "setup check" or "diagnostics")) Platform.SetupMaintenance.RequireNotRunning();
         switch (command)
         {
             case "version":
@@ -129,6 +131,7 @@ internal static class CommandRunner
             "setup check" => SetupCommands.Check(args, output),
             "inspect" => SessionCommands.Inspect(args, output),
             "compatibility" => SessionCommands.Compatibility(args, output),
+            "diagnostics" => SessionCommands.Diagnostics(args, output),
             "status" => SessionCommands.Status(args, output),
             "history list" => HistoryCommands.List(args, output),
             "history diff" => HistoryCommands.Diff(args, output),

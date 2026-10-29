@@ -67,6 +67,7 @@ PC to update before the next switch.
 | Command | Document |
 | --- | --- |
 | `status --json` | Status for scripts. Fields are listed under [status for scripts](getting-started.md#status-for-scripts). |
+| `diagnostics` | Support summary (`kind` `medal-sync-diagnostic-summary`). Unavailable parts read `unavailable: ERRORTYPE`; tokens are new for each export. See the [command reference](commands.md#check-this-pc-read-only). |
 | `history list --json`, `history diff --json` | Generation history and change counts. See [library history](storage.md#library-history). |
 | `release.json` in the portable ZIP | Version, runtime and per-file SHA-256 hashes. See [package verification](updates.md#package-verification). |
 
