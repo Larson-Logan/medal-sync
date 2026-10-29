@@ -46,6 +46,13 @@ internal sealed record MedalSyncConfig(
 
     public string MountRemote => Replication?.LocalCopyRoot ?? Remote;
 
+    /// <summary>Server-mode primary media on a named rclone remote (cloud or personal server) instead of an SMB share.</summary>
+    public bool PrimaryIsRclone => StorageMode == StorageMode.Server && ReplicationConfig.ValidRemote(Remote);
+
+    /// <summary>The capture folder on primary storage: a share path, or an rclone path such as onedrive:MedalSync/Clips.</summary>
+    public string PrimaryCapture => PrimaryIsRclone
+        ? Remote.TrimEnd('/') + "/" + string.Join('/', Capture.Segments) : ServerCapture.Display;
+
     public WindowsPath MountedCapture => Capture.Rebase(DriveRoot, WindowsPath.Parse(MountRemote));
 
     /// <summary>
@@ -58,9 +65,13 @@ internal sealed record MedalSyncConfig(
 
     public WindowsPath DriveRoot => WindowsPath.Parse(Capture.Root);
 
-    public WindowsPath RemoteRoot => WindowsPath.Parse(Remote);
+    [System.Text.Json.Serialization.JsonIgnore]
+    public WindowsPath RemoteRoot => PrimaryIsRclone
+        ? throw new UnsafeOperationException("This command needs a folder primary; primary storage is the rclone remote " + Remote + ".")
+        : WindowsPath.Parse(Remote);
 
     /// <summary>The capture folder as seen on the server, outside the mount.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public WindowsPath ServerCapture => Capture.Rebase(DriveRoot, RemoteRoot);
 
     public string LibraryCoordinationDirectory => WindowsPath.Parse(CoordinationRoot).Append(LibraryId).Display;
@@ -93,7 +104,13 @@ internal sealed record MedalSyncConfig(
         if (StorageMode == StorageMode.Server)
         {
             if (!IsUnc(CoordinationRoot)) problems.Add("coordinationRoot must be a UNC path on the private share");
-            if (!IsUnc(Remote)) problems.Add("remote must be a UNC path on the private share");
+            if (PrimaryIsRclone)
+            {
+                // Recording never depends on the network: the drive serves a persistent local copy.
+                if (Replication?.LocalCopyRoot is null) problems.Add("an rclone primary requires replication.localCopyRoot");
+                if (Replication?.RcloneConfigPath is null) problems.Add("an rclone primary requires replication.rcloneConfigPath");
+            }
+            else if (!IsUnc(Remote)) problems.Add("remote must be a UNC path on the private share, or a named rclone remote and folder such as onedrive:MedalSync");
         }
         else
         {

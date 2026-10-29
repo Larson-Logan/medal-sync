@@ -259,4 +259,165 @@ public sealed class ReplicationTests : IDisposable
         Assert.ThrowsAny<IOException>(() => replication.Prepare(LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId)));
         Assert.Equal("keep me", File.ReadAllText(config.MountedCapture.Append("unrelated.txt").Display));
     }
+
+    [Fact]
+    public void RclonePrimaryRequiresPersistentLocalCopyAndExplicitCredentials()
+    {
+        var cloud = Config() with { Remote = "onedrive:MedalSync" };
+        Assert.True(cloud.PrimaryIsRclone);
+        Assert.Throws<InvalidDataException>(cloud.Validate);
+        Assert.Throws<InvalidDataException>((cloud with { Replication = new(@"E:\MedalLibrary", null, []) }).Validate);
+        Assert.Throws<InvalidDataException>((cloud with { Replication = new(null, @"C:\Private\rclone.conf", []) }).Validate);
+        var valid = cloud with { Replication = new(@"E:\MedalLibrary", @"C:\Private\rclone.conf", []) };
+        valid.Validate();
+        Assert.Equal("onedrive:MedalSync/Clips", valid.PrimaryCapture);
+        Assert.Equal(@"E:\MedalLibrary", valid.MountRemote);
+        Assert.Throws<UnsafeOperationException>(() => valid.ServerCapture);
+        Assert.Equal(@"\\server\Data\Videos\Clips", Config().PrimaryCapture);
+    }
+
+    [Fact]
+    public void RclonePrimaryKeepsServerJournalAndCannotOverlapReplicas()
+    {
+        var replication = new ReplicationConfig(@"E:\MedalLibrary", @"C:\Private\rclone.conf", [new ReplicaTarget("same", "sftp-home:Media/Videos")]);
+        var config = Config() with { Remote = "sftp-home:Media", Replication = replication };
+        Assert.Throws<InvalidDataException>(config.Validate);
+        Assert.Throws<InvalidDataException>((config with { CoordinationRoot = @"C:\Journal", Replication = replication with { Targets = [] } }).Validate);
+        (config with { Replication = replication with { Targets = [new ReplicaTarget("other", "gdrive:MedalSync")] } }).Validate();
+        Assert.False((config with { StorageMode = StorageMode.Local }).PrimaryIsRclone);
+    }
+
+    private (MedalSyncConfig Config, LocalState State, LibrarySnapshot Snapshot) WithReplica(bool required)
+    {
+        string credentials = _fixture.PathFor("private", "rclone.conf");
+        Directory.CreateDirectory(Path.GetDirectoryName(credentials)!);
+        File.WriteAllText(credentials, "[synthetic]\n");
+        var storage = SyntheticStorage();
+        var config = storage with { Replication = storage.Replication! with { RcloneConfigPath = credentials,
+            Targets = [new ReplicaTarget("cloud", "onedrive:MedalSync") { Required = required }] } };
+        Directory.CreateDirectory(config.MountedCapture.Display);
+        File.Copy(config.ServerCapture.Append(MedalSyncConfig.StorageMarker).Display, config.MountedCapture.Append(MedalSyncConfig.StorageMarker).Display);
+        File.WriteAllText(config.MountedCapture.Append("clip.mp4").Display, "synthetic media bytes");
+        string db = _fixture.CreateLibrary("source");
+        MedalFixture.AddContent(db, "a", video: @"M:\Clips\clip.mp4");
+        return (config, new LocalState(_fixture.PathFor("state")), LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId));
+    }
+
+    [Fact]
+    public void OfflineOptionalReplicaIsDeferredRecordedAndClearedAfterALaterSuccess()
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        bool offline = true;
+        var replication = new StorageReplication(config, state, () => { }, arguments =>
+        {
+            if (offline && arguments[2].StartsWith("onedrive:", StringComparison.Ordinal)) throw new RcloneFailedException("provider unreachable", 1);
+        });
+        Assert.Equal(new[] { "cloud" }, replication.Publish(snapshot).Deferred);
+        Assert.Equal("cloud", Assert.Single(StorageReplication.Pending(state, config.LibraryId)).Name);
+        Assert.True(File.Exists(Path.Combine(state.Root, "replication", "last-verified.json")));
+        offline = false;
+        Assert.Empty(replication.Publish(snapshot).Deferred);
+        Assert.Empty(StorageReplication.Pending(state, config.LibraryId));
+    }
+
+    [Fact]
+    public void RequiredReplicaFailureStillBlocksWithoutAReceipt()
+    {
+        var (config, state, snapshot) = WithReplica(required: true);
+        var replication = new StorageReplication(config, state, () => { }, arguments =>
+        {
+            if (arguments[2].StartsWith("onedrive:", StringComparison.Ordinal)) throw new RcloneFailedException("quota", 7);
+        });
+        Assert.Throws<RcloneFailedException>(() => replication.Publish(snapshot));
+        Assert.False(File.Exists(Path.Combine(state.Root, "replication", "last-verified.json")));
+    }
+
+    [Fact]
+    public void MedalReopeningDuringAnOptionalReplicaIsNeverMistakenForAnOutage()
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        var replication = new StorageReplication(config, state, () => { }, arguments =>
+        {
+            if (arguments[2].StartsWith("onedrive:", StringComparison.Ordinal)) throw new IOException("Medal reopened during replication.");
+        });
+        Assert.Throws<IOException>(() => replication.Publish(snapshot));
+        Assert.Empty(StorageReplication.Pending(state, config.LibraryId));
+    }
+
+    private sealed class OfflinePrimary : IAssetChecker
+    {
+        public HashSet<string> Files { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public bool Offline { get; set; } = true;
+        public void RequireServer() { if (Offline) throw new StorageOfflineException("synthetic outage"); }
+        public bool ExistsOnServer(string capturePath) => Files.Contains(capturePath);
+        public AssetReport ThroughMount(LibrarySnapshot snapshot) => throw new NotSupportedException();
+        public AssetReport OnServer(LibrarySnapshot snapshot) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void OfflinePrimaryStillStartsWhenEveryClipIsLocalButWaitsWhenDownloadsAreNeeded()
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        var primary = new OfflinePrimary();
+        var replication = new StorageReplication(config, state, () => { }, _ => Assert.Fail("No transfer while offline"), primary: primary);
+        replication.Prepare(snapshot);
+        File.Delete(config.MountedCapture.Append("clip.mp4").Display);
+        Assert.Throws<StorageOfflineException>(() => replication.Prepare(snapshot));
+        Assert.Throws<StorageOfflineException>(() => replication.Publish(snapshot));
+    }
+
+    [Fact]
+    public void SwitchedPrimaryHydratesOnlyWhatItHoldsAndRefusesClipsMissingEverywhere()
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        var primary = new OfflinePrimary { Offline = false };
+        List<string> commands = [];
+        var replication = new StorageReplication(config, state, () => { }, arguments => commands.Add(arguments[0]), primary: primary);
+        replication.Prepare(snapshot); // The new primary is empty; the only copy is local and uploads at finish.
+        Assert.Empty(commands);
+        File.Delete(config.MountedCapture.Append("clip.mp4").Display);
+        Assert.Throws<IOException>(() => replication.Prepare(snapshot));
+        primary.Files.Add(@"M:\Clips\clip.mp4");
+        replication.Prepare(snapshot);
+        Assert.Equal(new[] { "copy", "check" }, commands);
+    }
+
+    [Fact]
+    public void RcloneCheckerDistinguishesOfflineMissingMarkerAndListedMedia()
+    {
+        var config = Config() with { Remote = "onedrive:MedalSync", Replication = new(@"E:\MedalLibrary", @"C:\Private\rclone.conf", []) };
+        var state = new LocalState(_fixture.PathFor("state"));
+        string db = _fixture.CreateLibrary("source");
+        MedalFixture.AddContent(db, "a", video: @"M:\Clips\one.mp4");
+        MedalFixture.AddContent(db, "b", video: @"M:\Clips\two.mp4");
+        var snapshot = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+        int? failure = null;
+        List<string> paths = [];
+        var checker = new RcloneAssetChecker(config, state, arguments =>
+        {
+            paths.Add(arguments[1]);
+            if (failure is { } code) throw new RcloneFailedException("synthetic", code);
+            return arguments[0] == "cat" ? config.LibraryId + "\n" : """[{"Path":"one.mp4","Size":5,"IsDir":false},{"Path":"sub","IsDir":true}]""";
+        });
+        checker.RequireServer();
+        Assert.Contains("onedrive:MedalSync/Clips/" + MedalSyncConfig.StorageMarker, paths);
+        Assert.True(checker.ExistsOnServer(@"M:\Clips\one.mp4"));
+        Assert.False(checker.ExistsOnServer(@"M:\Clips\two.mp4"));
+        Assert.Equal(@"M:\Clips\two.mp4", Assert.Single(checker.OnServer(snapshot).Blocking).Reference.Path);
+        failure = 1;
+        Assert.Throws<StorageOfflineException>(checker.RequireServer);
+        failure = 3;
+        Assert.Throws<UnsafeOperationException>(checker.RequireServer);
+    }
+
+    [Fact]
+    public void ShutdownBudgetStopsPrimaryChecksInsteadOfLookingLikeAnOutage()
+    {
+        var config = Config() with { Remote = "onedrive:MedalSync", Replication = new(@"E:\MedalLibrary", @"C:\Private\rclone.conf", []) };
+        var checker = new RcloneAssetChecker(config, new LocalState(_fixture.PathFor("state")),
+            _ => throw new InvalidOperationException("rclone must not run after the shutdown budget expires"),
+            requireTime: () => throw new OperationCanceledException("Windows shutdown budget expired."));
+        Assert.Throws<OperationCanceledException>(checker.RequireServer);
+        Assert.Throws<OperationCanceledException>(() => checker.ExistsOnServer(@"M:\Clips\one.mp4"));
+    }
 }

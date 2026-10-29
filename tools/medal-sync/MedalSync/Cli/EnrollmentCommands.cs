@@ -23,6 +23,7 @@ internal static class EnrollmentCommands
         args.RequireAllUsed();
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
+        if (config.PrimaryIsRclone) throw new UnsafeOperationException("Enrollment requires an SMB primary; cloud primary copies are not supported by this command.");
         var install = MedalEnvironment.Locate();
         var device = state.Device();
         if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Quit Medal from its tray before recovering enrollment.");
@@ -76,6 +77,7 @@ internal static class EnrollmentCommands
         args.RequireAllUsed();
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
+        if (config.PrimaryIsRclone) throw new UnsafeOperationException("Enrollment requires an SMB primary; cloud primary copies are not supported by this command.");
         var install = MedalEnvironment.Locate();
         var device = state.Device();
         if (install.AccountId != config.AccountId) throw new IncompatibleLibraryException("Enrollment account differs from this PC's signed-in Medal account.");

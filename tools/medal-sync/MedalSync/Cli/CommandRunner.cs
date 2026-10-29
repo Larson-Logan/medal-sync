@@ -49,6 +49,7 @@ internal static class CommandRunner
                         [--replica-conflicts stop|version]  Preserve earlier destination files when updating
                                                  Preview/create a config; never overwrite an existing file
           init [--apply]                         Create the shared library from this PC (generation 0)
+          storage init-primary [--apply]         Mark an empty primary folder or rclone remote for this library
           launch [--replace-local-library] [--wait-for-server SECONDS] [--medal-link URL]
                                                  Start Medal through medal-sync and hand off on exit
           finish [--accept-library-changes]      Finish this PC's interrupted session
@@ -126,6 +127,7 @@ internal static class CommandRunner
             "status" => SessionCommands.Status(args, output),
             "mount-plan" => SessionCommands.MountPlanCommand(args, output),
             "init" => SessionCommands.Init(args, output),
+            "storage init-primary" => SessionCommands.InitPrimary(args, output),
             "enroll" => EnrollmentCommands.Run(args, output),
             "enroll recover" => EnrollmentCommands.Recover(args, output),
             "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown),

@@ -24,6 +24,7 @@ public sealed class RepositoryFilesTests
     [InlineData("medal-sync.example.json")]
     [InlineData("medal-sync.spike.example.json")]
     [InlineData("medal-sync.local.example.json")]
+    [InlineData("medal-sync.cloud.example.json")]
     public void ConfigTemplates_LoadAndValidate(string name)
     {
         var config = MedalSyncConfig.Load(ConfigFile(name));

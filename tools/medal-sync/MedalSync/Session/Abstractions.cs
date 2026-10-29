@@ -87,12 +87,23 @@ internal interface IClock
     void Sleep(TimeSpan duration);
 }
 
-/// <summary>Hydrates persistent local media and verifies required replicas before handoff.</summary>
+/// <summary>Hydrates persistent local media and verifies primary storage and required replicas before handoff.</summary>
 internal interface IStorageReplication
 {
     void Prepare(LibrarySnapshot snapshot);
-    void Publish(LibrarySnapshot snapshot);
+
+    /// <summary>Throws while primary storage or a required replica is unverified; names optional replicas left for a retry.</summary>
+    ReplicationResult Publish(LibrarySnapshot snapshot);
 }
+
+internal sealed record ReplicationResult(IReadOnlyList<string> Deferred)
+{
+    public static readonly ReplicationResult None = new([]);
+}
+
+internal sealed record PendingReplica(string Name, DateTimeOffset Since, DateTimeOffset LastAttempt);
+
+internal sealed record PendingReplicas(int Format, string LibraryId, IReadOnlyList<PendingReplica> Targets);
 
 internal sealed class SystemClock : IClock
 {

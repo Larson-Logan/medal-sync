@@ -178,6 +178,7 @@ internal static class LibraryCommands
         if (!WindowsPath.TryParse(fromText, out WindowsPath? from, out string? problem)) throw new UsageException($"--from: {problem}");
         var state = Config.LocalState.ForCurrentUser();
         var config = Config.MedalSyncConfig.Load(configPath ?? state.ConfigPath);
+        if (config.PrimaryIsRclone) throw new UnsafeOperationException("Relocation requires an SMB primary; cloud primary copies are not supported by this command.");
         using var instance = apply ? SessionCommands.SingleInstance() : null;
         var install = MedalEnvironment.Locate();
         if (install.AccountId != config.AccountId)

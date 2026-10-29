@@ -62,6 +62,11 @@ internal static class SessionCommands
         bool json = args.Flag("--json");
         args.RequireAllUsed();
         var context = Load();
+        if (!json && !Directory.Exists(context.Config.CoordinationRoot))
+        {
+            output.WriteLine("Waiting for storage: the shared library's server cannot be reached right now. Clips and any session stay on this PC.");
+            return 3;
+        }
         var store = CoordinationStore.Open(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, context.Config.AccountId);
         var journal = store.ReadJournal();
         if (json)
@@ -71,6 +76,8 @@ internal static class SessionCommands
         }
         output.WriteLine(StatusText.For(journal, context.Device, Directory.Exists(context.Config.DriveRoot.Display)));
         foreach (var request in store.PendingRequests()) output.WriteLine($"Waiting to switch: {request.Device.DisplayName} since {request.RequestedAt:yyyy-MM-dd HH:mm} UTC.");
+        foreach (var replica in StorageReplication.Pending(context.State, context.Config.LibraryId))
+            output.WriteLine($"Cloud copy '{replica.Name}' is pending since {replica.Since:yyyy-MM-dd HH:mm} UTC; it retries on the next finish.");
         return 0;
     }
 
@@ -80,6 +87,7 @@ internal static class SessionCommands
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
         var device = state.ExistingDevice();
+        if (!Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
         var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
         var journal = store.ReadJournal();
         _ = store.Generations.ReadManifest(journal.CommittedGeneration);
@@ -93,6 +101,8 @@ internal static class SessionCommands
             if (DateTimeOffset.UtcNow - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
+        if (status.Notice is null && StorageReplication.Pending(state, config.LibraryId) is { Count: > 0 } pending)
+            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending and retries on the next finish." };
         return status;
     }
 
@@ -124,6 +134,47 @@ internal static class SessionCommands
         return 0;
     }
 
+    /// <summary>
+    /// <c>storage init-primary [--apply]</c>: marks a new, empty primary (share folder or rclone remote) for this
+    /// library so primaries can be switched. The next finish uploads and verifies every referenced clip there.
+    /// </summary>
+    public static int InitPrimary(Arguments args, TextWriter output)
+    {
+        bool apply = args.Flag("--apply");
+        args.RequireAllUsed();
+        var state = LocalState.ForCurrentUser();
+        var config = MedalSyncConfig.Load(state.ConfigPath);
+        using var instance = SingleInstance();
+        if (Directory.Exists(config.LibraryCoordinationDirectory)
+            && CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId).ReadJournal().State != OwnershipState.Clean)
+            throw new UnsafeOperationException("Finish the existing session before initializing another primary.");
+        return WritePrimaryInitialization(config, state, apply, output);
+    }
+
+    internal static int WritePrimaryInitialization(MedalSyncConfig config, LocalState state, bool apply, TextWriter output)
+    {
+        if (config.StorageMode != StorageMode.Server) throw new UnsafeOperationException("Local mode keeps media in its own folder; there is no primary to initialize.");
+        if (config.Replication?.LocalCopyRoot is null)
+            throw new UnsafeOperationException("Switching primaries requires replication.localCopyRoot, so this PC holds every clip to upload.");
+        output.WriteLine($"Primary storage: {config.PrimaryCapture}.");
+        if (!apply)
+        {
+            output.WriteLine("Preview only. With --apply this writes the library marker to an empty folder, or verifies an existing marker. Nothing is deleted.");
+            return 0;
+        }
+        if (PrimaryStorage.Checker(config, state) is RcloneAssetChecker remote) remote.Initialize(allowExistingMedia: false);
+        else
+        {
+            string folder = config.ServerCapture.Display;
+            if (Directory.Exists(folder) && !File.Exists(Path.Combine(folder, MedalSyncConfig.StorageMarker)) && Directory.EnumerateFileSystemEntries(folder).Any())
+                throw new UnsafeOperationException($"{folder} already contains files but no marker; choose an empty dedicated folder.");
+            StorageIdentity.Initialize(folder, config.LibraryId);
+            PrimaryStorage.Checker(config, state).RequireServer();
+        }
+        output.WriteLine("Primary storage is ready. The next finish uploads and verifies every referenced clip from this PC's local copy.");
+        return 0;
+    }
+
     /// <summary><c>init --apply</c>: creates the shared library (generation 0) from this PC's stopped library.</summary>
     public static int Init(Arguments args, TextWriter output)
     {
@@ -133,7 +184,7 @@ internal static class SessionCommands
         using var instance = SingleInstance();
         if (new MedalProcess(context.Install).IsRunning()) throw new UnsafeOperationException("Quit Medal from its tray icon first.");
         var snapshot = LibraryDatabase.ReadSnapshot(context.Install.DatabasePath, context.Install.AccountId);
-        var checker = new ShareAssetChecker(context.Config.Capture, context.Config.ServerCapture, context.Config.LibraryId, new FileSystemProbe());
+        var checker = PrimaryStorage.Checker(context.Config, context.State);
         var onServer = checker.OnServer(snapshot);
         var blocking = onServer.Blocking.ToList();
         output.WriteLine($"Library: {LibraryCommands.Counts(snapshot)}; {onServer.Items.Count} file references, {blocking.Count} not usable on the server.");
@@ -147,7 +198,8 @@ internal static class SessionCommands
             output.WriteLine($"Preview only. With --apply this creates {context.Config.LibraryCoordinationDirectory} and the storage marker.");
             return 0;
         }
-        StorageIdentity.Initialize(context.Config.ServerCapture.Display, context.Config.LibraryId);
+        if (checker is RcloneAssetChecker remote) remote.Initialize(allowExistingMedia: true);
+        else StorageIdentity.Initialize(context.Config.ServerCapture.Display, context.Config.LibraryId);
         CoordinationStore.Create(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, snapshot, AssetManifest.From(onServer),
             context.Device, SessionCoordinator.NewId(), context.Install.Versions, DateTimeOffset.UtcNow);
         context.Log.Write($"init: generation 0 created from {LibraryCommands.Counts(snapshot)}");
@@ -180,9 +232,22 @@ internal static class SessionCommands
             context.Log.Write($"launch: the server was still unreachable after {wait.TotalSeconds:0} s");
         }
         if (shutdown.Ending) return 3;
+        if (!Directory.Exists(context.Config.CoordinationRoot)) return WaitForStorage(context, output, status);
         GuardStartup(context);
-        var (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report);
-        var journal = store.ReadJournal();
+        SessionCoordinator coordinator;
+        CoordinationStore store;
+        RcloneClipMount mount;
+        OwnershipRecord journal;
+        try
+        {
+            (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report);
+            journal = store.ReadJournal();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The share dropped between the check and the journal read.
+            return WaitForStorage(context, output, status);
+        }
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
         var outcome = coordinator.Launch();
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
@@ -368,7 +433,7 @@ internal static class SessionCommands
         }
         var mount = new RcloneClipMount(context.Config, context.State, bitrate, clock);
         var library = new SqliteLocalLibrary(context.Install.DatabasePath, context.Install.AccountId, context.State.BackupDirectory, clock);
-        var checker = new ShareAssetChecker(context.Config.Capture, context.Config.ServerCapture, context.Config.LibraryId, new FileSystemProbe());
+        var checker = PrimaryStorage.Checker(context.Config, context.State, () => shutdown?.RequireTime());
         var options = new SessionOptions(context.Device, context.Config.Capture, context.Install.Versions,
             TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal);
         return (new SessionCoordinator(store, library, mount, new MedalProcess(context.Install, launchLink), checker, clock, options,
@@ -385,7 +450,7 @@ internal static class SessionCommands
                 shutdown?.RequireTime();
                 if (new MedalProcess(context.Install).IsRunning())
                     throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
-            }, progress: progress), new MedalCompatibilityGuard(context.Install), progress), store, mount);
+            }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress), store, mount);
     }
 
     internal static string SaveReviewedChanges(string backupDirectory, LibraryChangeReview review)
@@ -400,6 +465,15 @@ internal static class SessionCommands
             review.Changes, AcceptedAt = DateTimeOffset.UtcNow,
         }));
         return directory;
+    }
+
+    /// <summary>An outage is a wait, never an error: nothing was acquired or changed.</summary>
+    private static int WaitForStorage(Context context, TextWriter output, DesktopStatusPublisher status)
+    {
+        status.Report(new SessionProgress(SessionPhase.WaitingForStorage,
+            "Waiting for storage: the shared library's server cannot be reached. Open Medal again once it is back.", IsOutcome: true));
+        Report(context, output, "launch: Waiting: the shared library's server cannot be reached right now; nothing was changed.");
+        return 3;
     }
 
     private static void Report(Context context, TextWriter output, string message)

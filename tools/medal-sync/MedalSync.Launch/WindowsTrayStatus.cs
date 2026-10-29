@@ -135,7 +135,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         string text = $"{status.Title}\r\n\r\nNext action: {status.NextAction}\r\n\r\n"
             + $"Queued files: {status.QueuedFiles?.ToString() ?? "unavailable"}\r\n"
             + $"Queued bytes: {status.QueuedBytes?.ToString() ?? "unavailable"}\r\n"
-            + $"Required replica: {status.Replica ?? "none currently reported"}\r\n"
+            + $"Storage copy: {status.Replica ?? "none currently reported"}\r\n"
             + $"Last confirmed: {status.ConfirmedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "never"}"
             + (lastResult is null ? "" : $"\r\n\r\nLast finish result: {lastResult}")
             + (status.Notice is null ? "" : $"\r\n\r\nLatest notice: {status.Notice}");

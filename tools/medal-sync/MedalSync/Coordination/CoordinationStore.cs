@@ -48,6 +48,13 @@ internal sealed partial class CoordinationStore
 
     public static bool IsValidId(string? value) => value is not null && IdPattern().IsMatch(value);
 
+    /// <summary>False when the journal cannot be seen, which distinguishes an outage from a refusal.</summary>
+    public bool IsReachable()
+    {
+        try { return File.Exists(JournalPath); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+
     /// <summary>Opens an existing coordination directory and checks its identity.</summary>
     public static CoordinationStore Open(string root, string expectedLibraryId, string expectedAccountId)
     {
