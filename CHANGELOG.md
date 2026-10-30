@@ -8,7 +8,9 @@
   Update checks, the portable updater and setup compare the counter
   numerically and still recognize earlier three-part versions. The first such
   release is tagged with three parts (for example `v1.3.0`) so 1.2.0 and
-  earlier can still find it.
+  earlier can still find it. Releases are published through the private
+  `medal-sync-release` GitHub App, the only non-administrator allowed to
+  create `v*` tags.
 - Setup can add `medal-sync` to PATH, so the CLI runs from any new terminal.
   The option is off by default. It appends the program folder's `bin`
   directory to the system or user PATH, which also exposes the bundled

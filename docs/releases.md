@@ -132,16 +132,24 @@ Otherwise it checks the version format and main ancestry, refuses a `v*` tag
 that already points at a different commit, runs tests, builds both packages
 with the chosen number, verifies native installation, uploads setup EXE,
 portable ZIP, checksums and generated notes to a draft, then publishes it. The
-run summary links the release. It uses no caches. Only the release jobs have
-contents-write permission. Existing releases cause failure rather than
+run summary links the release. It uses no caches. Only the planning job, which
+must see drafts, and the app token have contents-write permission. Existing releases cause failure rather than
 replacement.
 
-Publishing creates the version tag on the exact commit that was built, as
-`github-actions[bot]`. The release tag ruleset therefore lets GitHub Actions
-bypass it as well as administrators; nobody else can create, move or delete a
-`v*` tag. Do not create a release or push a tag by hand. If publishing fails
-after the upload, the draft stays: review it and publish it by hand, or delete
-it and choose **Run workflow**.
+Publishing creates the version tag on the exact commit that was built. The
+release tag ruleset lets only administrators and the private
+`medal-sync-release` GitHub App create, move or delete a `v*` tag; rulesets
+cannot exempt `github-actions[bot]`. So the publish step alone uses a
+short-lived token for that app, minted by
+[create-github-app-token](https://github.com/actions/create-github-app-token)
+with contents-write only; every other step uses the workflow's own read-only
+token. The app is installed on this repository only. Its ID is the repository
+variable `RELEASE_APP_ID` and its private key the repository secret
+`RELEASE_APP_PRIVATE_KEY`; see
+[security maintenance](security-maintenance.md#release-app) to rotate it. Do
+not create a release or push a tag by hand. If publishing fails after the
+upload, the draft stays: review it and publish it by hand, or delete it and
+choose **Run workflow**.
 
 The release job also records a signed [build provenance attestation](https://docs.github.com/en/actions/concepts/security/artifact-attestations)
 for the setup EXE and portable ZIP. Anyone can check that a download was built
@@ -156,9 +164,10 @@ by their type labels. Label merged work accurately; notes include a catch-all
 for uncategorized changes and still require maintainer review.
 
 For a `.00` or bridge release, the run summary also lists any item still open in the
-version's milestone, and the workflow then closes that milestone once it is
-empty. Milestones are titled `MAJOR.MINOR.PATCH`; hotfix releases do not have
-their own.
+version's milestone. Because the app publishes the release, the
+[milestones workflow](../.github/workflows/milestones.yml) runs on it and
+closes that milestone once it is empty. Milestones are titled
+`MAJOR.MINOR.PATCH`; hotfix releases do not have their own.
 
 Releases are published without a manual review, so `validate` on the
 promotion pull request is the last gate. Drafts and prereleases are invisible
