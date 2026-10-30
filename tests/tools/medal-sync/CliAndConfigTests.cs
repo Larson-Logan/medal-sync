@@ -60,8 +60,8 @@ public sealed class CliAndConfigTests : IDisposable
         ];
         string[] stateChangingCommands =
         [
-            "enroll",
-            "enroll recover",
+            "enroll --out",
+            "enroll recover --out",
             "config create",
             "init",
             "storage init-primary",
@@ -77,6 +77,7 @@ public sealed class CliAndConfigTests : IDisposable
             "repair",
             "relocate",
             "promote",
+            "abandon --session",
             "spike start|status|stop",
         ];
 
