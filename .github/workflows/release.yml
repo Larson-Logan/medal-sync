@@ -3,7 +3,7 @@ name: Release Medal Sync
 # repository. Release builds deliberately use no caches.
 #
 # Releases are built only from main, which only accepts promotions from dev.
-# Every merge to main builds, verifies and publishes a release tagged
+# Every merge to main builds, verifies and drafts a release tagged
 # vMAJOR.MINOR.PATCH.NN. MAJOR.MINOR.PATCH is VersionPrefix in
 # Directory.Build.props; NN is a two-digit hotfix counter. A merge that raises
 # VersionPrefix starts at .00, and every later merge adds one.
@@ -12,8 +12,9 @@ name: Release Medal Sync
 # release newer than LAST_LEGACY_RELEASE is a three-part bridge (for example
 # v1.3.0) whose updater understands both formats; its hotfixes continue at .01.
 #
-# Publishing creates the v* tag as github-actions[bot], so the release tag
-# ruleset lets GitHub Actions bypass it (see .github/rulesets/release-tags.json).
+# The draft targets the exact commit that was built. A maintainer publishes it,
+# which creates the v* tag as that maintainer, so the admin-only tag ruleset
+# stays in force and publishing starts the milestone workflow.
 on:
   push:
     branches: [main]
@@ -103,7 +104,7 @@ jobs:
           fi
           version="$prefix.$revision"
           if [ "$revision" = 00 ]; then
-            # No release is newer than LAST_LEGACY_RELEASE yet: publish the bridge.
+            # No published release is newer than LAST_LEGACY_RELEASE yet: draft the bridge.
             newest="$( { echo "$LAST_LEGACY_RELEASE"
                 gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.draft == false) | .tag_name | ltrimstr("v")'
               } | sort -V | tail -n 1)"
@@ -120,7 +121,7 @@ jobs:
           } >>"$GITHUB_OUTPUT"
           echo "Releasing $version (VersionPrefix $prefix, hotfix $revision)." >>"$GITHUB_STEP_SUMMARY"
 
-          # The first release of a version closes its milestone, so list anything still open in it now.
+          # Publishing the first release of a version closes its milestone, so list anything still open in it now.
           if [ "$revision" = 00 ] || [ "$revision" = none ]; then
             milestone="$(gh api --paginate "repos/$REPO/milestones?state=open&per_page=100" --jq '.[] | select(.title == env.PREFIX) | .number')"
             if [ -n "$milestone" ]; then
@@ -133,7 +134,7 @@ jobs:
           fi
 
   release:
-    name: Build, verify and publish release
+    name: Build, verify and draft release
     needs: plan
     if: needs.plan.outputs.release == 'true'
     runs-on: windows-latest
@@ -193,7 +194,7 @@ jobs:
           subject-path: |
             .medal-sync-dist/medal-sync-*-setup-win-x64.exe
             .medal-sync-dist/medal-sync-*-win-x64.zip
-      - name: Publish GitHub release
+      - name: Create draft GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -202,32 +203,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $version = $env:VERSION
           $tag = $env:TAG = "v$version"
-          # Re-check just before creating, so a release made meanwhile is never duplicated.
+          # Re-check just before creating, so a draft made meanwhile is never duplicated.
           $existing = gh api --paginate "repos/$env:GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == env.TAG) | .html_url'
           if ($LASTEXITCODE -ne 0) { throw 'Could not list releases.' }
           if ($existing) { throw "A release for $tag already exists: $existing" }
           $archive = ".medal-sync-dist/medal-sync-$version-win-x64.zip"
           $setup = ".medal-sync-dist/medal-sync-$version-setup-win-x64.exe"
-          # Upload everything to a draft first, so a failed upload never leaves a
-          # published release with missing files. Publishing creates the tag on
-          # this exact commit.
+          # The draft targets this exact commit. Publishing it creates the tag.
           $url = gh release create $tag $setup "$setup.sha256" $archive "$archive.sha256" --target $env:GITHUB_SHA --draft --generate-notes --title "Medal Sync $version"
           if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed; existing releases are never overwritten.' }
-          gh release edit $tag --draft=false --latest
-          if ($LASTEXITCODE -ne 0) { throw "Publishing failed. The draft is still available: $url" }
-          "Published Medal Sync $version`: $url" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-
-  milestone:
-    name: Close the released milestone
-    needs: [plan, release]
-    # Only the first release of a version (.00 or the bridge) finishes its
-    # milestone. A release published by this workflow does not start other
-    # workflows, so call it here.
-    if: needs.plan.outputs.revision == '00' || needs.plan.outputs.revision == 'none'
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-    uses: ./.github/workflows/milestones.yml
-    with:
-      tag: v${{ needs.plan.outputs.version }}
+          "Draft release ready to review and publish: $url" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY

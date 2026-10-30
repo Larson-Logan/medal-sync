@@ -4,19 +4,12 @@ name: Release milestones
 # open milestone newer than the latest published release, so a milestone lists
 # what its release ships. Promotions from dev to main are not work items. Publishing a release closes its milestone once
 # nothing in it is still open. Release tags add a hotfix counter
-# (vMAJOR.MINOR.PATCH.NN) that milestones ignore; the release workflow calls
-# this workflow after publishing a .00 release. No code is checked out or run.
+# (vMAJOR.MINOR.PATCH.NN) that milestones ignore. No code is checked out or run.
 on:
   push:
     branches: [dev]
   release:
     types: [published]
-  workflow_call:
-    inputs:
-      tag:
-        description: Published release tag whose milestone to close.
-        type: string
-        required: true
 permissions: {}
 concurrency:
   group: milestones
@@ -24,8 +17,7 @@ concurrency:
 jobs:
   assign:
     name: Add merged work to the next release milestone
-    # A call from the release workflow also arrives as a push event, with a tag.
-    if: github.event_name == 'push' && !inputs.tag
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -126,7 +118,7 @@ jobs:
 
   close:
     name: Close the released milestone
-    if: inputs.tag || (github.event_name == 'release' && !github.event.release.prerelease)
+    if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -135,7 +127,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           # Milestones are titled MAJOR.MINOR.PATCH, without the hotfix counter.
           VERSION="$(sed -E 's/^v//; s/^([0-9]+\.[0-9]+\.[0-9]+)\.[0-9]+$/\1/' <<<"$TAG")"

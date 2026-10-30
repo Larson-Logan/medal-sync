@@ -1,8 +1,8 @@
 # Releasing Medal Sync
 
 `Directory.Build.props` holds `VersionPrefix` (`MAJOR.MINOR.PATCH`) for both
-programs. Every merge to `main` publishes a release tagged
-`vMAJOR.MINOR.PATCH.NN`, where `NN` is a hotfix counter: `.00` when the merge
+programs. Every merge to `main` drafts a release tagged
+`vMAJOR.MINOR.PATCH.NN`, which a maintainer reviews and publishes, where `NN` is a hotfix counter: `.00` when the merge
 changes `VersionPrefix`, otherwise one more than the last release of that
 version.
 [Versions and schemas](versioning.md) explains which part to raise and how file
@@ -108,11 +108,11 @@ close join it automatically, so before raising the version check the project's
 Releases view for anything still open in that milestone and finish it or move
 it to the next one.
 
-Every promotion to `main` is a release. To start a new version, raise
+Every promotion to `main` drafts a release. To start a new version, raise
 `VersionPrefix` and update the changelog in a pull request to `dev`, merge it,
 then promote `dev` to `main`; that release is `.00`. To ship a hotfix, merge
 the fix to `dev` and promote it without touching `VersionPrefix`; it is
-released as the next number, such as `.01`. Changing `VersionPrefix` to a
+drafted as the next number, such as `.01`. Changing `VersionPrefix` to a
 version that already has a release is refused.
 
 The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) is a
@@ -123,25 +123,27 @@ find every later release.
 The [release workflow](../.github/workflows/release.yml) starts on its own for
 every push to `main`, or from **Run workflow** on the Actions tab for `main`;
 it never builds another branch. Runs never overlap, so two merges never take
-the same number. It does nothing when the commit is no longer the tip of
-`main`, so rerunning an older failed run never publishes older code under a
-newer number, or when a release, draft or published, already targets that
-commit, so a rerun never publishes twice.
+the same number; a number taken by an unpublished draft is not reused. It does
+nothing when the commit is no longer the tip of `main`, so rerunning an older
+failed run never drafts older code under a newer number, or when a release,
+draft or published, already targets that commit, so a rerun never drafts
+twice.
 
 Otherwise it checks the version format and main ancestry, refuses a `v*` tag
 that already points at a different commit, runs tests, builds both packages
 with the chosen number, verifies native installation, uploads setup EXE,
-portable ZIP, checksums and generated notes to a draft, then publishes it. The
-run summary links the release. It uses no caches. Only the release jobs have
+portable ZIP, checksums and generated notes to a **draft** GitHub release. The
+run summary links the draft. It uses no caches. Only the release jobs have
 contents-write permission. Existing releases cause failure rather than
 replacement.
 
-Publishing creates the version tag on the exact commit that was built, as
-`github-actions[bot]`. The release tag ruleset therefore lets GitHub Actions
-bypass it as well as administrators; nobody else can create, move or delete a
-`v*` tag. Do not create a release or push a tag by hand. If publishing fails
-after the upload, the draft stays: review it and publish it by hand, or delete
-it and choose **Run workflow**.
+The draft targets the exact commit that was built; no tag exists yet.
+Publishing the draft creates the version tag on that commit as the maintainer
+who publishes, so tag creation stays limited to administrators. Do not create a
+release or push a tag by hand. To rebuild, delete the draft and choose **Run
+workflow**. Publish drafts in order. If a newer draft supersedes an older one
+you have not published, delete the older one rather than publishing it after
+the newer release.
 
 The release job also records a signed [build provenance attestation](https://docs.github.com/en/actions/concepts/security/artifact-attestations)
 for the setup EXE and portable ZIP. Anyone can check that a download was built
@@ -155,14 +157,13 @@ Generated notes use [.github/release.yml](../.github/release.yml) to group PRs
 by their type labels. Label merged work accurately; notes include a catch-all
 for uncategorized changes and still require maintainer review.
 
-For a `.00` or bridge release, the run summary also lists any item still open in the
-version's milestone, and the workflow then closes that milestone once it is
+For a `.00` or bridge release, the run summary also lists any item still open
+in the version's milestone. Publishing it closes that milestone once it is
 empty. Milestones are titled `MAJOR.MINOR.PATCH`; hotfix releases do not have
 their own.
 
-Releases are published without a manual review, so `validate` on the
-promotion pull request is the last gate. Drafts and prereleases are invisible
-to automatic update checks. A published stable setup is advertised on the
+Review assets, versions, hashes and release notes before publishing the draft.
+Drafts and prereleases are invisible to automatic update checks. A published stable setup is advertised on the
 next desktop launch; installation stays
 explicit and verifies Ready status. Publisher code signing is not configured.
 

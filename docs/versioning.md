@@ -15,7 +15,7 @@ for example `v1.3.0.02`. Both programs, setup, the portable ZIP and
   part a person edits.
 - `NN` is a two-digit hotfix counter that the
   [release workflow](releases.md#github-pipeline) sets. Every merge to `main`
-  is released: a merge that changes `VersionPrefix` starts at `.00`, and every
+  drafts a release: a merge that changes `VersionPrefix` starts at `.00`, and every
   later merge adds one (`.01`, `.02`, and so on; after `.99` comes `.100`).
   Local builds use `.00`.
 

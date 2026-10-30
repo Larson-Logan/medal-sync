@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Every merge to `main` now publishes a release automatically, tagged
-  `vMAJOR.MINOR.PATCH.NN`. `NN` is a hotfix counter: `.00` when the merge
+- Every merge to `main` now drafts a release, tagged
+  `vMAJOR.MINOR.PATCH.NN`, for maintainer review. `NN` is a hotfix counter: `.00` when the merge
   changes the version in `Directory.Build.props`, then `.01`, `.02` and so on.
   Update checks, the portable updater and setup compare the counter
   numerically and still recognize earlier three-part versions. The first such
