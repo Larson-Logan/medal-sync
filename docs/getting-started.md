@@ -23,7 +23,8 @@ installed Medal app, recorder and database schema, even before configuring
 Medal Sync. Exit 0 means those compatibility checks pass; exit 1 means a check
 failed or could not be completed. This does not test storage or recording.
 The supported schema is also reported by `medal-sync.exe version`;
-unknown Medal builds or schemas refuse operations. This remains experimental:
+unreadable version metadata or unknown schemas refuse operations. Version
+numbers alone do not block a routine Medal update. This remains experimental:
 real playback, cross-PC handoff and physical reboot need desktop acceptance.
 
 ## Install the programs
@@ -289,17 +290,26 @@ must pass recovery checks before receiving the link. Advanced CLI launches can
 use `launch --medal-link 'medal://...'` too.
 
 Medal Sync checks compatibility before starting a new session, once a minute
-while Medal runs, and before publishing a handoff. It warns about changed
-versions and unsupported schemas without stopping Medal or the clip drive.
+while Medal runs, and before publishing a handoff. Readable app and recorder
+version changes continue automatically when the supported schema still matches.
+It warns about unreadable update metadata and unsupported schemas without
+stopping Medal or the clip drive.
 After a warning, quit Medal normally. Uploads can drain, but an incompatible
 build keeps ownership and cache on this PC. Run `compatibility --json`, check
 for a Medal Sync update, then retry `finish` after compatibility passes.
-Matching database schemas alone do not verify Medal's native backup behavior;
-unknown app/recorder builds remain blocked. The reviewed pairs are app
+Every launch still requires Medal quit and checks its native backup for pending
+sidecars, supported schema, integrity and stable lineage before starting Medal.
+Library rows and local device settings are verified unchanged when aligning
+lineage. These checks do not prove that a future Medal build with the same
+schema has unchanged internal backup behavior; automatic continuation accepts
+that remaining compatibility risk. Keep an independent backup.
+
+`compatibility --json` reports `buildReviewed` separately from `compatible`.
+An unreviewed version pair is informational and does not require approval.
+The individually reviewed pairs are app
 2643.583.1 or 2644.591.1 with recorder 2643.3040.1, and app 2644.604.1 with
-recorder 2644.3209.1. Each app build is accepted only with its reviewed
-recorder. Enrollment allows PCs to run different reviewed pairs when their
-supported schemas match.
+recorder 2644.3209.1. Enrollment allows different readable app and recorder
+versions when their supported schemas match exactly.
 
 ## Recovery rules
 

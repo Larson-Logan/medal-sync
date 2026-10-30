@@ -16,9 +16,12 @@ internal sealed record MedalCompatibilityReport(
     IReadOnlyList<string> Blockers)
 {
     public bool Compatible => Blockers.Count == 0;
+    public bool BuildReviewed => NativeBackupBuilds.IsReviewed(Versions);
 
     public string Summary => $"Medal app {Versions.App ?? "unknown"} / recorder {Versions.Recorder ?? "unknown"}: "
-        + (Compatible ? "compatible with this Medal Sync build." : string.Join(" ", Blockers));
+        + (Compatible ? "compatible with this Medal Sync build."
+            + (BuildReviewed ? "" : " This version pair has not been individually reviewed; admission uses the supported schema and pre-launch native backup checks.")
+            : string.Join(" ", Blockers));
 
     public void RequireCompatible()
     {
@@ -38,8 +41,8 @@ internal static class MedalCompatibility
         bool executable = File.Exists(install.Executable);
         var blockers = new List<string>();
         if (!executable) blockers.Add("Medal's executable is missing; let its update finish or repair Medal before retrying.");
-        if (!NativeBackupBuilds.IsSupported(versions))
-            blockers.Add("This app/recorder pair has not been verified for Medal's native database backup behavior.");
+        if (!NativeBackupBuilds.HasReadableVersions(versions))
+            blockers.Add("Medal's app or recorder version metadata is missing or unreadable; let its update finish before retrying.");
         SchemaInfo? schema = null;
         try
         {
@@ -65,8 +68,6 @@ internal sealed class MedalCompatibilityGuard(MedalInstall install) : ISessionCo
     {
         var report = MedalCompatibility.Check(install);
         report.RequireCompatible();
-        if (report.Versions != install.Versions)
-            throw new IncompatibleLibraryException("Medal updated while launch was being prepared. Retry through Medal Sync so its new versions are detected.");
     }
 
     public MedalVersions RequirePublish()
@@ -79,9 +80,8 @@ internal sealed class MedalCompatibilityGuard(MedalInstall install) : ISessionCo
     public string? CheckForUpdate()
     {
         var report = MedalCompatibility.Check(install);
-        if (report.Compatible && report.Versions == install.Versions) return null;
-        return (report.Compatible ? "Medal update detected. " : "Medal compatibility problem detected. ") + report.Summary
-            + (report.Compatible ? " Quit Medal normally to finish the session."
-                : " Quit Medal normally; uploads can drain, but handoff is blocked. Keep this PC's session and cache, run 'medal-sync compatibility --json', and check for a Medal Sync update.");
+        if (report.Compatible) return null;
+        return "Medal compatibility problem detected. " + report.Summary
+            + " Quit Medal normally; uploads can drain, but handoff is blocked. Keep this PC's session and cache, run 'medal-sync compatibility --json', and check for a Medal Sync update.";
     }
 }

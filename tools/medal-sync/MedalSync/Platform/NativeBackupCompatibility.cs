@@ -12,8 +12,8 @@ internal static class NativeBackupCompatibility
     public static void Prepare(MedalSyncConfig config, MedalInstall install, LocalState state)
     {
         if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Quit Medal before preparing its native backup identity.");
-        // Verified against the installed worker's restore/track implementation;
-        // do not extrapolate this compatibility behavior to unknown builds.
+        // Versions may change independently of the schema. Keep the exact schema,
+        // stopped-process, sidecar, integrity and lineage checks for every build.
         new MedalCompatibilityGuard(install).RequireLaunch();
         string backup = config.MountedCapture.Append("Databases", $"medal-{config.AccountId}.db").Display;
         NativeBackupIdentity.Align(install.DatabasePath, backup, Path.Combine(state.BackupDirectory, "native-identity"), config.AccountId);

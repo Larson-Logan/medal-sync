@@ -32,9 +32,10 @@ rclone processes and WinFsp mounts with disposable synthetic libraries. It tests
 named remotes for all three provider slots, copy verification, conflict refusal,
 versioned updates, interruption/retry, persistent-local retention, local mode
 without SMB and a sequential two-PC simulation. The mount scenarios also
-exercise real compatibility guards with synthetic version manifests: unknown
-updates refuse launch, drain uploads while
-retaining ownership/cache, then recover with fresh reviewed version metadata.
+exercise real compatibility guards with synthetic version manifests: unreadable
+update metadata and unsupported schemas refuse launch; a blocked finish drains
+uploads while retaining ownership/cache, then recovers automatically when readable
+future app/recorder versions and the supported schema are available.
 Named test remotes alias local folders; no cloud service or account is contacted.
 WinFsp must already exist on a personal PC; driver installation is restricted
 to ephemeral hosted CI.

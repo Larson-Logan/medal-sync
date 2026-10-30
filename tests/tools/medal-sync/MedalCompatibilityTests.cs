@@ -73,11 +73,12 @@ public sealed class MedalCompatibilityTests : IDisposable
         Assert.Null(new MedalCompatibilityGuard(install).CheckForUpdate());
         SetVersions(install.InstallDirectory, Reviewed with { App = "9999.1.1" });
         report = MedalCompatibility.Check(install);
-        Assert.False(report.Compatible);
+        Assert.True(report.Compatible);
+        Assert.False(report.BuildReviewed);
         Assert.True(report.SchemaSupported);
         Assert.Equal("9999.1.1", report.Versions.App);
         Assert.Contains("9999.1.1", report.Summary, StringComparison.Ordinal);
-        Assert.Contains("native database backup", report.Summary, StringComparison.Ordinal);
+        Assert.Contains("pre-launch native backup checks", report.Summary, StringComparison.Ordinal);
         Assert.Equal(databaseBefore, Hashing.Sha256File(install.DatabasePath));
         string json = JsonSerializer.Serialize(report, Json.Options);
         Assert.DoesNotContain("private-clip", json, StringComparison.Ordinal);
@@ -121,19 +122,40 @@ public sealed class MedalCompatibilityTests : IDisposable
     }
 
     [Fact]
-    public void ReviewedUpdateRequiresFreshLaunchButCanPublishWithNewVersions()
+    public void RoutineAppAndRecorderUpdatesContinueAndPublishFreshVersions()
     {
         var install = Install();
         var guard = new MedalCompatibilityGuard(install);
         guard.RequireLaunch();
-        var updated = Reviewed with { App = "2643.583.1" };
+        var updated = new MedalVersions("9999.1.1", "9999.2.2");
         SetVersions(install.InstallDirectory, updated);
-        Assert.Contains("Retry through Medal Sync", Assert.Throws<IncompatibleLibraryException>(guard.RequireLaunch).Message, StringComparison.Ordinal);
+        guard.RequireLaunch();
         Assert.Equal(updated, guard.RequirePublish());
-        Assert.Contains("Medal update detected", guard.CheckForUpdate()!, StringComparison.Ordinal);
+        Assert.Null(guard.CheckForUpdate());
         SetVersions(install.InstallDirectory, updated with { Recorder = "future" });
         Assert.Throws<IncompatibleLibraryException>(() => guard.RequirePublish());
         Assert.Contains("handoff is blocked", guard.CheckForUpdate()!, StringComparison.Ordinal);
+        SetVersions(install.InstallDirectory, updated);
+        guard.RequireLaunch();
+        Assert.Equal(updated, guard.RequirePublish());
+        Assert.Null(guard.CheckForUpdate());
+    }
+
+    [Fact]
+    public void AnAutomaticUpdateWithANewSchemaStillBlocksLaunchAndPublicationUntilRecovery()
+    {
+        var install = Install();
+        var guard = new MedalCompatibilityGuard(install);
+        SetVersions(install.InstallDirectory, new("9999.1.1", "9999.2.2"));
+        using (var db = MedalFixture.Open(install.DatabasePath)) MedalFixture.Execute(db, "PRAGMA user_version=5");
+        string before = Hashing.Sha256File(install.DatabasePath);
+        Assert.Throws<IncompatibleLibraryException>(guard.RequireLaunch);
+        Assert.Throws<IncompatibleLibraryException>(() => guard.RequirePublish());
+        Assert.Contains("handoff is blocked", guard.CheckForUpdate()!, StringComparison.Ordinal);
+        Assert.Equal(before, Hashing.Sha256File(install.DatabasePath));
+        using (var db = MedalFixture.Open(install.DatabasePath)) MedalFixture.Execute(db, "PRAGMA user_version=4");
+        guard.RequireLaunch();
+        Assert.Equal(new("9999.1.1", "9999.2.2"), guard.RequirePublish());
     }
 
     [Theory]
@@ -142,12 +164,14 @@ public sealed class MedalCompatibilityTests : IDisposable
     [InlineData("2644.591.1", "2643.3040.1", "2644.604.1", "2644.3209.1", true)]
     [InlineData("2644.604.1", "2644.3209.1", "2644.591.1", "2643.3040.1", true)]
     [InlineData("2644.604.1", "2644.3209.1", "2644.604.1", "2644.3209.1", true)]
-    [InlineData("2644.591.1", "2643.3040.1", "2644.591.1", "2643.3040.2", false)]
-    [InlineData("2644.591.1", "2643.3040.1", "2644.604.1", "2643.3040.1", false)]
-    [InlineData("2644.604.1", "2643.3040.1", "2644.591.1", "2643.3040.1", false)]
-    [InlineData("9999.1.1", "2643.3040.1", "2644.591.1", "2643.3040.1", false)]
-    [InlineData("2644.591.1", "2643.3040.1", "9999.1.1", "2643.3040.1", false)]
-    public void EnrollmentAllowsReviewedBuildDifferencesOnly(string shared, string sharedRecorder, string local, string recorder, bool supported)
+    [InlineData("2644.591.1", "2643.3040.1", "2644.591.1", "2643.3040.2", true)]
+    [InlineData("2644.591.1", "2643.3040.1", "2644.604.1", "2643.3040.1", true)]
+    [InlineData("2644.604.1", "2643.3040.1", "2644.591.1", "2643.3040.1", true)]
+    [InlineData("9999.1.1", "2643.3040.1", "2644.591.1", "2643.3040.1", true)]
+    [InlineData("2644.591.1", "2643.3040.1", "9999.1.1", "2643.3040.1", true)]
+    [InlineData("future", "2643.3040.1", "2644.591.1", "2643.3040.1", false)]
+    [InlineData("2644.591.1", "2643.3040.1", "9999.1.1", null, false)]
+    public void EnrollmentDoesNotRequireMatchingBuildReviews(string shared, string sharedRecorder, string local, string? recorder, bool supported)
     {
         var first = new MedalVersions(shared, sharedRecorder);
         var second = new MedalVersions(local, recorder);
@@ -184,6 +208,6 @@ public sealed class MedalCompatibilityTests : IDisposable
             Compatibility: compatibility);
         string text = InventoryText.Render(report);
         Assert.Contains("Compatibility: Medal app future", text, StringComparison.Ordinal);
-        Assert.Contains("native database backup behavior", text[(text.IndexOf("Blockers before Gate B:", StringComparison.Ordinal))..], StringComparison.Ordinal);
+        Assert.Contains("version metadata", text[(text.IndexOf("Blockers before Gate B:", StringComparison.Ordinal))..], StringComparison.Ordinal);
     }
 }

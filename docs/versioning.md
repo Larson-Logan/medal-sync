@@ -93,6 +93,7 @@ schema is a minor release; dropping one is a major release.
 
 Each generation records the schema it was read from. `history diff` refuses to
 compare generations from different schemas. Enrollment allows PCs to run
-different reviewed Medal app builds only when their schemas match exactly; see
+different Medal app and recorder versions only when their supported schemas match exactly; see
 [requirements and limits](getting-started.md#requirements-and-limits) and
-[status for scripts](getting-started.md#status-for-scripts) for the reviewed builds.
+[compatibility checks](getting-started.md#status-for-scripts) for the
+automatic update policy and its native-backup limitations.

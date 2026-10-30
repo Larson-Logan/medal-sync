@@ -298,10 +298,14 @@ internal static class Program
                     compatibility: compatibility);
                 if (pc == 0)
                 {
-                    AppVersion("9999.1.1");
+                    AppVersion("update-in-progress");
                     Check(coordinator.Launch().Status == LaunchStatus.Blocked && !mount.IsRunning && store.ReadJournal().State == OwnershipState.Clean,
-                        "an unknown synthetic Medal update refuses startup before acquiring ownership or mounting storage");
-                    AppVersion(Versions.App!);
+                        "unreadable update metadata refuses startup before acquiring ownership or mounting storage");
+                    AppVersion("9999.1.1");
+                    using (var connection = MedalFixture.Open(db)) MedalFixture.Execute(connection, "PRAGMA user_version=5");
+                    Check(coordinator.Launch().Status == LaunchStatus.Blocked && !mount.IsRunning && store.ReadJournal().State == OwnershipState.Clean,
+                        "an updated unsupported schema refuses startup before acquiring ownership or mounting storage");
+                    using (var connection = MedalFixture.Open(db)) MedalFixture.Execute(connection, "PRAGMA user_version=4");
                 }
                 var launch = coordinator.Launch();
                 Check(launch.Status == LaunchStatus.Started, "PC " + (pc + 1) + " mounts real WinFsp storage and restores the committed synthetic library: " + launch.Message);
@@ -315,7 +319,7 @@ internal static class Program
                 medal.Running = false;
                 if (pc == 0)
                 {
-                    AppVersion("9999.1.1");
+                    AppVersion("update-in-progress");
                     Check(compatibility.CheckForUpdate()?.Contains("handoff is blocked", StringComparison.Ordinal) == true,
                         "fresh synthetic update metadata warns that handoff is blocked");
                     var blocked = coordinator.Finish(launch.Session!);
@@ -328,12 +332,14 @@ internal static class Program
                         "incompatible update retains the real WinFsp mount and session cache");
                     Check(File.ReadAllText(config.MountedCapture.Append("new.mp4").Display) == "new synthetic recording",
                         "the drained synthetic recording remains intact in the mount's backing storage while publication is blocked");
-                    AppVersion("2644.591.1");
+                    AppVersion("9999.1.2");
+                    File.WriteAllText(Path.Combine(installDirectory, "version.json"), JsonSerializer.Serialize(new { RecorderHandler2Version = "9999.2.2" }));
+                    Check(compatibility.CheckForUpdate() is null, "completed app and recorder updates with the supported schema need no per-version approval");
                 }
                 var finish = coordinator.Finish(launch.Session!);
                 Check(finish.Status == (pc == 0 ? FinishStatus.Published : FinishStatus.Unchanged), "PC " + (pc + 1) + " completes verified handoff: " + finish.Message);
-                if (pc == 0) Check(store.Generations.Read(1).Manifest.Medal == Versions with { App = "2644.591.1" },
-                    "retry after a reviewed update publishes its freshly detected build versions");
+                if (pc == 0) Check(store.Generations.Read(1).Manifest.Medal == new MedalVersions("9999.1.2", "9999.2.2"),
+                    "retry after a routine update publishes its freshly detected app and recorder versions");
                 Check(store.ReadJournal().State == OwnershipState.Clean, "PC " + (pc + 1) + " releases ownership only after verified copies");
                 Check(!Directory.Exists(config.SessionCacheDirectory(launch.Session!)), "PC " + (pc + 1) + " clears only its finished session cache");
                 Check(File.Exists(config.MountedCapture.Append("new.mp4").Display), "PC " + (pc + 1) + " retains the persistent local collection");
