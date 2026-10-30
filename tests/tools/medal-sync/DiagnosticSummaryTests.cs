@@ -182,11 +182,11 @@ public sealed class DiagnosticSummaryTests : IDisposable
         }));
 
         Assert.Equal(reviewed, (bool)report["medal"]!["buildReviewed"]!);
-        Assert.Equal(!reviewed, report["refusals"]!.AsArray().Select(r => (string)r!).Contains("medal-build-unreviewed"));
+        Assert.DoesNotContain("medal-build-unreviewed", report["refusals"]!.AsArray().Select(r => (string)r!));
     }
 
     [Fact]
-    public void AnUnsupportedSchemaAndUnreviewedBuildAreRefusalCodes()
+    public void AnUnsupportedSchemaIsRefusedIndependentlyOfBuildReview()
     {
         var report = Parse(DiagnosticSummary.Build(Full() with
         {
@@ -199,7 +199,7 @@ public sealed class DiagnosticSummaryTests : IDisposable
         }));
 
         Assert.Equal(
-            ["cache-space-insufficient", "cloud-copy-pending", "medal-account-mismatch", "medal-build-unreviewed", "medal-executable-missing",
+            ["cache-space-insufficient", "cloud-copy-pending", "medal-account-mismatch", "medal-executable-missing",
                 "medal-schema-unsupported", "rclone-missing", "recovery-required", "winfsp-missing"],
             report["refusals"]!.AsArray().Select(r => (string)r!));
         Assert.False((bool)report["medal"]!["schemaSupported"]!);

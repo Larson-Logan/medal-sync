@@ -111,14 +111,14 @@ internal static partial class DiagnosticSummary
         };
         if (compatibility is null) return medal;
         medal["executablePresent"] = compatibility.ExecutablePresent;
-        medal["buildReviewed"] = NativeBackupBuilds.IsSupported(compatibility.Versions);
+        medal["buildReviewed"] = compatibility.BuildReviewed;
         medal["schemaVersion"] = compatibility.SchemaVersion;
         medal["definitionsVersion"] = compatibility.DefinitionsVersion;
         medal["schemaFingerprint"] = compatibility.SchemaFingerprint is { } fingerprint && HexPattern().IsMatch(fingerprint) ? fingerprint : null;
         medal["schemaSupported"] = compatibility.SchemaSupported;
         medal["compatible"] = compatibility.Compatible;
         if (!compatibility.ExecutablePresent) refusals.Add("medal-executable-missing");
-        if (!NativeBackupBuilds.IsSupported(compatibility.Versions)) refusals.Add("medal-build-unreviewed");
+        if (!NativeBackupBuilds.HasReadableVersions(compatibility.Versions)) refusals.Add("medal-version-unreadable");
         if (compatibility.SchemaVersion is null) refusals.Add("medal-schema-unreadable");
         else if (!compatibility.SchemaSupported) refusals.Add("medal-schema-unsupported");
         return medal;

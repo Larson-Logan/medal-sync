@@ -324,21 +324,17 @@ internal static class SessionCommands
 
     /// <summary>Keeps the Run value and medal:// handler on the launcher once startup is rewired; never fails a launch.</summary>
     private static void GuardStartup(Context context) => GuardStartup(
-        // Machine-wide setup owns its own shortcuts, not Medal's per-user hooks.
-        // Keep the existing portable integration intact until explicitly migrated.
-        () => LocalState.IsManagedInstall(AppContext.BaseDirectory),
-        () => StartupEntries.Enforce(context.State.Root, Path.Combine(AppContext.BaseDirectory, StartupEntries.LauncherFile)),
+        () => StartupEntries.EnforceExisting(context.State.Root, AppContext.BaseDirectory),
         context.Log.Write);
 
     /// <summary>
     /// Never throws. It also runs on a timer thread, where an unhandled exception would end the supervisor
     /// while Medal is still running, so the layout check, the repair and the log write are all guarded.
     /// </summary>
-    internal static void GuardStartup(Func<bool> isManagedInstall, Func<IEnumerable<string>> enforce, Action<string> log)
+    internal static void GuardStartup(Func<IEnumerable<string>> enforce, Action<string> log)
     {
         try
         {
-            if (isManagedInstall()) return;
             foreach (string change in enforce()) log("startup: " + change);
         }
         catch (Exception ex)

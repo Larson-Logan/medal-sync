@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using System.Runtime.InteropServices;
 using System.Text;
+using MedalSync.Config;
 using Microsoft.Win32;
 
 namespace MedalSync.Platform;
@@ -40,6 +41,36 @@ internal static class StartupEntries
     public static string RunCommand(string launcher) => $"\"{launcher}\" {SignInFlag}";
 
     public static string ProtocolCommand(string launcher) => $"\"{launcher}\" \"%1\"";
+
+    /// <summary>A native supervisor also maintains a previously opted-in portable integration.</summary>
+    [SupportedOSPlatform("windows")]
+    public static IReadOnlyList<string> EnforceExisting(string stateRoot, string executableDirectory)
+    {
+        // Native setup alone never opts a user into rewriting Medal's hooks.
+        if (!File.Exists(Path.Combine(stateRoot, OriginalsFile))) return [];
+        using var run = Registry.CurrentUser.OpenSubKey(RunKey);
+        string? launcher = GuardLauncher(stateRoot, executableDirectory,
+            LocalState.IsManagedInstall(executableDirectory), run?.GetValue(RunValue) as string);
+        return launcher is null ? [] : Enforce(stateRoot, launcher);
+    }
+
+    internal static string? GuardLauncher(string stateRoot, string executableDirectory, bool managed, string? registeredCommand)
+    {
+        // Keep the user's existing target, including an explicitly migrated native
+        // target. Parse only our exact Run syntax; never execute registry text.
+        if (registeredCommand is { } command && command.StartsWith('"'))
+        {
+            int end = command.IndexOf('"', 1);
+            if (end > 1 && command[(end + 1)..] == " " + SignInFlag)
+            {
+                string target = command[1..end];
+                if (Path.IsPathFullyQualified(target) && Path.GetFileName(target).Equals(LauncherFile, StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(target)) return target;
+            }
+        }
+        string fallback = Path.Combine(managed ? Path.Combine(stateRoot, "bin") : executableDirectory, LauncherFile);
+        return File.Exists(fallback) ? fallback : null;
+    }
 
     private static bool Contains(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle)
     {

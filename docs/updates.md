@@ -41,7 +41,10 @@ Recordings, caches and shared library files remain in their existing locations.
 
 Setup creates its own Start menu and optional desktop shortcuts. It does not
 replace Medal's per-user startup, URL handler or legacy portable shortcuts.
-The installed companion preserves that existing integration too. Existing
+The installed companion maintains previously opted-in integration too: when a
+Medal update rewrites its URL handler or shortcut, supervision repairs it to
+the existing launcher. It does not opt a new user in or migrate that target.
+Existing
 portable binaries remain available for recovery; use the new Start menu shortcut
 for the Program Files build. Repointing existing Medal startup integration is
 an explicit advanced migration performed as the owning Windows user.

@@ -129,16 +129,14 @@ public sealed class SupervisionResilienceTests : IDisposable
     public void StartupGuardNeverThrowsEvenWhenItsLogFails()
     {
         List<string> log = [];
-        SessionCommands.GuardStartup(() => throw new IOException("layout unreadable"), () => [], log.Add);
+        SessionCommands.GuardStartup(() => throw new IOException("layout unreadable"), log.Add);
         Assert.Equal("startup: check failed: layout unreadable", Assert.Single(log));
 
-        SessionCommands.GuardStartup(() => false, () => throw new UnauthorizedAccessException("registry denied"),
+        SessionCommands.GuardStartup(() => throw new UnauthorizedAccessException("registry denied"),
             _ => throw new IOException("disk full"));
 
-        SessionCommands.GuardStartup(() => false, () => ["Run value restored"], log.Add);
+        SessionCommands.GuardStartup(() => ["Run value restored"], log.Add);
         Assert.Equal("startup: Run value restored", log[^1]);
-        SessionCommands.GuardStartup(() => true, () => throw new InvalidOperationException("managed installs are left alone"), log.Add);
-        Assert.Equal(2, log.Count);
     }
 
     private sealed class Ui : ILauncherUi

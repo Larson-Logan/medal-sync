@@ -2,10 +2,16 @@
 
 ## Unreleased
 
-- Verified native-backup compatibility for Medal 2644.604.1 with recorder
-  2644.3209.1, which uses the reviewed schema. Reviewed app builds are now
-  accepted only with the recorder they were reviewed with; unknown pairs
-  remain refused.
+- Routine Medal app and recorder updates no longer require an exact version
+  pair in Medal Sync. Readable version metadata, the exact supported schema,
+  stopped-process checks, native-backup integrity/sidecar/lineage checks and
+  verified handoff still apply. Individually reviewed builds are identified
+  separately in compatibility reports; schema-compatible future builds continue
+  automatically without a version-change warning. A future change to native
+  backup behavior that retains the same schema cannot be guaranteed compatible.
+- Native installations now repair Medal's overwritten per-user startup hooks
+  when the user previously opted into that integration. They retain its existing
+  launcher target; setup alone still does not opt users in or migrate shortcuts.
 - `SUPPORT.md` now asks for a `diagnostics` summary in reports. The exporter
   was checked on a real Windows PC with an active library; its preview held no
   paths, names or IDs and saved nothing.
