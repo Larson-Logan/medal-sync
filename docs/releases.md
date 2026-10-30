@@ -143,9 +143,9 @@ cannot exempt `github-actions[bot]`. So the publish step alone uses a
 short-lived token for that app, minted by
 [create-github-app-token](https://github.com/actions/create-github-app-token)
 with contents-write only; every other step uses the workflow's own read-only
-token. The app is installed on this repository only. Its ID is the repository
-variable `RELEASE_APP_ID` and its private key the repository secret
-`RELEASE_APP_PRIVATE_KEY`; see
+token. The app is installed on this repository only. Its client ID is the
+repository variable `RELEASE_APP_CLIENT_ID` and its private key the repository
+secret `RELEASE_APP_PRIVATE_KEY`; see
 [security maintenance](security-maintenance.md#release-app) to rotate it. Do
 not create a release or push a tag by hand. If publishing fails after the
 upload, the draft stays: review it and publish it by hand, or delete it and

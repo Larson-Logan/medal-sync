@@ -82,7 +82,9 @@ Metadata read-only permissions, no webhook and no events. The release workflow
 mints a token for it, limited to contents-write, only in the step that
 publishes the release.
 
-- `RELEASE_APP_ID` (repository variable) holds the app's numeric ID. The
+- `RELEASE_APP_CLIENT_ID` (repository variable) holds the app's client ID,
+  which the workflow uses to mint its token.
+- `RELEASE_APP_ID` (repository variable) records the app's numeric ID. The
   release tags ruleset names the same ID as its `Integration` bypass actor.
 - `RELEASE_APP_PRIVATE_KEY` (repository secret) holds its private key. No copy
   is kept anywhere else; never commit, log or attach it.
@@ -98,7 +100,7 @@ once if it may have been exposed:
    Tokens already minted from it expire within an hour.
 
 The new key is first used by the next promotion to `main`. If the app is ever
-replaced, update `RELEASE_APP_ID` and the actor ID in
+replaced, update `RELEASE_APP_CLIENT_ID`, `RELEASE_APP_ID` and the actor ID in
 [release-tags.json](../.github/rulesets/release-tags.json), install the new
 app, then run the ruleset script.
 
