@@ -64,6 +64,42 @@ try {
             foreach ($tag in @('0.2.0','v0.2.0')) { Assert-True ((Get-MedalRelease $tag).Version -eq '0.2.0') 'Wrong release version.' }
         } finally { & $module { Remove-Item Function:script:Invoke-RestMethod } }
     }
+    Test-Case 'Build version adds the hotfix counter to VersionPrefix' {
+        $props = Join-Path $scratch 'props'
+        $null = New-Item -ItemType Directory -Path $props
+        @'
+<Project>
+  <PropertyGroup>
+    <VersionPrefix>1.4.2</VersionPrefix>
+    <MedalReleaseRevision Condition="'$(MedalReleaseRevision)' == ''">00</MedalReleaseRevision>
+  </PropertyGroup>
+</Project>
+'@ | Set-Content -LiteralPath (Join-Path $props 'Directory.Build.props')
+        $saved = $env:MedalReleaseRevision
+        try {
+            $env:MedalReleaseRevision = $null
+            Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.00') 'Local builds must use counter 00.'
+            $env:MedalReleaseRevision = '07'
+            Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.07') 'Release builds must use the workflow counter.'
+            $env:MedalReleaseRevision = '7'
+            Refuses { Get-MedalBuildVersion $props } '*two or more digits*'
+        } finally { $env:MedalReleaseRevision = $saved }
+    }
+    Test-Case 'Keep the hotfix counter when normalizing release tags' {
+        & $module {
+            function script:Invoke-RestMethod {
+                param($Uri, $Headers, $TimeoutSec)
+                if ($Uri -cne 'https://api.github.com/repos/Larson-Logan/medal-sync/releases/tags/v0.2.0.03') { throw 'Unexpected release endpoint.' }
+                return @{ draft=$false; prerelease=$false; tag_name='v0.2.0.03'; assets=@(@{
+                    name='medal-sync-0.2.0.03-win-x64.zip'; digest=('sha256:' + ('a' * 64)); size=1024
+                    browser_download_url='https://github.com/Larson-Logan/medal-sync/releases/download/v0.2.0.03/medal-sync-0.2.0.03-win-x64.zip'
+                }) }
+            }
+        }
+        try {
+            foreach ($tag in @('0.2.0.03','v0.2.0.03')) { Assert-True ((Get-MedalRelease $tag).Version -ceq '0.2.0.03') 'Wrong release version.' }
+        } finally { & $module { Remove-Item Function:script:Invoke-RestMethod } }
+    }
     Test-Case 'Portable lifecycle refuses a native Windows layout before changing programs' {
         $root = New-Install 'native-layout'
         '{}' | Set-Content -LiteralPath (Join-Path $root 'bin/setup-layout.json')
@@ -96,7 +132,10 @@ try {
         }
     }
     Test-Case 'Reject prerelease versions, malformed versions and missing files' {
-        foreach ($value in @('v1.0.0', '1.0.0-beta', '01.0.0', '../1.0.0')) { Refuses { Assert-MedalVersion $value } '*stable version*' }
+        foreach ($value in @('v1.0.0', '1.0.0-beta', '01.0.0', '../1.0.0', '1.0.0.1', '1.0.0.001', '1.0.0.00.1', 'v1.0.0.01')) { Refuses { Assert-MedalVersion $value } '*stable version*' }
+        foreach ($value in @('1.0.0', '1.0.0.00', '1.0.0.01', '1.0.0.10', '1.0.0.100')) { $null = Assert-MedalVersion $value }
+        Assert-True ((Assert-MedalVersion '1.0.0.10') -gt (Assert-MedalVersion '1.0.0.09')) 'Hotfix counter must compare numerically.'
+        Assert-True ((Assert-MedalVersion '1.0.0.00') -gt (Assert-MedalVersion '1.0.0')) 'The first hotfix-counted release must be newer than its three-part version.'
         $bad = New-Package 'missing'
         Remove-Item -LiteralPath (Join-Path $bad.path 'medal-sync-launch.exe')
         $badZip = Zip-Package $bad 'missing'

@@ -1,6 +1,10 @@
 <Project>
   <PropertyGroup>
     <VersionPrefix>1.3.0</VersionPrefix>
+    <!-- Hotfix counter, the fourth part of the release version. The release
+         workflow sets it for each merge to main; local builds use 00. -->
+    <MedalReleaseRevision Condition="'$(MedalReleaseRevision)' == ''">00</MedalReleaseRevision>
+    <Version>$(VersionPrefix).$(MedalReleaseRevision)</Version>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>

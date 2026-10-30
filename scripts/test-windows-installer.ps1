@@ -12,7 +12,8 @@ if (-not $IsWindows -or $env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONME
     throw 'Native installer integration requires an ephemeral GitHub-hosted Windows runner.'
 }
 $root = Split-Path -Parent $PSScriptRoot
-$version = ([xml](Get-Content -LiteralPath (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.VersionPrefix
+Import-Module (Join-Path $PSScriptRoot 'storage/medal-sync/MedalSync.Update.psm1') -Force
+$version = Get-MedalBuildVersion $root
 $setup = Join-Path $root ".medal-sync-dist/medal-sync-$version-setup-win-x64.exe"
 $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{168562DF-1041-441D-96D0-2244EA744E18}_is1'
 $machineKey = $key.Replace('HKCU:', 'HKLM:')

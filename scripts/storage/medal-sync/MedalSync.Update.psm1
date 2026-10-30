@@ -5,9 +5,25 @@ $script:Payload = @('medal-sync.exe', 'medal-sync-launch.exe', 'update-medal-syn
 
 function Get-MedalPayloadNames { return $script:Payload.Clone() }
 
+# MAJOR.MINOR.PATCH.NN, where NN is the two-digit hotfix counter. Versions
+# before 1.3.0.00 had no counter, so installed programs may still report three parts.
+$script:StableVersion = '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0[0-9]|[1-9][0-9]+))?'
+
 function Assert-MedalVersion([string]$Version) {
-    if ($Version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'Expected a stable version such as 0.2.0.' }
+    if ($Version -cnotmatch "^$script:StableVersion$") { throw 'Expected a stable version such as 0.2.0.01.' }
     return [version]$Version
+}
+
+function Get-MedalBuildVersion([string]$Root) {
+    # VersionPrefix from Directory.Build.props plus the hotfix counter, which the
+    # release workflow passes in the MedalReleaseRevision environment variable.
+    $props = [xml](Get-Content -LiteralPath (Join-Path $Root 'Directory.Build.props') -Raw)
+    $prefix = $props.SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText
+    $revision = if ($env:MedalReleaseRevision) { $env:MedalReleaseRevision } else { $props.SelectSingleNode('/Project/PropertyGroup/MedalReleaseRevision').InnerText }
+    if ($revision -cnotmatch '^(0[0-9]|[1-9][0-9]+)$') { throw "MedalReleaseRevision '$revision' must be two or more digits, such as 00 or 01." }
+    $version = "$prefix.$revision"
+    $null = Assert-MedalVersion $version
+    return $version
 }
 
 function Read-MedalReleasePackage([string]$PackagePath, [string]$ExpectedSha256, [string]$Destination) {
@@ -44,14 +60,15 @@ function Read-MedalReleasePackage([string]$PackagePath, [string]$ExpectedSha256,
 
 function Get-MedalRelease([string]$Tag = 'latest') {
     if ($Tag -ne 'latest') {
-        $version = (Assert-MedalVersion ($Tag -creplace '^v', '')).ToString()
+        $version = $Tag -creplace '^v', ''
+        $null = Assert-MedalVersion $version
         $Tag = "v$version"
     }
     $endpoint = if ($Tag -eq 'latest') { 'latest' } else { "tags/$Tag" }
     # No caller-selected host/repository or token: never send private credentials.
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/Larson-Logan/medal-sync/releases/$endpoint" `
         -Headers @{ Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28'; 'User-Agent'='MedalSync-Updater' } -TimeoutSec 30
-    if ($release.draft -or $release.prerelease -or $release.tag_name -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'Expected a published stable release.' }
+    if ($release.draft -or $release.prerelease -or $release.tag_name -cnotmatch "^v$script:StableVersion$") { throw 'Expected a published stable release.' }
     if ($Tag -ne 'latest' -and $release.tag_name -cne $Tag) { throw 'Release tag mismatch.' }
     $version = $release.tag_name.Substring(1)
     $name = "medal-sync-$version-win-x64.zip"
@@ -189,8 +206,9 @@ function Uninstall-MedalRelease([string]$StateRoot) {
         if ((Get-Item -LiteralPath (Join-Path $root "bin/$name") -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installed payload must not be a link.' }
     }
     $version = Invoke-MedalBinary (Join-Path $root 'bin/medal-sync.exe') @('version')
-    if (($version -join '') -notmatch '^medal-sync ([0-9]+\.[0-9]+\.[0-9]+);') { throw 'Cannot identify installed version.' }
-    $installed = (Assert-MedalVersion $Matches[1]).ToString()
+    if (($version -join '') -notmatch '^medal-sync ([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?);') { throw 'Cannot identify installed version.' }
+    $installed = $Matches[1]
+    $null = Assert-MedalVersion $installed
     if (Test-Path -LiteralPath (Join-Path $root 'config.json')) {
         $null = Assert-MedalInstallPath $root
         Assert-MedalIdle $root
@@ -229,7 +247,7 @@ function Install-MedalRelease([string]$Root, [string]$Staged, $Manifest) {
     Assert-MedalNoInterruptedUpdate $Root
     Assert-MedalIdle $Root
     $current = Invoke-MedalBinary (Join-Path $Root 'bin/medal-sync.exe') @('version')
-    if (($current -join '') -notmatch '^medal-sync ([0-9]+\.[0-9]+\.[0-9]+);') { throw 'Cannot identify installed version.' }
+    if (($current -join '') -notmatch '^medal-sync ([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?);') { throw 'Cannot identify installed version.' }
     $installed = Assert-MedalVersion $Matches[1]
     if ((Assert-MedalVersion $Manifest.version) -le $installed) { throw 'The package must be newer than the installed version.' }
     # Never overwrite a helper script that is currently executing from bin.
@@ -276,4 +294,4 @@ function Install-MedalRelease([string]$Root, [string]$Staged, $Manifest) {
     return $receiptPath
 }
 
-Export-ModuleMember -Function Get-MedalPayloadNames, Assert-MedalVersion, Read-MedalReleasePackage, Get-MedalRelease, Assert-MedalInstallPath, Assert-MedalLocalPath, Install-MedalRelease, Install-MedalFresh, Uninstall-MedalRelease
+Export-ModuleMember -Function Get-MedalPayloadNames, Assert-MedalVersion, Get-MedalBuildVersion, Read-MedalReleasePackage, Get-MedalRelease, Assert-MedalInstallPath, Assert-MedalLocalPath, Install-MedalRelease, Install-MedalFresh, Uninstall-MedalRelease

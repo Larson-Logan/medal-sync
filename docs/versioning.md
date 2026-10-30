@@ -7,21 +7,33 @@ when it changes.
 
 ## Release version
 
-`Directory.Build.props` is the single source of the version. Both programs,
-setup, the portable ZIP and `release.json` carry it. Releases use
-`MAJOR.MINOR.PATCH` and are tagged `vMAJOR.MINOR.PATCH`, for example `v1.1.0`.
-See the [release process](releases.md) for how a tag becomes a release.
+Releases use `MAJOR.MINOR.PATCH.NN` and are tagged `vMAJOR.MINOR.PATCH.NN`,
+for example `v1.3.0.02`. Both programs, setup, the portable ZIP and
+`release.json` carry the full version.
+
+- `MAJOR.MINOR.PATCH` is `VersionPrefix` in `Directory.Build.props`, the only
+  part a person edits.
+- `NN` is a two-digit hotfix counter that the
+  [release workflow](releases.md#github-pipeline) sets. Every merge to `main`
+  is released: a merge that changes `VersionPrefix` starts at `.00`, and every
+  later merge adds one (`.01`, `.02`, and so on; after `.99` comes `.100`).
+  Local builds use `.00`.
+
+Releases before 1.3.0.00 had no counter, for example `v1.2.0`. See the
+[release process](releases.md) for how a merge becomes a release.
 
 | Part | Raised when |
 | --- | --- |
 | `MAJOR` | A PC on the new version can no longer share a library with a PC on the previous major version, a documented file `format` changes, a documented command or option is removed, or a documented output field changes meaning. |
 | `MINOR` | New commands, options, settings or output fields; newly supported Medal builds or schemas; behavior changes that keep existing configurations and libraries working. |
 | `PATCH` | Fixes and documentation only, with no new options or fields. |
+| `NN` | Automatically, for each merge to `main` that does not change `VersionPrefix`. |
 
 Only stable tags count. Automatic update checks ignore drafts, prereleases and
 any tag that is not exactly `v` followed by three numbers without leading
-zeros. The installed version is compared numerically, so `1.10.0` is newer than
-`1.9.0`. `medal-sync version` prints the installed version together with the
+zeros, optionally followed by a two-digit (or longer) counter. The installed
+version is compared numerically, so `1.10.0.00` is newer than `1.9.0.00`,
+`1.3.0.10` is newer than `1.3.0.09`, and `1.3.0.00` is newer than `1.3.0`. `medal-sync version` prints the installed version together with the
 supported Medal schema.
 
 Undocumented output is not a contract. For example, `status --json` printed the

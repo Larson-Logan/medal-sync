@@ -7,14 +7,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'Windows setup is built on Windows only.' }
 $root = Split-Path -Parent $PSScriptRoot
-$version = ([xml](Get-Content -LiteralPath (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.VersionPrefix
+Import-Module (Join-Path $PSScriptRoot 'storage/medal-sync/MedalSync.Update.psm1') -Force
+$version = Get-MedalBuildVersion $root
 if (-not $SkipPackage) {
     & (Join-Path $PSScriptRoot 'package-release.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Release packaging failed.' }
 }
 $compiler = & (Join-Path $PSScriptRoot 'setup-installer-toolchain.ps1')
 $storageDependencies = & (Join-Path $PSScriptRoot 'setup-storage-toolchain.ps1')
-Import-Module (Join-Path $PSScriptRoot 'storage/medal-sync/MedalSync.Update.psm1') -Force
 $output = Join-Path $root '.medal-sync-dist'
 $archive = Join-Path $output "medal-sync-$version-win-x64.zip"
 $hash = ((Get-Content -LiteralPath "$archive.sha256" -Raw) -split '\s+')[0]

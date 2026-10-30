@@ -249,6 +249,21 @@ begin
     RegQueryStringValue(HKA, Key, 'DisplayVersion', Version);
 end;
 
+// Releases are MAJOR.MINOR.PATCH.NN; installations before 1.3.0.00 registered
+// MAJOR.MINOR.PATCH, which packs as revision 0.
+function PackVersion(const Value: String; var Packed: Int64): Boolean;
+var
+  I, Dots: Integer;
+begin
+  Dots := 0;
+  for I := 1 to Length(Value) do
+    if Value[I] = '.' then Dots := Dots + 1;
+  if Dots = 2 then
+    Result := StrToVersion(Value + '.0', Packed)
+  else
+    Result := (Dots = 3) and StrToVersion(Value, Packed);
+end;
+
 function WinFspInstalled(): Boolean;
 var
   Directory: String;
@@ -321,7 +336,7 @@ begin
       Result := 'Medal Sync is already installed at ' + RegisteredDir + '. Select that folder to upgrade or repair it. Uninstall first if you want to move the programs.';
       exit;
     end;
-    if not StrToVersion(RegisteredVersion + '.0', Installed) then begin
+    if not PackVersion(RegisteredVersion, Installed) then begin
       Result := 'Cannot identify the registered Medal Sync version. Recover the existing installation before continuing.';
       exit;
     end;
@@ -340,7 +355,7 @@ begin
     end;
   end;
   if HasRegisteredVersion or FileExists(ProgramPath) then begin
-    if not StrToVersion('{#AppVersion}.0', Target) then begin
+    if not PackVersion('{#AppVersion}', Target) then begin
       Result := 'Cannot identify the installed version. Repair the existing installation before continuing.';
       exit;
     end;
@@ -374,8 +389,8 @@ begin
   Operation := 'Install Medal Sync {#AppVersion}';
   if RegisteredInstallation(RegisteredDir, InstalledVersion) and
      (CompareText(RemoveBackslashUnlessRoot(RegisteredDir), RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) = 0) and
-     StrToVersion(InstalledVersion + '.0', Installed) and
-     StrToVersion('{#AppVersion}.0', Target) then begin
+     PackVersion(InstalledVersion, Installed) and
+     PackVersion('{#AppVersion}', Target) then begin
     if ComparePackedVersion(Installed, Target) = 0 then
       Operation := 'Repair Medal Sync {#AppVersion}'
     else

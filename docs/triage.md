@@ -72,9 +72,11 @@ milestones accurate without manual bookkeeping:
   the bump joins the following milestone, so merge the bump last and promote
   it straight away. If a later fix is promoted with it, move the fix back by
   hand.
-- Publishing a release closes its milestone. If anything in it is still open,
-  the milestone stays open and the run warns; the draft's run summary lists the
-  same items before you publish.
+- The first release of a version (`.00`) closes its milestone. If anything in
+  it is still open, the milestone stays open and the run warns. Hotfix
+  releases (`.01` and later) have no milestone of their own: fixes merged
+  after `.00` join the next version's milestone even though they ship sooner
+  in a hotfix.
 
 ## Project board
 

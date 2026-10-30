@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Every merge to `main` now publishes a release automatically, tagged
+  `vMAJOR.MINOR.PATCH.NN`. `NN` is a hotfix counter: `.00` when the merge
+  changes the version in `Directory.Build.props`, then `.01`, `.02` and so on.
+  Update checks, the portable updater and setup compare the counter
+  numerically and still recognize earlier three-part versions.
 - Setup can add `medal-sync` to PATH, so the CLI runs from any new terminal.
   The option is off by default. It appends the program folder's `bin`
   directory to the system or user PATH, which also exposes the bundled

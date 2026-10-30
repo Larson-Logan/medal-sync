@@ -96,8 +96,9 @@ Builds and packages go into ignored `.medal-sync-dist/`. Work lands on the
 `dev` branch first, and only `dev` merges into `main`, so `main` always works.
 Windows CI validates pull requests, `dev` and `main`, builds the installer, and
 checks native installation, repair and uninstall on an ephemeral runner.
-Promoting a version bump to `main` creates a draft release for maintainer
-review; releases are built only from `main`.
+Every merge to `main` publishes a release tagged `vMAJOR.MINOR.PATCH.NN`,
+where `NN` counts hotfixes since the last version bump; releases are built
+only from `main`.
 
 - [Contributing](CONTRIBUTING.md), [local development](docs/local-development.md),
   [tests](tests/README.md) and [changelog](CHANGELOG.md)

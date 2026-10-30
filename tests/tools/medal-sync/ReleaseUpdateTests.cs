@@ -31,6 +31,29 @@ public sealed class ReleaseUpdateTests
     }
 
     [Fact]
+    public void ComparesHotfixCounterNumerically()
+    {
+        Assert.Equal("1.3.0.00", ReleaseUpdate.AvailableVersion(Release("1.3.0.00"), "1.2.0"));
+        Assert.Equal("1.3.0.00", ReleaseUpdate.AvailableVersion(Release("1.3.0.00"), "1.3.0"));
+        Assert.Equal("1.3.0.01", ReleaseUpdate.AvailableVersion(Release("1.3.0.01"), "1.3.0.00"));
+        Assert.Equal("1.3.0.10", ReleaseUpdate.AvailableVersion(Release("1.3.0.10"), "1.3.0.09"));
+        Assert.Equal("1.3.0.100", ReleaseUpdate.AvailableVersion(Release("1.3.0.100"), "1.3.0.99"));
+        Assert.Equal("1.3.1.00", ReleaseUpdate.AvailableVersion(Release("1.3.1.00"), "1.3.0.12"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.0.01"), "1.3.0.01"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.0.01"), "1.3.0.02"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.0.05"), "1.3.1.00"));
+    }
+
+    [Theory]
+    [InlineData("1.3.0.1")]
+    [InlineData("1.3.0.001")]
+    [InlineData("1.3.0.00.1")]
+    [InlineData("1.3.0.0a")]
+    [InlineData("01.3.0.00")]
+    public void RefusesMalformedHotfixTags(string version) =>
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release(version), "0.2.0"));
+
+    [Fact]
     public void FindsPublishedNativeSetupWithExpectedDigestAndRepositoryUrl()
     {
         string setup = Release().Replace("-win-x64.zip", "-setup-win-x64.exe");
@@ -102,8 +125,8 @@ public sealed class ReleaseUpdateTests
         Assert.Null(ReleaseUpdate.PublishedAsset(setup.Replace(asset, asset + "," + asset)));
     }
 
-    private static ReleaseAsset SetupAsset(byte[] bytes) => new("0.5.0", "medal-sync-0.5.0-setup-win-x64.exe",
-        "https://github.com/Larson-Logan/medal-sync/releases/download/v0.5.0/medal-sync-0.5.0-setup-win-x64.exe",
+    private static ReleaseAsset SetupAsset(byte[] bytes) => new("0.5.0.01", "medal-sync-0.5.0.01-setup-win-x64.exe",
+        "https://github.com/Larson-Logan/medal-sync/releases/download/v0.5.0.01/medal-sync-0.5.0.01-setup-win-x64.exe",
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength);
 
     [Fact]
@@ -158,7 +181,7 @@ public sealed class ReleaseUpdateTests
         using var client = new HttpClient(new Handler(_ => throw new InvalidOperationException("Network must not be used.")));
         string directory = fixture.PathFor("downloads");
         foreach (var bad in new[] { asset with { Url = "https://example.com/setup.exe" }, asset with { Name = "../setup.exe" },
-            asset with { Sha256 = "bad" }, asset with { Size = 0 }, asset with { Version = "../0.5.0" } })
+            asset with { Sha256 = "bad" }, asset with { Size = 0 }, asset with { Version = "../0.5.0.01" }, asset with { Version = "0.5.0.1" } })
             await Assert.ThrowsAsync<InvalidDataException>(() => ReleaseUpdate.DownloadSetupAsync(client, bad, directory, null, CancellationToken.None));
         Assert.False(Directory.Exists(directory));
     }

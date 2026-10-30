@@ -126,8 +126,8 @@ explicit `-Install -Apply`, update `-Apply`, and `-Uninstall -Apply`, with an
 explicit `-StateRoot` and trusted package digest. It keeps transactional backups
 and receipts under the state root's `updates` directory.
 Applying a portable change also blocks native setup and new library operations
-for the duration of the transaction. Bare release versions such as `0.4.0` and
-full tags such as `v0.4.0` both resolve to the exact stable release tag.
+for the duration of the transaction. Bare release versions such as `1.3.0.01` and
+full tags such as `v1.3.0.01` both resolve to the exact stable release tag.
 
 Use the native setup and Windows uninstaller for Program Files installations;
 the portable script refuses a native installation layout.
