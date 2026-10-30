@@ -166,6 +166,25 @@ public sealed class LauncherAndRelocationTests : IDisposable
     }
 
     [Fact]
+    public void NativeSupervisorPreservesTheOptedInLauncherAndCanRecoverAnOverwrittenRunEntry()
+    {
+        string state = _fixture.PathFor("state"), native = _fixture.PathFor("Programs", "Medal Sync", "bin");
+        string portableLauncher = Path.Combine(state, "bin", StartupEntries.LauncherFile);
+        string nativeLauncher = Path.Combine(native, StartupEntries.LauncherFile);
+        Directory.CreateDirectory(Path.GetDirectoryName(portableLauncher)!);
+        Directory.CreateDirectory(native);
+        File.WriteAllText(portableLauncher, "synthetic");
+        File.WriteAllText(nativeLauncher, "synthetic");
+        Assert.Equal(portableLauncher, StartupEntries.GuardLauncher(state, native, true, StartupEntries.RunCommand(portableLauncher)));
+        Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(state, native, true, StartupEntries.RunCommand(nativeLauncher)));
+        Assert.Equal(portableLauncher, StartupEntries.GuardLauncher(state, native, true, @"""C:\Medal\Medal.exe"""));
+        Assert.Equal(portableLauncher, StartupEntries.GuardLauncher(state, native, true, StartupEntries.RunCommand(nativeLauncher) + " --unexpected"));
+        File.Delete(portableLauncher);
+        Assert.Null(StartupEntries.GuardLauncher(state, native, true, null));
+        Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(state, native, false, null));
+    }
+
+    [Fact]
     public void StartupEntries_RepairARecreatedWindowsShortcutAndPreserveItsIcon()
     {
         if (!OperatingSystem.IsWindows()) return;

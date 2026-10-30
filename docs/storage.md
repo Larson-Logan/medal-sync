@@ -273,7 +273,7 @@ Verification reads the selected files back from the destination; plan for
 provider bandwidth, API limits, time and possible download charges. Set
 `replication.bandwidthLimitMiB` to limit transfer bandwidth (1 to 10000 MiB/s),
 or leave it `null` for unlimited bandwidth.
-Every finish currently verifies all referenced media, including unchanged
+By default every finish verifies all referenced media, including unchanged
 clips. Each transfer command has a four-hour default timeout; set
 `replication.timeoutMinutes` from 1 to 1440 for your collection and connection.
 Interrupted commands are retried on the next finish; completed immutable files
@@ -303,6 +303,54 @@ error text is never stored or shown, since it can contain credentials or private
 file names; only the kind of problem is kept. The last verification receipt is
 `replication/last-verified.json` under the configured state root; it lists
 verified and deferred targets.
+
+### Incremental verification
+
+Always-full byte verification remains the default. To reduce read-back for a
+large library, set `replication.fullVerifyEveryHandoffs` above 1 (at most 100).
+Between full passes, new or changed files are copied and byte-verified; unchanged
+files get a presence and size check using [rclone check --size-only](https://rclone.org/commands/rclone_check/).
+The full pass repeats every N successful replication passes per destination
+(including retries), or after `fullVerifyEveryDays` days (default 7, at most 30),
+whichever comes first. Set the handoff count back to 1 to always read all bytes.
+
+This is a deliberate tradeoff: same-size corruption of an unchanged destination
+file can remain undetected until the next full pass. File identity uses its size
+and source modification time; do not edit media while preserving both values.
+Required destinations still block handoff unless their selected byte checks and
+all remaining presence/size checks pass. Progress and finish results show the
+planned files and bytes to read back, summed across destinations.
+
+Private receipts under `replication/destinations/` bind the snapshot digest,
+library, source, destination, configuration, credential-file fingerprint and
+per-file identities. Missing, damaged, foreign, expired or failed evidence forces
+a full pass. Each attempt invalidates its previous receipt before checking files;
+an interruption or conflict cannot leave a partially updated receipt reusable.
+Keep these receipts private: they name media. Their absence is safe.
+
+### Retry cloud copies while Ready
+
+With Medal quit and the library Ready, preview pending optional cloud copies:
+
+```powershell
+medal-sync replicate retry
+medal-sync replicate retry --target offsite --apply
+```
+
+Omit `--target` to retry every pending optional target. A required target still
+verifies during finish and cannot be selected here. The source is this PC's
+persistent copy when configured, otherwise primary storage. The run uses the
+committed snapshot and rechecks its generation and journal revision throughout.
+It never takes ownership or holds the journal writer lock, so another PC may
+start normally. A local launch cancels the retry before using media.
+
+Each target leaves `pending.json` only after its copy, verification and final
+generation check pass. Outages keep it pending and update its last attempt.
+Launch, Ctrl+C, Windows shutdown, configuration changes or another PC starting
+cancel unfinished work and invalidate its receipts. Retry after the library is
+Ready again. Configured bandwidth and per-command timeout limits still apply.
+`status`, `status --json` and the tray show progress and the last result without
+changing Ready ownership; stale progress is explicitly reported as stale.
 
 ### Check sign-in before recording
 

@@ -13,7 +13,7 @@ internal static class CommandRunner
     private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--help", "--new-library", "--spike" };
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
-        "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config",
+        "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
         "--from", "--to", "--limit", "--before", "--wait-for-server", "--state-root", "--medal-link",
         "--local-copy-root", "--cloud-remote", "--rclone-config",
         "--storage-mode",
@@ -55,6 +55,7 @@ internal static class CommandRunner
                                                  Preview/create a config; never overwrite an existing file
           init [--apply]                         Create the shared library from this PC (generation 0)
           storage init-primary [--apply]         Mark an empty primary folder or rclone remote for this library
+          replicate retry [--target NAME] [--apply]  Preview/retry pending optional cloud copies while Ready
           launch [--replace-local-library] [--wait-for-server SECONDS] [--medal-link URL]
                                                  Start Medal through medal-sync and hand off on exit
           finish [--accept-library-changes]      Finish this PC's interrupted session
@@ -139,6 +140,7 @@ internal static class CommandRunner
             "init" => SessionCommands.Init(args, output),
             "storage init-primary" => SessionCommands.InitPrimary(args, output),
             "storage check" => SessionCommands.CheckStorage(args, output),
+            "replicate retry" => ReplicationCommands.Retry(args, output),
             "enroll" => EnrollmentCommands.Run(args, output),
             "enroll recover" => EnrollmentCommands.Recover(args, output),
             "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown),

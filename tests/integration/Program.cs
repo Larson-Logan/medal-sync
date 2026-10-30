@@ -34,6 +34,7 @@ internal static class Program
             string rclone = args[Array.IndexOf(args, "--rclone") + 1];
             if (!File.Exists(rclone)) throw new IOException("An explicit pinned rclone executable is required.");
             TestReplication(rclone);
+            TestIncrementalAndReadyRetry(rclone);
             TestCloudPrimary(rclone);
             TestInterruptedTransfer(rclone);
             if (args.Contains("--mount"))
@@ -176,6 +177,48 @@ internal static class Program
         Check(File.ReadAllText(ReplicaFile(fixture, "onedrive", "#clip [test].mp4")) == "synthetic media bytes", "versioned replication verifies the updated destination");
     }
 
+    private static void TestIncrementalAndReadyRetry(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone) with { Replication = new(null, Remotes(fixture), [new("cloud", "onedrive:MedalSync")])
+            { FullVerifyEveryHandoffs = 3 } };
+        Seed(config);
+        string db = fixture.CreateLibrary("incremental");
+        MedalFixture.AddContent(db, "one", video: config.Capture.Append("#clip [test].mp4").Display);
+        var snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        var state = new LocalState(fixture.PathFor("state"));
+        List<IReadOnlyList<string>> commands = [];
+        void Execute(IReadOnlyList<string> arguments)
+        {
+            commands.Add(arguments);
+            new RcloneRunner(rclone).Run(arguments, TimeSpan.FromSeconds(30));
+        }
+        var replication = new StorageReplication(config, state, () => { }, Execute);
+        Check(replication.Publish(snapshot).ReadBackFiles == 1, "incremental first pass byte-verifies every file using real rclone");
+        commands.Clear();
+        Check(replication.Publish(snapshot).ReadBackFiles == 0 && commands.Count == 1 && commands[0].Contains("--size-only")
+            && !commands[0].Contains("--download"), "unchanged library performs only a presence/size check without media read-back");
+        File.WriteAllText(config.ServerCapture.Append("new.mp4").Display, "new synthetic media");
+        MedalFixture.AddContent(db, "two", video: config.Capture.Append("new.mp4").Display);
+        snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        Check(replication.Publish(snapshot).ReadBackFiles == 1, "one added clip reads back only its bytes while old clips get a size check");
+        string destination = ReplicaFile(fixture, "onedrive", "#clip [test].mp4");
+        File.WriteAllText(destination, new string('x', "synthetic media bytes".Length));
+        Check(replication.Publish(snapshot).Deferred.SequenceEqual(["cloud"]), "scheduled full check catches same-size corruption of previously unchanged media");
+        File.Delete(destination);
+        var store = CoordinationStore.Create(config.LibraryCoordinationDirectory, config.LibraryId, snapshot, new(1, [], []),
+            new(new string('d', 32), "Synthetic PC"), new string('e', 32), Versions, DateTimeOffset.UtcNow);
+        var before = store.ReadJournal();
+        var retry = new ReadyReplicaRetry(config, state, store, () => { }, Execute);
+        Check(retry.Plan().Targets.SequenceEqual(["cloud"]), "Ready retry previews the exact pending optional target");
+        Check(retry.Apply(retry.Plan()).Deferred.Count == 0 && StorageReplication.Pending(state, config.LibraryId).Count == 0
+            && File.ReadAllText(destination) == "synthetic media bytes", "Ready retry copies and byte-verifies a repaired target and clears pending evidence");
+        Check(store.ReadJournal() == before, "real Ready retry never acquires ownership or changes the journal");
+        File.Delete(destination);
+        Check(replication.Publish(snapshot).Deferred.SequenceEqual(["cloud"]), "incremental size check catches deleted unchanged media");
+        Check(retry.Apply(retry.Plan()).ReadBackFiles == 2, "failed listing invalidates receipts so Ready retry verifies the whole destination");
+    }
+
     private static void TestCloudPrimary(string rclone)
     {
         using var fixture = new MedalFixture();
@@ -298,10 +341,14 @@ internal static class Program
                     compatibility: compatibility);
                 if (pc == 0)
                 {
-                    AppVersion("9999.1.1");
+                    AppVersion("update-in-progress");
                     Check(coordinator.Launch().Status == LaunchStatus.Blocked && !mount.IsRunning && store.ReadJournal().State == OwnershipState.Clean,
-                        "an unknown synthetic Medal update refuses startup before acquiring ownership or mounting storage");
-                    AppVersion(Versions.App!);
+                        "unreadable update metadata refuses startup before acquiring ownership or mounting storage");
+                    AppVersion("9999.1.1");
+                    using (var connection = MedalFixture.Open(db)) MedalFixture.Execute(connection, "PRAGMA user_version=5");
+                    Check(coordinator.Launch().Status == LaunchStatus.Blocked && !mount.IsRunning && store.ReadJournal().State == OwnershipState.Clean,
+                        "an updated unsupported schema refuses startup before acquiring ownership or mounting storage");
+                    using (var connection = MedalFixture.Open(db)) MedalFixture.Execute(connection, "PRAGMA user_version=4");
                 }
                 var launch = coordinator.Launch();
                 Check(launch.Status == LaunchStatus.Started, "PC " + (pc + 1) + " mounts real WinFsp storage and restores the committed synthetic library: " + launch.Message);
@@ -315,7 +362,7 @@ internal static class Program
                 medal.Running = false;
                 if (pc == 0)
                 {
-                    AppVersion("9999.1.1");
+                    AppVersion("update-in-progress");
                     Check(compatibility.CheckForUpdate()?.Contains("handoff is blocked", StringComparison.Ordinal) == true,
                         "fresh synthetic update metadata warns that handoff is blocked");
                     var blocked = coordinator.Finish(launch.Session!);
@@ -328,12 +375,14 @@ internal static class Program
                         "incompatible update retains the real WinFsp mount and session cache");
                     Check(File.ReadAllText(config.MountedCapture.Append("new.mp4").Display) == "new synthetic recording",
                         "the drained synthetic recording remains intact in the mount's backing storage while publication is blocked");
-                    AppVersion("2644.591.1");
+                    AppVersion("9999.1.2");
+                    File.WriteAllText(Path.Combine(installDirectory, "version.json"), JsonSerializer.Serialize(new { RecorderHandler2Version = "9999.2.2" }));
+                    Check(compatibility.CheckForUpdate() is null, "completed app and recorder updates with the supported schema need no per-version approval");
                 }
                 var finish = coordinator.Finish(launch.Session!);
                 Check(finish.Status == (pc == 0 ? FinishStatus.Published : FinishStatus.Unchanged), "PC " + (pc + 1) + " completes verified handoff: " + finish.Message);
-                if (pc == 0) Check(store.Generations.Read(1).Manifest.Medal == Versions with { App = "2644.591.1" },
-                    "retry after a reviewed update publishes its freshly detected build versions");
+                if (pc == 0) Check(store.Generations.Read(1).Manifest.Medal == new MedalVersions("9999.1.2", "9999.2.2"),
+                    "retry after a routine update publishes its freshly detected app and recorder versions");
                 Check(store.ReadJournal().State == OwnershipState.Clean, "PC " + (pc + 1) + " releases ownership only after verified copies");
                 Check(!Directory.Exists(config.SessionCacheDirectory(launch.Session!)), "PC " + (pc + 1) + " clears only its finished session cache");
                 Check(File.Exists(config.MountedCapture.Append("new.mp4").Display), "PC " + (pc + 1) + " retains the persistent local collection");

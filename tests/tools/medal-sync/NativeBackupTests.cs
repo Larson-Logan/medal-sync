@@ -14,15 +14,45 @@ public sealed class NativeBackupTests : IDisposable
     [Theory]
     [InlineData("2643.583.1", "2643.3040.1", true)]
     [InlineData("2644.591.1", "2643.3040.1", true)]
-    [InlineData("2644.591.2", "2643.3040.1", false)]
-    [InlineData("2644.591.1", "2643.3040.2", false)]
+    [InlineData("2644.604.1", "2644.3209.1", true)]
+    [InlineData("2644.591.2", "2643.3040.1", true)]
+    [InlineData("2644.591.1", "2643.3040.2", true)]
+    [InlineData("2644.604.1", "2643.3040.1", true)]
+    [InlineData("2644.591.1", "2644.3209.1", true)]
+    [InlineData("2644.604.2", "2644.3209.1", true)]
+    [InlineData("2644.604.1", "2644.3209.2", true)]
+    [InlineData("9999.1.1", "9999.2.2", true)]
+    [InlineData("future", "2644.3209.1", false)]
+    [InlineData("1.2", "2644.3209.1", false)]
+    [InlineData("2644.604.1", "", false)]
+    [InlineData("2644.604.1", "1.2.3+unreadable", false)]
     [InlineData(null, "2643.3040.1", false)]
     [InlineData("2644.591.1", null, false)]
-    public void NativeBackupCompatibilityAcceptsOnlyReviewedExactBuildPairs(string? app, string? recorder, bool supported)
+    [InlineData("2644.604.1", null, false)]
+    [InlineData(null, "2644.3209.1", false)]
+    public void UpdateMetadataMustBeReadableButNeedNotMatchAReviewedPair(string? app, string? recorder, bool supported)
     {
         var versions = new MedalVersions(app, recorder);
-        if (supported) Assert.Null(Record.Exception(() => NativeBackupBuilds.RequireSupported(versions)));
-        else Assert.Throws<IncompatibleLibraryException>(() => NativeBackupBuilds.RequireSupported(versions));
+        if (supported) Assert.Null(Record.Exception(() => NativeBackupBuilds.RequireVersionMetadata(versions)));
+        else Assert.Throws<IncompatibleLibraryException>(() => NativeBackupBuilds.RequireVersionMetadata(versions));
+    }
+
+    [Fact]
+    public void AnAutomaticallyAdmittedBuildStillRefusesAnUnsupportedNativeBackupWithoutChangingEitherLibrary()
+    {
+        NativeBackupBuilds.RequireVersionMetadata(new("9999.1.1", "9999.2.2"));
+        string local = _fixture.CreateLibrary("local"), backup = _fixture.CreateLibrary("backup");
+        using (var db = MedalFixture.Open(backup))
+        {
+            MedalFixture.Execute(db, "PRAGMA journal_mode=DELETE");
+            MedalFixture.Execute(db, "PRAGMA user_version=5");
+            MedalFixture.Execute(db, "PRAGMA application_id=222");
+        }
+        string beforeLocal = Hashing.Sha256File(local), beforeBackup = Hashing.Sha256File(backup);
+        Assert.Throws<IncompatibleLibraryException>(() => NativeBackupIdentity.Align(local, backup, _fixture.PathFor("backups"), MedalFixture.AccountId));
+        Assert.Equal(beforeLocal, Hashing.Sha256File(local));
+        Assert.Equal(beforeBackup, Hashing.Sha256File(backup));
+        Assert.Empty(DatabaseBackup.List(_fixture.PathFor("backups"), MedalFixture.AccountId));
     }
 
     [Fact]

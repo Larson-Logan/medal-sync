@@ -171,8 +171,22 @@ public sealed class DiagnosticSummaryTests : IDisposable
         Assert.Contains("cloud-copy-pending", report["refusals"]!.AsArray().Select(r => (string)r!));
     }
 
+    [Theory]
+    [InlineData("2644.604.1", "2644.3209.1", true)]
+    [InlineData("2644.604.1", "2643.3040.1", false)]
+    public void TheBuildReviewIsReportedForTheExactAppAndRecorderPair(string app, string recorder, bool reviewed)
+    {
+        var report = Parse(DiagnosticSummary.Build(Full() with
+        {
+            Compatibility = new MedalCompatibilityReport(new(app, recorder), true, 4, 3, new string('a', 64), true, []),
+        }));
+
+        Assert.Equal(reviewed, (bool)report["medal"]!["buildReviewed"]!);
+        Assert.DoesNotContain("medal-build-unreviewed", report["refusals"]!.AsArray().Select(r => (string)r!));
+    }
+
     [Fact]
-    public void AnUnsupportedSchemaAndUnreviewedBuildAreRefusalCodes()
+    public void AnUnsupportedSchemaIsRefusedIndependentlyOfBuildReview()
     {
         var report = Parse(DiagnosticSummary.Build(Full() with
         {
@@ -185,7 +199,7 @@ public sealed class DiagnosticSummaryTests : IDisposable
         }));
 
         Assert.Equal(
-            ["cache-space-insufficient", "cloud-copy-pending", "medal-account-mismatch", "medal-build-unreviewed", "medal-executable-missing",
+            ["cache-space-insufficient", "cloud-copy-pending", "medal-account-mismatch", "medal-executable-missing",
                 "medal-schema-unsupported", "rclone-missing", "recovery-required", "winfsp-missing"],
             report["refusals"]!.AsArray().Select(r => (string)r!));
         Assert.False((bool)report["medal"]!["schemaSupported"]!);

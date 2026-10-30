@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 1.2.0 — 2026-10-29
+
+- Retry pending optional cloud copies while Ready with
+  `replicate retry [--target NAME] [--apply]`. Preview first, then copy and
+  verify the committed generation without taking ownership. Launch, shutdown,
+  configuration changes and a changed journal cancel the retry; unfinished
+  targets stay pending. Status and the tray show progress and the result.
+- Optional incremental replication verification reads back only new or changed
+  media, checking unchanged files for presence and size. Private receipts are
+  bound to the library, source, destination, settings, credentials and each
+  file's size and modification time. Missing, damaged or failed receipts force
+  a full pass. `replication.fullVerifyEveryHandoffs` defaults to 1 (always full);
+  raise it up to 100 to opt in, with a full pass at least every
+  `fullVerifyEveryDays` (default 7, at most 30). Same-size corruption of unchanged
+  media can go undetected until the scheduled full pass. Progress and finish
+  results report planned file and byte read-back counts.
+- Routine Medal app and recorder updates no longer require an exact version
+  pair in Medal Sync. Readable version metadata, the exact supported schema,
+  stopped-process checks, native-backup integrity/sidecar/lineage checks and
+  verified handoff still apply. Individually reviewed builds are identified
+  separately in compatibility reports; schema-compatible future builds continue
+  automatically without a version-change warning. A future change to native
+  backup behavior that retains the same schema cannot be guaranteed compatible.
+- Native installations now repair Medal's overwritten per-user startup hooks
+  when the user previously opted into that integration. They retain its existing
+  launcher target; setup alone still does not opt users in or migrate shortcuts.
+- `SUPPORT.md` now asks for a `diagnostics` summary in reports. The exporter
+  was checked on a real Windows PC with an active library; its preview held no
+  paths, names or IDs and saved nothing.
 - Add `diagnostics [--out FILE]`, a privacy-safe summary to share when asking
   for help. It reports versions, schema compatibility, installation and
   storage mode, coarse free space, ownership state and refusal codes, built

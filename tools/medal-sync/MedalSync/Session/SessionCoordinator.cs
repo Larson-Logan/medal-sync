@@ -546,8 +546,8 @@ internal sealed class SessionCoordinator(
         }
     }
 
-    private static string Deferred(ReplicationResult result) => result.Deferred.Count == 0 ? ""
-        : $" Cloud copy {string.Join(", ", result.Deferred.Select(n => $"'{n}'"))} is offline or failing; primary storage is verified and the copy retries on the next finish.";
+    private static string Deferred(ReplicationResult result) => result.Summary + (result.Deferred.Count == 0 ? ""
+        : $" Cloud copy {string.Join(", ", result.Deferred.Select(n => $"'{n}'"))} is offline or failing; primary storage is verified and the copy retries on the next finish.");
 
     /// <summary>Removes the finished session's cache and login; a failure only leaves files behind.</summary>
     private string Forget(string session)

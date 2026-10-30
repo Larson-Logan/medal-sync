@@ -2,26 +2,39 @@ using MedalSync.Coordination;
 
 namespace MedalSync.Platform;
 
-/// <summary>Exact app/recorder pairs whose native database restore and lineage behavior were reviewed.</summary>
+/// <summary>Historical build reviews are informational; schema and backup checks decide admission.</summary>
 internal static class NativeBackupBuilds
 {
-    public static bool IsSupported(MedalVersions versions) =>
-        versions.Recorder == "2643.3040.1" && versions.App is "2643.583.1" or "2644.591.1";
+    // Keep the distinction between a reviewed pair and an automatically admitted
+    // update visible in diagnostics. Version numbers are not a schema contract.
+    private static readonly HashSet<(string App, string Recorder)> Reviewed =
+    [
+        ("2643.583.1", "2643.3040.1"),
+        ("2644.591.1", "2643.3040.1"),
+        ("2644.604.1", "2644.3209.1"),
+    ];
 
-    public static void RequireSupported(MedalVersions versions)
+    public static bool IsReviewed(MedalVersions versions) =>
+        versions.App is { } app && versions.Recorder is { } recorder && Reviewed.Contains((app, recorder));
+
+    public static bool HasReadableVersions(MedalVersions versions) =>
+        Readable(versions.App) && Readable(versions.Recorder);
+
+    private static bool Readable(string? value) =>
+        value is not null && value.Length <= 64 && value.All(c => char.IsAsciiDigit(c) || c == '.')
+        && Version.TryParse(value, out var version) && version.Build >= 0;
+
+    public static void RequireVersionMetadata(MedalVersions versions)
     {
-        // Both app builds restore a nonzero, mismatched application_id backup in full.
-        // Matching lineage suppresses that restore; ClipFolders is read before database open.
-        if (!IsSupported(versions))
-            throw new IncompatibleLibraryException($"Medal app {versions.App ?? "unknown"} / recorder {versions.Recorder ?? "unknown"} needs native backup compatibility verification. "
-                + "Run 'medal-sync compatibility --json' for details and check for a Medal Sync update. Keep unfinished sessions and caches on this PC.");
+        if (!HasReadableVersions(versions))
+            throw new IncompatibleLibraryException("Medal's app or recorder version metadata is missing or unreadable. Let its update finish, then retry through Medal Sync. Keep unfinished sessions and caches on this PC.");
     }
 
     public static void RequireCompatible(MedalVersions shared, MedalVersions local)
     {
-        // These reviewed builds share the same backup behavior. The library
-        // reconciler separately requires an identical supported schema.
-        RequireSupported(shared);
-        RequireSupported(local);
+        // Enrollment separately compares the exact supported schemas. A version
+        // difference by itself does not mean the two library formats differ.
+        RequireVersionMetadata(shared);
+        RequireVersionMetadata(local);
     }
 }

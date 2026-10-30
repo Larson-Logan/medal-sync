@@ -18,6 +18,64 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
     private readonly IFileProbe _probe = new FileSystemProbe();
     private readonly IAssetChecker _primary = primary ?? PrimaryStorage.Checker(config, state);
     private readonly Func<string, VolumeInfo?> _volumes = volumes ?? StorageVolume.Describe;
+    private int _readBackFiles;
+    private long _readBackBytes;
+    private int _verifiedDestinations;
+
+    private ReplicationResult Result(IReadOnlyList<string> deferred) => new(deferred)
+    { ReadBackFiles = _readBackFiles, ReadBackBytes = _readBackBytes, VerifiedDestinations = _verifiedDestinations };
+
+    /// <summary>Copies only pending optional targets of a committed snapshot. The caller guards Ready and its exact generation.</summary>
+    public ReplicationResult RetryPending(LibrarySnapshot snapshot, string? targetName = null)
+    {
+        _readBackFiles = 0; _readBackBytes = 0; _verifiedDestinations = 0;
+        var replication = config.Replication ?? throw new UnsafeOperationException("No cloud copies are configured.");
+        var pending = Pending(state, config.LibraryId).Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var targets = replication.Targets.Where(t => !t.Required && pending.Contains(t.Name)
+            && (targetName is null || t.Name.Equals(targetName, StringComparison.OrdinalIgnoreCase))).ToArray();
+        if (targetName is not null && targets.Length == 0)
+            throw new UnsafeOperationException("The named target is not a pending optional cloud copy.");
+        if (targets.Length == 0) return ReplicationResult.None;
+        requireIdle();
+        var source = config.PersistentMediaRoot is null ? config.ServerCapture : config.MountedCapture;
+        RequireMarker(source);
+        var files = ReplicationPlan.Files(snapshot, config.Capture, source, _probe);
+        List<string> deferred = [];
+        foreach (var target in targets)
+        {
+            string destination = ReplicationPlan.Destination(target, config.LibraryId);
+            bool complete = false;
+            try
+            {
+                requireIdle();
+                VerifyDestination(snapshot, source.Display, destination, files, true,
+                    replication.ConflictPolicy == ReplicaConflictPolicy.Version, target.Name);
+                requireIdle();
+                RequireMarker(source);
+                pending.Remove(target.Name);
+                RecordPending([.. pending], DateTimeOffset.UtcNow, target.Name);
+                complete = true;
+            }
+            catch (RcloneFailedException)
+            {
+                requireIdle();
+                deferred.Add(target.Name);
+                RecordPending([.. pending], DateTimeOffset.UtcNow, target.Name);
+            }
+            finally
+            {
+                if (!complete)
+                {
+                    pending.Add(target.Name);
+                    new ReplicationVerification(config, state, source.Display, destination, snapshot.Digest(), files, DateTimeOffset.UtcNow).Invalidate();
+                    // Cancellation keeps the pending target and records that this attempt did not finish.
+                    RecordPending([.. pending], DateTimeOffset.UtcNow, target.Name);
+                }
+            }
+        }
+        requireIdle();
+        return Result(deferred);
+    }
 
     public string? Prepare(LibrarySnapshot snapshot)
     {
@@ -71,6 +129,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
 
     public ReplicationResult Publish(LibrarySnapshot snapshot)
     {
+        _readBackFiles = 0; _readBackBytes = 0; _verifiedDestinations = 0;
         if (config.Replication is not { } replication) return ReplicationResult.None;
         requireIdle();
         RequirePrimary();
@@ -83,7 +142,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         {
             try
             {
-                CopyAndCheck(source.Display, config.PrimaryCapture, files, credentials: config.PrimaryIsRclone, versionConflicts: version, replica: "Primary storage");
+                VerifyDestination(snapshot, source.Display, config.PrimaryCapture, files, config.PrimaryIsRclone, version, "Primary storage");
             }
             catch (RcloneFailedException ex)
             {
@@ -101,7 +160,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             requireIdle();
             try
             {
-                CopyAndCheck(source.Display, ReplicationPlan.Destination(target, config.LibraryId), files, credentials: true, versionConflicts: version, replica: target.Name);
+                VerifyDestination(snapshot, source.Display, ReplicationPlan.Destination(target, config.LibraryId), files, true, version, target.Name);
                 verified.Add(target.Name);
                 pending.Remove(target.Name);
             }
@@ -130,7 +189,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
             targets = verified.ToArray(), deferred = deferred.ToArray(),
         }));
         RecordPending([.. pending], DateTimeOffset.UtcNow);
-        return new ReplicationResult(deferred);
+        return Result(deferred);
     }
 
     /// <summary>Optional replicas waiting for a retry; empty when every copy is verified.</summary>
@@ -149,10 +208,11 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { return []; }
     }
 
-    private void RecordPending(IReadOnlyList<string> deferred, DateTimeOffset now)
+    private void RecordPending(IReadOnlyList<string> deferred, DateTimeOffset now, string? attempted = null)
     {
         var previous = Pending(state, config.LibraryId).ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
-        var targets = deferred.Select(name => new PendingReplica(name, previous.TryGetValue(name, out var old) ? old.Since : now, now)).ToArray();
+        var targets = deferred.Select(name => new PendingReplica(name, previous.TryGetValue(name, out var old) ? old.Since : now,
+            attempted is null || name.Equals(attempted, StringComparison.OrdinalIgnoreCase) || old is null ? now : old.LastAttempt)).ToArray();
         string path = PendingPath(state);
         if (targets.Length == 0) { File.Delete(path); return; }
         AtomicFile.Replace(path, Json.Serialize(new PendingReplicas(1, config.LibraryId, targets)));
@@ -217,7 +277,23 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         catch (Exception) { /* UI telemetry cannot interrupt required copies. */ }
     }
 
-    private void CopyAndCheck(string source, string target, IReadOnlyList<string> files, bool credentials, bool versionConflicts = false, string? replica = null)
+    private void VerifyDestination(LibrarySnapshot snapshot, string source, string target, IReadOnlyList<string> files,
+        bool credentials, bool versionConflicts, string replica)
+    {
+        var verification = new ReplicationVerification(config, state, source, target, snapshot.Digest(), files, DateTimeOffset.UtcNow);
+        string detail = "";
+        verification.Run((delta, _) => CopyAndCheck(source, target, delta, credentials, versionConflicts, replica, detail: detail),
+            unchanged => CopyAndCheck(source, target, unchanged, credentials, replica: replica, sizeOnly: true, detail: detail),
+            (count, bytes, full) =>
+            {
+                _readBackFiles += count; _readBackBytes += bytes;
+                detail = $"{(full ? "Full" : "Incremental")} verification: reading back {count} file(s), {bytes} bytes; checking remaining file sizes.";
+                Report(SessionPhase.Verifying, detail, replica);
+            }, requireIdle);
+        _verifiedDestinations++;
+    }
+
+    private void CopyAndCheck(string source, string target, IReadOnlyList<string> files, bool credentials, bool versionConflicts = false, string? replica = null, bool sizeOnly = false, string? detail = null)
     {
         requireIdle();
         if (files.Count == 0) return;
@@ -245,14 +321,15 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
                 ? localTarget.Append(".medal-sync-history", attempt).Display : target.TrimEnd('/') + "/.medal-sync-history/" + attempt;
             if (versionDirectory is not null && WindowsPath.TryParse(versionDirectory, out var localHistory, out _))
                 RequireOrdinaryDirectory(localHistory);
-            foreach (string command in new[] { "copy", "check" })
+            foreach (string command in sizeOnly ? new[] { "check" } : new[] { "copy", "check" })
             {
                 requireIdle();
                 try { progress?.Invoke(new(command == "copy" ? SessionPhase.Uploading : SessionPhase.Verifying,
-                    "Copying and verifying clips. Keep this PC on and wait for Ready.", Replica: replica)); }
+                    detail is null ? "Copying and verifying clips. Keep this PC on and wait for Ready."
+                        : (command == "copy" ? "Copying selected clips. " : "Checking selected clips. ") + detail, Replica: replica)); }
                 catch (Exception) { /* UI telemetry cannot interrupt required copies. */ }
                 var arguments = ReplicationPlan.Arguments(command, source, target, list, configFile,
-                    credentials ? config.Replication?.BandwidthLimitMiB : null, versionDirectory);
+                    credentials ? config.Replication?.BandwidthLimitMiB : null, versionDirectory, sizeOnly);
                 if (execute is not null) execute(arguments); else Execute(arguments);
             }
         }

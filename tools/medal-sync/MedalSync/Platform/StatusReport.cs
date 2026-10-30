@@ -35,6 +35,8 @@ internal sealed record StatusReport(
 {
     public const int CurrentFormat = 1;
 
+    public ReplicaRetryReport? ReplicaRetry { get; init; }
+
     public const string Reachable = "reachable";
 
     public const string Unreachable = "unreachable";
