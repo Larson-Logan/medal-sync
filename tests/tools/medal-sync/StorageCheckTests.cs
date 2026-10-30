@@ -47,7 +47,8 @@ public sealed class StorageCheckTests : IDisposable
         Assert.All(calls, args =>
         {
             Assert.Contains(args[0], new[] { "cat", "lsf" });
-            Assert.Contains("--ask-password=false", args);
+            // Prompt disabling is enforced by RcloneRunner at the process boundary.
+            Assert.DoesNotContain("--ask-password=false", args);
             Assert.Equal(Credentials, args[args.ToList().IndexOf("--config") + 1]);
         });
         Assert.Contains(calls, args => args[0] == "cat" && args[1] == "onedrive:MedalSync/Clips/.medal-sync-library");

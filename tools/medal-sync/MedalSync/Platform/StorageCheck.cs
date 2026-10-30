@@ -190,7 +190,7 @@ internal static class StorageCheck
     }
 
     private static IReadOnlyList<string> Common(string command, string credentials, params string[] rest) =>
-        [command, .. rest, "--config", credentials, "--ask-password=false",
+        [command, .. rest, "--config", credentials,
             "--retries", "1", "--low-level-retries", "1", "--contimeout", "10s", "--timeout", "20s"];
 
     private static (StorageCheckResult, string) CheckPrimary(MedalSyncConfig config, string destination, string credentials,

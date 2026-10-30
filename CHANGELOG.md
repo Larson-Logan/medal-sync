@@ -22,7 +22,7 @@
   ranges instead of damage. Update every PC to 1.3.0 before applying.
 - Fixed: invalidating a cloud copy's verification receipt no longer fails when
   no receipt was ever written.
-- Prevent rclone commands from waiting on an invisible password prompt. The
+- Fixed: rclone commands no longer wait on an invisible password prompt. The
   runner disables prompts and closes stdin so encrypted configs fail promptly
   through the existing configuration guidance.
 

@@ -113,8 +113,18 @@ public sealed class PrimaryStorageTests : IDisposable
     [Fact]
     public void RcloneOutputIsBoundedEvenWithoutNewlines()
     {
-        Assert.Throws<RcloneFailedException>(() => new RcloneRunner("pwsh").Run(
-            ["-NoProfile", "-NonInteractive", "-Command", "[Console]::Out.Write(('x' * 17000000))"], TimeSpan.FromSeconds(30), captureOutput: true));
+        string scriptPath = Path.Combine(Path.GetTempPath(),
+            "medal-sync-rclone-output-" + Guid.NewGuid().ToString("N") + ".ps1");
+        File.WriteAllText(scriptPath, "[Console]::Out.Write(('x' * 17000000))");
+        try
+        {
+            Assert.Throws<RcloneFailedException>(() => new RcloneRunner("pwsh").Run(
+                ["-NoProfile", "-NonInteractive", "-File", scriptPath], TimeSpan.FromSeconds(30), captureOutput: true));
+        }
+        finally
+        {
+            if (File.Exists(scriptPath)) File.Delete(scriptPath);
+        }
     }
 
     [Fact]

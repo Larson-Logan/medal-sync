@@ -13,18 +13,13 @@ internal sealed class RcloneRunner(string rclonePath)
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
         foreach (string key in start.Environment.Keys.Where(k => k.StartsWith("RCLONE_", StringComparison.OrdinalIgnoreCase)).ToArray())
             start.Environment.Remove(key);
-        for (int i = 0; i < arguments.Count; i++)
-        {
-            string argument = arguments[i];
-            if (argument.Equals("--ask-password", StringComparison.OrdinalIgnoreCase))
-            {
-                if (i + 1 < arguments.Count && bool.TryParse(arguments[i + 1], out _)) i++;
-                continue;
-            }
-            if (argument.StartsWith("--ask-password=", StringComparison.OrdinalIgnoreCase)) continue;
-            start.ArgumentList.Add(argument);
-        }
-        start.ArgumentList.Add("--ask-password=false");
+        foreach (string argument in arguments) start.ArgumentList.Add(argument);
+        // Keep the forced value last, but before the option terminator so it cannot become a path.
+        int separator = start.ArgumentList.IndexOf("--");
+        if (separator < 0)
+            start.ArgumentList.Add("--ask-password=false");
+        else
+            start.ArgumentList.Insert(separator, "--ask-password=false");
         Process? child;
         try { child = Process.Start(start); }
         catch (System.ComponentModel.Win32Exception ex) { throw new RcloneFailedException("Cannot start rclone. Check rclonePath and retry.", inner: ex); }
