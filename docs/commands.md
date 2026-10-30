@@ -9,6 +9,8 @@ Medal Sync installs two programs in its `bin` folder:
 
 The examples assume `$cli` names `medal-sync.exe` in the folder you chose in
 setup, as in [getting started](getting-started.md#plan-configuration-before-using-live-data).
+If you selected **Add medal-sync to PATH** in setup, you can type `medal-sync`
+in any terminal opened after setup instead.
 
 ## How commands behave
 

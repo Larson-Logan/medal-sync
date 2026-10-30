@@ -32,7 +32,9 @@ real playback, cross-PC handoff and physical reboot need desktop acceptance.
 Follow [installation and updates](updates.md). The setup EXE offers per-user
 and all-users installation and creates Start menu shortcuts. All-users setup
 defaults to `C:\Program Files\Medal Sync`; per-user setup uses your local
-programs folder. Use the location selected in the installer for CLI commands.
+programs folder. Use the location selected in the installer for CLI commands,
+or select **Add medal-sync to PATH** in setup to type `medal-sync` in any new
+terminal.
 It bundles pinned rclone and offers the bundled WinFsp driver in all-users mode.
 It does not enroll a library, mount storage or change Medal's startup entries.
 
