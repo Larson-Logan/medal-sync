@@ -81,6 +81,8 @@ try {
             Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.00') 'Local builds must use counter 00.'
             $env:MedalReleaseRevision = '07'
             Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.07') 'Release builds must use the workflow counter.'
+            $env:MedalReleaseRevision = 'none'
+            Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2') 'The bridge release must use three parts.'
             $env:MedalReleaseRevision = '7'
             Refuses { Get-MedalBuildVersion $props } '*two or more digits*'
         } finally { $env:MedalReleaseRevision = $saved }

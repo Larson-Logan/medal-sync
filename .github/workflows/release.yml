@@ -8,6 +8,10 @@ name: Release Medal Sync
 # Directory.Build.props; NN is a two-digit hotfix counter. A merge that raises
 # VersionPrefix starts at .00, and every later merge adds one.
 #
+# Updaters in 1.2.0 and earlier only recognize three-part tags. So the first
+# release newer than LAST_LEGACY_RELEASE is a three-part bridge (for example
+# v1.3.0) whose updater understands both formats; its hotfixes continue at .01.
+#
 # Publishing creates the v* tag as github-actions[bot], so the release tag
 # ruleset lets GitHub Actions bypass it (see .github/rulesets/release-tags.json).
 on:
@@ -22,6 +26,8 @@ concurrency:
   group: release
   cancel-in-progress: false
 env:
+  # Newest release whose updater only understands vMAJOR.MINOR.PATCH tags.
+  LAST_LEGACY_RELEASE: 1.2.0
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
   NUGET_XMLDOC_MODE: skip
@@ -56,6 +62,15 @@ jobs:
             exit 1
           fi
 
+          # Only the tip of main is released. A rerun for an older commit would
+          # otherwise publish older code under a newer number than a later fix.
+          head="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          if [ "$head" != "$SHA" ]; then
+            echo "release=false" >>"$GITHUB_OUTPUT"
+            echo "main has moved on to $head, which is released instead, so nothing was built." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           # A rerun for a commit that already has a release, draft or published, does nothing.
           existing="$(gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.target_commitish == env.SHA) | .html_url')"
           if [ -n "$existing" ]; then
@@ -64,12 +79,13 @@ jobs:
             exit 0
           fi
 
-          # Highest hotfix counter already used by a release or tag for this VersionPrefix.
+          # Highest hotfix counter already used by a release or tag for this
+          # VersionPrefix. A three-part bridge release counts as 00.
           export PREFIX="$prefix"
           used="$( {
               gh api --paginate "repos/$REPO/releases" --jq '.[].tag_name'
               gh api --paginate "repos/$REPO/git/matching-refs/tags/v$prefix." --jq '.[].ref | ltrimstr("refs/tags/")'
-            } | awk -v p="v$PREFIX." 'index($0, p) == 1 { n = substr($0, length(p) + 1); if (n ~ /^[0-9][0-9]+$/) print n + 0 }' \
+            } | awk -v p="v$PREFIX." '$0 == substr(p, 1, length(p) - 1) { print 0 } index($0, p) == 1 { n = substr($0, length(p) + 1); if (n ~ /^[0-9][0-9]+$/) print n + 0 }' \
             | sort -n | tail -n 1)"
           parent="$(gh api "repos/$REPO/commits/$SHA" --jq '.parents[0].sha')"
           previous="$(version_at "$parent")"
@@ -86,6 +102,17 @@ jobs:
             revision="$(printf '%02d' $((used + 1)))"
           fi
           version="$prefix.$revision"
+          if [ "$revision" = 00 ]; then
+            # No release is newer than LAST_LEGACY_RELEASE yet: publish the bridge.
+            newest="$( { echo "$LAST_LEGACY_RELEASE"
+                gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.draft == false) | .tag_name | ltrimstr("v")'
+              } | sort -V | tail -n 1)"
+            if [ "$newest" = "$LAST_LEGACY_RELEASE" ]; then
+              revision=none
+              version="$prefix"
+              echo "Older updaters only find three-part tags, so this bridge release is v$version; hotfixes continue at .01." >>"$GITHUB_STEP_SUMMARY"
+            fi
+          fi
           {
             echo "version=$version"
             echo "revision=$revision"
@@ -94,7 +121,7 @@ jobs:
           echo "Releasing $version (VersionPrefix $prefix, hotfix $revision)." >>"$GITHUB_STEP_SUMMARY"
 
           # The first release of a version closes its milestone, so list anything still open in it now.
-          if [ "$revision" = 00 ]; then
+          if [ "$revision" = 00 ] || [ "$revision" = none ]; then
             milestone="$(gh api --paginate "repos/$REPO/milestones?state=open&per_page=100" --jq '.[] | select(.title == env.PREFIX) | .number')"
             if [ -n "$milestone" ]; then
               remaining="$(gh api --paginate "repos/$REPO/issues?milestone=$milestone&state=open&per_page=100" --jq '.[] | "- #\(.number) \(.title)"')"
@@ -193,9 +220,10 @@ jobs:
   milestone:
     name: Close the released milestone
     needs: [plan, release]
-    # Only the first release of a version (.00) finishes its milestone. A release
-    # published by this workflow does not start other workflows, so call it here.
-    if: needs.plan.outputs.revision == '00'
+    # Only the first release of a version (.00 or the bridge) finishes its
+    # milestone. A release published by this workflow does not start other
+    # workflows, so call it here.
+    if: needs.plan.outputs.revision == '00' || needs.plan.outputs.revision == 'none'
     permissions:
       contents: read
       issues: write

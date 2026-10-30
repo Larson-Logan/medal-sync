@@ -19,7 +19,10 @@ for example `v1.3.0.02`. Both programs, setup, the portable ZIP and
   later merge adds one (`.01`, `.02`, and so on; after `.99` comes `.100`).
   Local builds use `.00`.
 
-Releases before 1.3.0.00 had no counter, for example `v1.2.0`. See the
+Releases up to 1.2.0 had no counter, and their update checks only recognize
+three-part tags. So the first release after 1.2.0 is a one-time three-part
+bridge, for example `v1.3.0`, built with the updater that understands both
+formats; it counts as `.00`, and its hotfixes continue at `.01`. See the
 [release process](releases.md) for how a merge becomes a release.
 
 | Part | Raised when |

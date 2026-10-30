@@ -115,11 +115,18 @@ the fix to `dev` and promote it without touching `VersionPrefix`; it is
 released as the next number, such as `.01`. Changing `VersionPrefix` to a
 version that already has a release is refused.
 
+The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) is a
+three-part bridge such as `v1.3.0`, because update checks in 1.2.0 and earlier
+ignore four-part tags. It counts as `.00`; installs that update to it can then
+find every later release.
+
 The [release workflow](../.github/workflows/release.yml) starts on its own for
 every push to `main`, or from **Run workflow** on the Actions tab for `main`;
 it never builds another branch. Runs never overlap, so two merges never take
-the same number. It does nothing when a release, draft or published, already
-targets that commit, so a rerun never publishes twice.
+the same number. It does nothing when the commit is no longer the tip of
+`main`, so rerunning an older failed run never publishes older code under a
+newer number, or when a release, draft or published, already targets that
+commit, so a rerun never publishes twice.
 
 Otherwise it checks the version format and main ancestry, refuses a `v*` tag
 that already points at a different commit, runs tests, builds both packages
@@ -148,7 +155,7 @@ Generated notes use [.github/release.yml](../.github/release.yml) to group PRs
 by their type labels. Label merged work accurately; notes include a catch-all
 for uncategorized changes and still require maintainer review.
 
-For a `.00` release, the run summary also lists any item still open in the
+For a `.00` or bridge release, the run summary also lists any item still open in the
 version's milestone, and the workflow then closes that milestone once it is
 empty. Milestones are titled `MAJOR.MINOR.PATCH`; hotfix releases do not have
 their own.
