@@ -122,6 +122,32 @@ public sealed class StorageFailureTests : IDisposable
         Assert.True(RcloneFailure.IsTransient(timeout));
     }
 
+    [Fact]
+    public void RcloneRunnerDisablesPasswordPromptsAndClosesStandardInput()
+    {
+        string scriptPath = Path.Combine(Path.GetTempPath(), $"medal-sync-rclone-runner-{Guid.NewGuid():N}.ps1");
+        File.WriteAllText(scriptPath, """
+            $inputText = [Console]::In.ReadToEnd()
+            if ($inputText.Length -ne 0) { exit 20 }
+            $askPassword = @($args | Where-Object { $_ -like '--ask-password*' })
+            if ($askPassword.Count -ne 1 -or $askPassword[0] -cne '--ask-password=false') { exit 21 }
+            [Console]::Out.WriteLine($args -join "`n")
+            """);
+        try
+        {
+            string output = new RcloneRunner("pwsh").Run(
+                ["-NoProfile", "-NonInteractive", "-File", scriptPath, "argument", "--ask-password=true"],
+                TimeSpan.FromSeconds(10), captureOutput: true);
+
+            Assert.Equal(["argument", "--ask-password=false"],
+                output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(argument => argument.TrimEnd('\r')));
+        }
+        finally
+        {
+            if (File.Exists(scriptPath)) File.Delete(scriptPath);
+        }
+    }
+
     // Replication runs against real (synthetic) folders, so these use the Windows paths of the fixture.
 
     private sealed class Primary(Exception? failure = null) : IAssetChecker

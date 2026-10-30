@@ -3,21 +3,34 @@ using System.Text;
 
 namespace MedalSync.Platform;
 
-/// <summary>Runs one rclone command. Errors are drained, never retained: they can contain credentials or private filenames.</summary>
+/// <summary>Runs one non-interactive rclone command. Errors are drained, never retained: they can contain credentials or private filenames.</summary>
 internal sealed class RcloneRunner(string rclonePath)
 {
     /// <summary>Returns standard output when <paramref name="captureOutput"/> is set; throws <see cref="RcloneFailedException"/> otherwise.</summary>
     public string Run(IReadOnlyList<string> arguments, TimeSpan timeout, Action? requireIdle = null, bool captureOutput = false)
     {
         var start = new ProcessStartInfo(rclonePath) { UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
         foreach (string key in start.Environment.Keys.Where(k => k.StartsWith("RCLONE_", StringComparison.OrdinalIgnoreCase)).ToArray())
             start.Environment.Remove(key);
-        foreach (string argument in arguments) start.ArgumentList.Add(argument);
+        for (int i = 0; i < arguments.Count; i++)
+        {
+            string argument = arguments[i];
+            if (argument.Equals("--ask-password", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < arguments.Count && bool.TryParse(arguments[i + 1], out _)) i++;
+                continue;
+            }
+            if (argument.StartsWith("--ask-password=", StringComparison.OrdinalIgnoreCase)) continue;
+            start.ArgumentList.Add(argument);
+        }
+        start.ArgumentList.Add("--ask-password=false");
         Process? child;
         try { child = Process.Start(start); }
         catch (System.ComponentModel.Win32Exception ex) { throw new RcloneFailedException("Cannot start rclone. Check rclonePath and retry.", inner: ex); }
         using var process = child ?? throw new RcloneFailedException("rclone did not start.");
+        try { process.StandardInput.Close(); }
+        catch (IOException) { /* The child may have already closed its input. */ }
         var output = ReadOutput(process.StandardOutput, captureOutput);
         var errors = ScanErrors(process.StandardError);
         var elapsed = Stopwatch.StartNew();
