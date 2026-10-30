@@ -20,10 +20,13 @@ internal sealed record HistoryEntry(long Generation, long? Parent, bool? Committ
 /// followed back to generation 0; history before that point is reported as unknown, never invented.
 /// </summary>
 internal sealed record HistoryList(int Format, long Head, DateTimeOffset ObservedAt, bool Complete, string? Problem,
-    IReadOnlyList<HistoryEntry> Entries, long? NextBefore)
+    IReadOnlyList<HistoryEntry> Entries, long? NextBefore, IReadOnlyList<PrunedRange>? Pruned = null)
 {
     public const int CurrentFormat = 1;
 }
+
+/// <summary>Consecutive generation numbers that retention removed on purpose; not damage.</summary>
+internal sealed record PrunedRange(long From, long To, DateTimeOffset PrunedAt);
 
 internal sealed record HistoryCounts(
     int Added,
@@ -69,14 +72,32 @@ internal static class GenerationHistory
     {
         if (limit is < 1 or > MaxLimit) throw new ArgumentOutOfRangeException(nameof(limit));
         var (chain, complete, problem) = Ancestry(generations, head);
-        var numbers = generations.Numbered().Concat(chain.Keys).Distinct()
+        var numbers = generations.Numbered().Concat(chain.Where(c => c.Value.Problem != PrunedProblem).Select(c => c.Key)).Distinct()
             .Where(n => before is null || n < before).OrderDescending().ToArray();
         long oldestKnown = chain.Keys.Min();
         var entries = numbers.Take(limit).Select(n => chain.TryGetValue(n, out var known)
             ? Entry(n, known.Manifest, known.Problem, committed: true, n == head)
             : Uncommitted(generations, n, complete || n > oldestKnown ? false : null)).ToArray();
         return new(HistoryList.CurrentFormat, head, now, complete, problem, entries,
-            numbers.Length > limit ? entries[^1].Generation : null);
+            numbers.Length > limit ? entries[^1].Generation : null, PrunedRanges(generations));
+    }
+
+    private const string PrunedProblem = "pruned";
+
+    private static IReadOnlyList<PrunedRange> PrunedRanges(GenerationStore generations)
+    {
+        GenerationRetention? retention;
+        try { retention = generations.ReadRetention(); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException) { return []; }
+        var pruned = (retention?.Pruned ?? []).Where(p => !generations.Exists(p.Generation)).OrderBy(p => p.Generation).ToArray();
+        var ranges = new List<PrunedRange>();
+        foreach (var p in pruned)
+        {
+            if (ranges.Count > 0 && ranges[^1].To + 1 == p.Generation)
+                ranges[^1] = ranges[^1] with { To = p.Generation, PrunedAt = p.PrunedAt > ranges[^1].PrunedAt ? p.PrunedAt : ranges[^1].PrunedAt };
+            else ranges.Add(new(p.Generation, p.Generation, p.PrunedAt));
+        }
+        return ranges;
     }
 
     /// <summary>
@@ -95,6 +116,8 @@ internal static class GenerationHistory
 
     private static GenerationContent ReadForDiff(GenerationStore generations, long generation)
     {
+        if (generations.Pruned(generation) is { } pruned)
+            throw new InvalidDataException($"Generation {generation} was removed by retention on {pruned.PrunedAt:yyyy-MM-dd}, so it cannot be compared. Nothing was changed.");
         try { return generations.Read(generation); }
         catch (Exception ex) when (ex is InvalidDataException or IOException or KeyNotFoundException)
         {
@@ -107,9 +130,20 @@ internal static class GenerationHistory
         GenerationStore generations, long head)
     {
         var chain = new Dictionary<long, (GenerationManifest?, string?)>();
+        GenerationRetention? retention;
+        try { retention = generations.ReadRetention(); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException) { retention = null; }
         long? current = head;
         while (current is { } number)
         {
+            if (!generations.Exists(number) && retention?.Find(number) is not null)
+            {
+                chain[number] = (null, PrunedProblem);
+                var (known, prunedParent) = retention.ParentOf(number);
+                if (!known) return (chain, false, $"History before generation {number} was removed by retention and is not recorded; older history is unknown.");
+                current = prunedParent;
+                continue;
+            }
             if (!generations.Exists(number))
             {
                 chain[number] = (null, "missing");
@@ -132,15 +166,12 @@ internal static class GenerationHistory
 
     private static bool? IsAncestor(GenerationStore generations, long ancestor, long generation)
     {
-        long? current = generation;
         try
         {
-            while (current is { } number && number >= ancestor)
+            foreach (var (number, _) in generations.Chain(generation))
             {
                 if (number == ancestor) return true;
-                var parent = generations.ReadManifest(number).ParentGeneration;
-                if (parent >= number) return null;
-                current = parent;
+                if (number < ancestor) return false;
             }
             return false;
         }
@@ -305,6 +336,13 @@ internal static class GenerationHistory
         }
         if (list.Entries.Any(e => e.Committed == false))
             text.AppendLine("Uncommitted generations were left by an abandoned or unfinished switch. They are not part of the shared history.");
+        foreach (var range in list.Pruned ?? [])
+        {
+            if (range.From == range.To)
+                text.AppendLine(CultureInfo.InvariantCulture, $"Generation {range.From} was removed by retention on {range.PrunedAt:yyyy-MM-dd}; this is not damage.");
+            else
+                text.AppendLine(CultureInfo.InvariantCulture, $"Generations {range.From}-{range.To} were removed by retention on {range.PrunedAt:yyyy-MM-dd}; this is not damage.");
+        }
         if (!list.Complete) text.AppendLine(CultureInfo.InvariantCulture, $"History is incomplete: {list.Problem} Generations marked unknown may or may not have been committed.");
         if (list.NextBefore is { } next) text.AppendLine(CultureInfo.InvariantCulture, $"More: history list --before {next}");
         return text.ToString().TrimEnd();

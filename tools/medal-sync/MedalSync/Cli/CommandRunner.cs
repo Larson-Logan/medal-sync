@@ -18,6 +18,7 @@ internal static class CommandRunner
         "--local-copy-root", "--cloud-remote", "--rclone-config",
         "--storage-mode",
         "--replica-conflicts",
+        "--grace-days", "--history-older-than", "--older-than", "--keep", "--keep-days",
         "--account-id", "--cache-root", "--remote", "--coordination-root", "--library-id", "--capture-folder", "--rclone-path", "--sync-folder", "--sync-pattern", "--spike-config", "--server-ignore",
     };
 
@@ -41,6 +42,7 @@ internal static class CommandRunner
           history list [--json] [--limit N] [--before N]  Committed generations, newest first
           history diff --from N --to M [--json] [--out FILE]  Count changes between generations;
                                                  --out writes per-clip titles and paths to a new private file
+          replica history [--target NAME] [--json]  Past cloud-copy checks; counts only
           enroll --out DIRECTORY [--apply]       Preview/review a lossless union with this PC, then enroll it
           enroll recover --out DIRECTORY [--apply]  Recover an exact native-backup rollback after enrollment
 
@@ -56,6 +58,14 @@ internal static class CommandRunner
           init [--apply]                         Create the shared library from this PC (generation 0)
           storage init-primary [--apply]         Mark an empty primary folder or rclone remote for this library
           replicate retry [--target NAME] [--apply]  Preview/retry pending optional cloud copies while Ready
+          replica verify [--target NAME] [--apply]  Preview/read back cloud copies while Ready; never copies or deletes
+          replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]
+                                                 Review unreferenced files at an optional cloud copy
+          replica prune --in FILE --apply        Move exactly those files to the copy's trash folder
+          replica purge-trash --target NAME [--older-than D] [--apply]  Permanently delete old cloud trash
+          retention --out FILE [--keep N] [--keep-days D] [--grace-days G]
+                                                 Review old generations and recovery folders to remove
+          retention --in FILE --apply            Remove exactly what that review listed (every PC Ready)
           launch [--replace-local-library] [--wait-for-server SECONDS] [--medal-link URL]
                                                  Start Medal through medal-sync and hand off on exit
           finish [--accept-library-changes]      Finish this PC's interrupted session
@@ -141,6 +151,11 @@ internal static class CommandRunner
             "storage init-primary" => SessionCommands.InitPrimary(args, output),
             "storage check" => SessionCommands.CheckStorage(args, output),
             "replicate retry" => ReplicationCommands.Retry(args, output),
+            "replica verify" => ReplicaCommands.Verify(args, output),
+            "replica history" => ReplicaCommands.History(args, output),
+            "replica prune" => ReplicaCommands.Prune(args, output),
+            "replica purge-trash" => ReplicaCommands.PurgeTrash(args, output),
+            "retention" => RetentionCommands.Run(args, output),
             "enroll" => EnrollmentCommands.Run(args, output),
             "enroll recover" => EnrollmentCommands.Recover(args, output),
             "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown),

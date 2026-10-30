@@ -2,8 +2,6 @@ using System.Runtime.Versioning;
 using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Platform;
-using MedalSync.Session;
-using MedalSync.Util;
 
 namespace MedalSync.Cli;
 
@@ -17,37 +15,13 @@ internal static class ReplicationCommands
         args.RequireAllUsed();
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
-        string fingerprint = Hashing.Sha256File(state.ConfigPath);
         var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
-        using var interlock = apply ? ReplicaRetryInterlock.Retry() : null;
-        var shutdown = new SessionShutdown(new SystemClock());
-        using var ending = apply ? new WindowsSessionEnd(shutdown, _ => { }, setOrder: false) : null;
-        using var cancellation = new CancellationTokenSource();
-        ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; cancellation.Cancel(); };
-        if (apply) Console.CancelKeyPress += cancel;
+        using var operation = new ReadyOperation(state, config, apply, "Cloud retry", "unfinished copies remain pending",
+            "Quit Medal before retrying pending cloud copies.", "Configuration changed; preview the cloud retry again.");
         ReplicaRetryStatus? telemetry = null;
         try
         {
-            void Guard()
-            {
-                cancellation.Token.ThrowIfCancellationRequested();
-                SetupMaintenance.RequireNotRunning();
-                interlock?.RequireContinuing();
-                if (shutdown.Ending) throw new OperationCanceledException("Cloud retry stopped for Windows shutdown; unfinished copies remain pending.");
-                if (SessionCommands.AnotherInstanceRunning() || Directory.Exists(config.DriveRoot.Display))
-                    throw new OperationCanceledException("Cloud retry stopped for a local library operation; unfinished copies remain pending.");
-                if (Hashing.Sha256File(state.ConfigPath) != fingerprint)
-                    throw new OperationCanceledException("Configuration changed; preview the cloud retry again.");
-                // No library database or new identity is needed; only observe whether Medal is running.
-                foreach (string name in new[] { "Medal", "MedalEncoder", "MedalRecorder" })
-                {
-                    var processes = System.Diagnostics.Process.GetProcessesByName(name);
-                    bool running = processes.Length != 0;
-                    foreach (var process in processes) process.Dispose();
-                    if (running) throw new OperationCanceledException("Quit Medal before retrying pending cloud copies.");
-                }
-            }
-            var retry = new ReadyReplicaRetry(config, state, store, Guard, progress: p => { output.WriteLine(p.NextAction); telemetry?.Report(p); });
+            var retry = new ReadyReplicaRetry(config, state, store, operation.Guard, progress: p => { output.WriteLine(p.NextAction); telemetry?.Report(p); });
             var plan = retry.Plan(target);
             output.WriteLine($"Committed generation {plan.Generation}: {plan.Targets.Count} pending cloud copy/copies{(plan.Targets.Count > 0 ? ": " + string.Join(", ", plan.Targets) : ".")}");
             if (!apply) { output.WriteLine("Preview only. Run again with --apply to copy and verify; ownership stays Ready."); return 0; }
@@ -76,8 +50,6 @@ internal static class ReplicationCommands
         finally
         {
             telemetry?.Dispose();
-            if (apply) Console.CancelKeyPress -= cancel;
-            shutdown.Complete();
         }
     }
 }

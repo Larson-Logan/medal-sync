@@ -164,6 +164,8 @@ public sealed class SpacePressureTests
         for (int i = 0; i < SpacePressureMonitor.FailuresBeforeNotice; i++) last = monitor.Check(Start + i * SpacePressureMonitor.CheckInterval);
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10));
         Assert.Contains("did not answer in time", Assert.Single(last), StringComparison.Ordinal);
+        // Under a busy test run the probe can still be queued here; wait for it to start, then require exactly one.
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref started) > 0, TimeSpan.FromSeconds(10)));
         Assert.Equal(1, Volatile.Read(ref started));
 
         // When the slow probe finally answers, its result is used.

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Check cloud copies on demand with `replica verify [--target NAME] [--apply]`.
+  It reads back every file of the committed generation while Ready, never
+  copies, replaces or deletes, and records per-target results (counts only) in
+  `replica history`. Incomplete attempts never replace the last complete result.
+  Missing or different files invalidate that target's incremental receipt and
+  queue an optional target for `replicate retry`.
+- Clean up unreferenced files and old version history at an optional cloud copy
+  with a reviewed `replica prune --target NAME --out FILE`, then
+  `replica prune --in FILE --apply`. Apply holds the journal writer lock, refuses
+  any change since the review and only moves files into `.medal-sync-trash/`;
+  `replica purge-trash` deletes old trash separately. Referenced and recent
+  files are never planned.
+- Remove old generations and this PC's old recovery folders with a reviewed
+  `retention --out FILE`, then `retention --in FILE --apply`. The head, recent
+  ancestors, recent generations, each PC's latest generation and the
+  highest-numbered folder are kept. `generations/retention.json` records what
+  was removed, so numbers are never reused and `history list` shows removed
+  ranges instead of damage. Update every PC to 1.3.0 before applying.
+- Fixed: invalidating a cloud copy's verification receipt no longer fails when
+  no receipt was ever written.
+
 ## 1.2.0 — 2026-10-29
 
 - Retry pending optional cloud copies while Ready with
