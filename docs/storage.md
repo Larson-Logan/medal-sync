@@ -410,7 +410,9 @@ differs from the review, then moves exactly the reviewed files into
 move is interrupted, apply the same review again: files already in its trash
 folder count as moved. `purge-trash` lists trash batches and, with `--apply`,
 permanently deletes batches whose files were moved at least `--older-than` days
-ago (default 7). Age counts from the move, not the review, so applying an old
+ago (default 7). It holds the same writer lock while it chooses and deletes
+batches, so a prune resumed on another PC cannot add files to a batch that is
+being purged. Age counts from the move, not the review, so applying an old
 review still gets the full wait. Apply writes an empty `.medal-sync-moved-<time>`
 marker into the batch for this; batches without one are kept. Required targets
 are refused.
