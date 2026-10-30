@@ -12,8 +12,11 @@ name: Release Medal Sync
 # release newer than LAST_LEGACY_RELEASE is a three-part bridge (for example
 # v1.3.0) whose updater understands both formats; its hotfixes continue at .01.
 #
-# Publishing creates the v* tag as github-actions[bot], so the release tag
-# ruleset lets GitHub Actions bypass it (see .github/rulesets/release-tags.json).
+# Only administrators and the medal-sync-release GitHub App may create v* tags
+# (see .github/rulesets/release-tags.json), and rulesets cannot exempt
+# github-actions[bot]. So only the publish step uses a short-lived app token;
+# everything else uses github.token. Because the app publishes the release,
+# the milestones workflow sees it and closes the version's milestone.
 on:
   push:
     branches: [main]
@@ -138,8 +141,9 @@ jobs:
     if: needs.plan.outputs.release == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
+    # The release itself is published with the app token, so github.token only reads.
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     env:
@@ -193,10 +197,18 @@ jobs:
           subject-path: |
             .medal-sync-dist/medal-sync-*-setup-win-x64.exe
             .medal-sync-dist/medal-sync-*-win-x64.zip
+      - name: Get a release app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
       - name: Publish GitHub release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          # The app may create v* tags; github.token may not.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -216,18 +228,3 @@ jobs:
           gh release edit $tag --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw "Publishing failed. The draft is still available: $url" }
           "Published Medal Sync $version`: $url" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-
-  milestone:
-    name: Close the released milestone
-    needs: [plan, release]
-    # Only the first release of a version (.00 or the bridge) finishes its
-    # milestone. A release published by this workflow does not start other
-    # workflows, so call it here.
-    if: needs.plan.outputs.revision == '00' || needs.plan.outputs.revision == 'none'
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-    uses: ./.github/workflows/milestones.yml
-    with:
-      tag: v${{ needs.plan.outputs.version }}
