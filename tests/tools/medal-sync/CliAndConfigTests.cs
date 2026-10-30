@@ -32,50 +32,65 @@ public sealed class CliAndConfigTests : IDisposable
     }
 
     [Fact]
-    public void Cli_HelpListsEveryDispatchCommand()
+    public void Cli_HelpListsEveryDispatchCommandInTheCorrectSection()
     {
         string help = Run("--help").Output;
-        string[] commands =
+        string[] sections = help.Split("Changes state (need the configuration from the runbook):", StringSplitOptions.None);
+        Assert.Equal(2, sections.Length);
+
+        string[] readOnlyCommands =
         [
             "version",
+            "setup check",
+            "config validate",
+            "inspect",
+            "compatibility",
+            "diagnostics",
             "snapshot export",
             "snapshot verify",
             "dry-run-restore",
             "audit",
-            "repair",
             "capacity",
-            "config create",
-            "config validate",
-            "setup check",
-            "inspect",
-            "compatibility",
-            "diagnostics",
+            "mount-plan",
+            "storage check",
             "status",
             "history list",
             "history diff",
-            "mount-plan",
+            "replica history",
+        ];
+        string[] stateChangingCommands =
+        [
+            "enroll",
+            "enroll recover",
+            "config create",
             "init",
             "storage init-primary",
-            "storage check",
             "replicate retry",
             "replica verify",
-            "replica history",
             "replica prune",
             "replica purge-trash",
             "retention",
-            "enroll",
-            "enroll recover",
             "launch",
             "finish",
             "recover-start",
             "refresh-media",
-            "abandon",
+            "repair",
             "relocate",
             "promote",
+            "spike start|status|stop",
         ];
 
-        Assert.All(commands, command => Assert.Contains(command, help, StringComparison.Ordinal));
-        Assert.Contains("spike start|status|stop", help, StringComparison.Ordinal);
+        static void AssertCommandsStartLines(string section, IEnumerable<string> commands)
+        {
+            string[] lines = section.Split('\n');
+            foreach (string command in commands)
+            {
+                Assert.Contains(lines, line => line.StartsWith($"  {command} ", StringComparison.Ordinal));
+            }
+        }
+
+        AssertCommandsStartLines(sections[0], readOnlyCommands);
+        AssertCommandsStartLines(sections[1], stateChangingCommands);
     }
 
     [Fact]
