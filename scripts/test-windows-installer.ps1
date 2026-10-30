@@ -39,6 +39,13 @@ function Get-BinPathCount {
         try { [IO.Path]::GetFullPath($_.Trim().Trim('"')).TrimEnd('\') -ieq $bin.TrimEnd('\') } catch { $false }
     }).Count
 }
+function Set-UserPathEntries([string[]]$Entries) {
+    $environment = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    try {
+        if (-not $Entries) { $environment.DeleteValue('Path', $false) }
+        else { $environment.SetValue('Path', ($Entries -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString) }
+    } finally { $environment.Dispose() }
+}
 $originalPath = Get-UserPathEntries
 if ((Get-BinPathCount) -ne 0) { throw 'The test program folder is already on PATH.' }
 if ((Run-Setup @('/MERGETASKS="addtopath"')) -ne 0) { throw 'Native fresh install failed. Inspect the setup log.' }
@@ -68,6 +75,13 @@ if ((Run-Setup) -ne 0) { throw 'Native in-place upgrade/repair failed.' }
 if ((Get-BinPathCount) -ne 1) { throw 'Repair did not keep exactly one PATH entry.' }
 if ((Run-Setup @('/MERGETASKS="!addtopath"')) -ne 0) { throw 'Repair without the PATH option failed.' }
 if ((Get-BinPathCount) -ne 0) { throw 'Clearing the PATH option did not remove its entry.' }
+# An entry the user added by hand stays theirs, even after selecting and clearing the option.
+Set-UserPathEntries (@(Get-UserPathEntries) + $bin)
+if ((Run-Setup @('/MERGETASKS="addtopath"')) -ne 0) { throw 'Repair with a user PATH entry failed.' }
+if ((Get-BinPathCount) -ne 1) { throw 'Setup duplicated a user PATH entry.' }
+if ((Run-Setup @('/MERGETASKS="!addtopath"')) -ne 0) { throw 'Repair clearing the PATH option over a user entry failed.' }
+if ((Get-BinPathCount) -ne 1) { throw 'Clearing the PATH option removed an entry the user added.' }
+Set-UserPathEntries $originalPath
 if ((Run-Setup @('/MERGETASKS="addtopath"')) -ne 0) { throw 'Repair with the PATH option failed.' }
 if ((Get-BinPathCount) -ne 1) { throw 'Selecting the PATH option again did not restore its entry.' }
 $mutex = [Threading.Mutex]::new($false, 'Local\LarsonServer.MedalSync')

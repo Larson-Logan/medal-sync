@@ -123,7 +123,8 @@ Filename: "{app}\bin\medal-sync-launch.exe"; Description: "Open Medal Sync"; Fla
 var
   CheckNumber: Integer;
   StoragePage: TOutputMsgWizardPage;
-  PathTaskWasSelected: Boolean;
+  { Whether setup, rather than the user, added the PATH entry: before and after this run. }
+  PathWasOwned, PathOwnedAfterInstall: Boolean;
 
 { PATH lives in a different key for all-users and per-user installations. }
 function PathRoot(): Integer;
@@ -176,15 +177,23 @@ begin
 end;
 
 { Appends the bin folder, so programs already on PATH (such as another rclone) keep priority. }
-procedure AddProgramsToPath();
+function ProgramsOnPath(): Boolean;
 var
-  Path, Directory, Unused: String;
+  Path, Unused: String;
   Found: Boolean;
 begin
-  Directory := ExpandConstant('{app}\bin');
   if not RegQueryStringValue(PathRoot(), PathKey(), 'Path', Path) then Path := '';
-  Unused := PathWithout(Path, Directory, Found);
-  if Found then exit;
+  Unused := PathWithout(Path, ExpandConstant('{app}\bin'), Found);
+  Result := Found;
+end;
+
+procedure AddProgramsToPath();
+var
+  Path, Directory: String;
+begin
+  Directory := ExpandConstant('{app}\bin');
+  if ProgramsOnPath() then exit;
+  if not RegQueryStringValue(PathRoot(), PathKey(), 'Path', Path) then Path := '';
   if (Path <> '') and (Path[Length(Path)] <> ';') then Path := Path + ';';
   if not RegWriteExpandStringValue(PathRoot(), PathKey(), 'Path', Path + Directory) then
     Log('Could not add ' + Directory + ' to PATH.');
@@ -207,19 +216,22 @@ end;
 
 procedure RegisterPreviousData(PreviousDataKey: Integer);
 begin
-  if WizardIsTaskSelected('addtopath') then
-    SetPreviousData(PreviousDataKey, 'AddToPath', 'yes')
+  if PathOwnedAfterInstall then
+    SetPreviousData(PreviousDataKey, 'PathEntryOwned', 'yes')
   else
-    SetPreviousData(PreviousDataKey, 'AddToPath', 'no');
+    SetPreviousData(PreviousDataKey, 'PathEntryOwned', 'no');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  { Decide ownership before setup records it; an entry the user already had stays theirs. }
+  if CurStep = ssInstall then
+    PathOwnedAfterInstall := WizardIsTaskSelected('addtopath') and (PathWasOwned or (not ProgramsOnPath()));
   if CurStep = ssPostInstall then begin
     if WizardIsTaskSelected('addtopath') then
       AddProgramsToPath()
     { Only undo an entry an earlier setup added, never one the user added by hand. }
-    else if PathTaskWasSelected then
+    else if PathWasOwned then
       RemoveProgramsFromPath();
   end;
 end;
@@ -422,7 +434,7 @@ var
   WinFspDirectory, DependencyStatus: String;
 begin
   { Read before setup rewrites its registration with this run's choices. }
-  PathTaskWasSelected := GetPreviousData('AddToPath', '') = 'yes';
+  PathWasOwned := GetPreviousData('PathEntryOwned', '') = 'yes';
   if RegQueryStringValue(HKLM32, 'SOFTWARE\WinFsp', 'InstallDir', WinFspDirectory) and
      FileExists(AddBackslash(WinFspDirectory) + 'bin\winfsp-x64.dll') then
     DependencyStatus := 'WinFsp is installed.'
