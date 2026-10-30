@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.2.0 — 2026-10-29
+
+- Retry pending optional cloud copies while Ready with
+  `replicate retry [--target NAME] [--apply]`. Preview first, then copy and
+  verify the committed generation without taking ownership. Launch, shutdown,
+  configuration changes and a changed journal cancel the retry; unfinished
+  targets stay pending. Status and the tray show progress and the result.
+- Optional incremental replication verification reads back only new or changed
+  media, checking unchanged files for presence and size. Private receipts are
+  bound to the library, source, destination, settings, credentials and each
+  file's size and modification time. Missing, damaged or failed receipts force
+  a full pass. `replication.fullVerifyEveryHandoffs` defaults to 1 (always full);
+  raise it up to 100 to opt in, with a full pass at least every
+  `fullVerifyEveryDays` (default 7, at most 30). Same-size corruption of unchanged
+  media can go undetected until the scheduled full pass. Progress and finish
+  results report planned file and byte read-back counts.
 - Routine Medal app and recorder updates no longer require an exact version
   pair in Medal Sync. Readable version metadata, the exact supported schema,
   stopped-process checks, native-backup integrity/sidecar/lineage checks and

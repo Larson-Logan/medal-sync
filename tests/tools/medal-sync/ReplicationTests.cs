@@ -1,4 +1,5 @@
 using MedalSync.Config;
+using MedalSync.Coordination;
 using MedalSync.Library;
 using MedalSync.Platform;
 using MedalSync.Session;
@@ -229,8 +230,10 @@ public sealed class ReplicationTests : IDisposable
         Assert.True(File.Exists(Path.Combine(state.Root, "replication", "last-verified.json")));
         Assert.True(File.Exists(Path.Combine(config.MountedCapture.Display, "clip.mp4")));
         Assert.Empty(Directory.GetFiles(state.Root, "replication-*.txt"));
-        Assert.Equal(new[] { SessionPhase.Uploading, SessionPhase.Verifying, SessionPhase.Uploading, SessionPhase.Verifying }, progress.Select(p => p.Phase));
-        Assert.Equal(new[] { "Persistent local media", "Persistent local media", "Primary storage", "Primary storage" }, progress.Select(p => p.Replica));
+        Assert.Contains(progress, p => p.NextAction.Contains("reading back 1 file(s)"));
+        var transfers = progress.Where(p => !p.NextAction.StartsWith("Full verification: reading back", StringComparison.Ordinal));
+        Assert.Equal(new[] { SessionPhase.Uploading, SessionPhase.Verifying, SessionPhase.Uploading, SessionPhase.Verifying }, transfers.Select(p => p.Phase));
+        Assert.Equal(new[] { "Persistent local media", "Persistent local media", "Primary storage", "Primary storage" }, transfers.Select(p => p.Replica));
     }
 
     [Fact]
@@ -344,6 +347,128 @@ public sealed class ReplicationTests : IDisposable
         });
         Assert.Throws<IOException>(() => replication.Publish(snapshot));
         Assert.Empty(StorageReplication.Pending(state, config.LibraryId));
+    }
+
+    private CoordinationStore ReadyStore(MedalSyncConfig config, LibrarySnapshot snapshot) => CoordinationStore.Create(
+        _fixture.PathFor("ready-journal"), config.LibraryId, snapshot, new AssetManifest(1, [], []),
+        new DeviceIdentity(new string('d', 32), "Synthetic PC"), new string('e', 32), new("2643.583.1", "2643.3040.1"), DateTimeOffset.UtcNow);
+
+    private static void Defer(MedalSyncConfig config, LocalState state)
+    {
+        Directory.CreateDirectory(Path.Combine(state.Root, "replication"));
+        var then = DateTimeOffset.UtcNow.AddHours(-1);
+        AtomicFile.Replace(Path.Combine(state.Root, "replication", "pending.json"),
+            Json.Serialize(new PendingReplicas(1, config.LibraryId, [new("cloud", then, then)])));
+    }
+
+    [Fact]
+    public void ReadyRetryPreviewsWithoutWritingAndRetriesOnlyPendingOptionalTargets()
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        Defer(config, state);
+        var store = ReadyStore(config, snapshot);
+        var journal = store.ReadJournal();
+        var original = File.ReadAllBytes(Path.Combine(state.Root, "replication", "pending.json"));
+        List<IReadOnlyList<string>> commands = [];
+        var retry = new ReadyReplicaRetry(config, state, store, () => { }, commands.Add);
+        var plan = retry.Plan();
+        Assert.Equal(new[] { "cloud" }, plan.Targets);
+        Assert.Equal(original, File.ReadAllBytes(Path.Combine(state.Root, "replication", "pending.json")));
+        Assert.Empty(commands);
+        Assert.Empty(retry.Apply(plan).Deferred);
+        Assert.All(commands, c => Assert.StartsWith("onedrive:", c[2]));
+        Assert.Equal(new[] { "copy", "check" }, commands.Select(c => c[0]));
+        Assert.Empty(StorageReplication.Pending(state, config.LibraryId));
+        Assert.Equal(journal, store.ReadJournal());
+        Assert.Throws<UnsafeOperationException>(() => retry.Plan("missing"));
+    }
+
+    [Fact]
+    public void ReadyRetryLeavesOfflineTargetPendingAndLaterClearsIt()
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        Defer(config, state);
+        var first = Assert.Single(StorageReplication.Pending(state, config.LibraryId));
+        var store = ReadyStore(config, snapshot);
+        bool offline = true;
+        var retry = new ReadyReplicaRetry(config, state, store, () => { }, _ => { if (offline) throw new RcloneFailedException("offline"); });
+        Assert.Equal(new[] { "cloud" }, retry.Apply(retry.Plan()).Deferred);
+        var pending = Assert.Single(StorageReplication.Pending(state, config.LibraryId));
+        Assert.Equal(first.Since, pending.Since);
+        Assert.True(pending.LastAttempt > first.LastAttempt);
+        offline = false;
+        Assert.Empty(retry.Apply(retry.Plan()).Deferred);
+        Assert.Empty(StorageReplication.Pending(state, config.LibraryId));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReadyRetryStopsForLocalLaunchOrAnotherPcAndNeverClearsPending(bool otherPc)
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        Defer(config, state);
+        var store = ReadyStore(config, snapshot);
+        bool canceled = false;
+        var retry = new ReadyReplicaRetry(config, state, store, () => { if (canceled) throw new OperationCanceledException("launch"); }, arguments =>
+        {
+            if (otherPc)
+                store.Update(j => Ownership.Acquire(j, new(new string('f', 32), "Other synthetic PC"), new string('1', 32), DateTimeOffset.UtcNow), TimeSpan.Zero);
+            else canceled = true;
+        });
+        Assert.Throws<OperationCanceledException>(() => retry.Apply(retry.Plan()));
+        Assert.Single(StorageReplication.Pending(state, config.LibraryId));
+        Assert.Empty(Directory.GetFiles(Path.Combine(state.Root, "replication", "destinations"), "*.json"));
+        Assert.Equal(otherPc ? OwnershipState.Starting : OwnershipState.Clean, store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void ReadyRetryStopsWhenCommittedGenerationChangesDuringVerification()
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        Defer(config, state);
+        var store = ReadyStore(config, snapshot);
+        var retry = new ReadyReplicaRetry(config, state, store, () => { }, arguments =>
+        {
+            if (arguments[0] != "check") return;
+            var device = new DeviceIdentity(new string('f', 32), "Other synthetic PC");
+            store.Generations.Publish(1, 0, new string('1', 32), device, snapshot, new(1, [], []), new("2643.583.1", "2643.3040.1"), DateTimeOffset.UtcNow);
+            store.Update(j => j with { CommittedGeneration = 1, Revision = j.Revision + 1 }, TimeSpan.Zero);
+        });
+        Assert.Throws<OperationCanceledException>(() => retry.Apply(retry.Plan()));
+        Assert.Single(StorageReplication.Pending(state, config.LibraryId));
+        Assert.Equal(1, store.ReadJournal().CommittedGeneration);
+    }
+
+    [Fact]
+    public void ReadyRetryDoesNotTouchRequiredTargetsAndCanUsePrimaryWhenThereIsNoLocalCopy()
+    {
+        var (original, state, snapshot) = WithReplica(required: false);
+        var config = original with { Replication = original.Replication! with { LocalCopyRoot = null,
+            Targets = [new("cloud", "onedrive:MedalSync"), new("required", "other:MedalSync") { Required = true }] } };
+        Defer(config, state);
+        var store = ReadyStore(config, snapshot);
+        List<IReadOnlyList<string>> commands = [];
+        var retry = new ReadyReplicaRetry(config, state, store, () => { }, commands.Add);
+        Assert.Empty(retry.Apply(retry.Plan()).Deferred);
+        Assert.All(commands, c => { Assert.Equal(config.ServerCapture.Display, c[1]); Assert.StartsWith("onedrive:", c[2]); });
+    }
+
+    [Fact]
+    public void CancellationAtTheFinalGenerationCheckRestoresPendingAndInvalidatesReceipts()
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        Defer(config, state);
+        var store = ReadyStore(config, snapshot);
+        bool checkedBytes = false;
+        var retry = new ReadyReplicaRetry(config, state, store, () =>
+        {
+            if (checkedBytes && StorageReplication.Pending(state, config.LibraryId).Count == 0)
+                throw new OperationCanceledException("generation changed at completion");
+        }, arguments => { if (arguments[0] == "check") checkedBytes = true; });
+        Assert.Throws<OperationCanceledException>(() => retry.Apply(retry.Plan()));
+        Assert.Single(StorageReplication.Pending(state, config.LibraryId));
+        Assert.Empty(Directory.GetFiles(Path.Combine(state.Root, "replication", "destinations"), "*.json"));
     }
 
     private sealed class OfflinePrimary : IAssetChecker

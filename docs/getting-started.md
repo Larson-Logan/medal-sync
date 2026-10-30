@@ -278,6 +278,7 @@ the reason on standard error.
 | `handoffRequests` | `null` when unreachable. Each has `device`, `requestedAt`, `ageSeconds` and `stale` (older than six hours, no longer prompting). |
 | `pendingCloudCopies` | Optional cloud copies waiting for a retry: `name`, `firstFailure`, `lastAttempt`. |
 | `lastVerifiedAt` | When this PC last verified primary storage and its cloud copies, or `null`. |
+| `replicaRetry` | Ready-state cloud retry progress/result, or `null`: `generation`, `running`, `message`, `confirmedAt`, optional `target`, plus format and library identity. Stale running evidence becomes an explicit stale result. This does not change library ownership. |
 | `observedAt` | When this report was made. |
 
 Times are UTC in ISO 8601. The document has no device IDs, credentials or file

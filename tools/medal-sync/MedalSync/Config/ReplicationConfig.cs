@@ -21,6 +21,10 @@ internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneCo
     public int? BandwidthLimitMiB { get; init; }
     public ReplicaConflictPolicy ConflictPolicy { get; init; } = ReplicaConflictPolicy.Stop;
 
+    // One keeps the original always-full verification. Incremental verification is explicitly opt-in.
+    public int FullVerifyEveryHandoffs { get; init; } = 1;
+    public int FullVerifyEveryDays { get; init; } = 7;
+
     /// <summary>
     /// Launch checks every rclone remote's sign-in before taking ownership. <c>WARN</c> (the default) shows a notice and
     /// starts Medal; <c>REFUSE</c> keeps Medal closed when an rclone primary or a required target needs attention.
@@ -32,6 +36,8 @@ internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneCo
     public IEnumerable<string> Problems(MedalSyncConfig config)
     {
         if (TimeoutMinutes is < 1 or > 1440) yield return "replication timeoutMinutes must be 1 to 1440";
+        if (FullVerifyEveryHandoffs is < 1 or > 100) yield return "replication fullVerifyEveryHandoffs must be 1 to 100";
+        if (FullVerifyEveryDays is < 1 or > 30) yield return "replication fullVerifyEveryDays must be 1 to 30";
         if (BandwidthLimitMiB is < 1 or > 10000) yield return "bandwidthLimitMiB must be 1 to 10000, or null for unlimited";
         if (!Enum.IsDefined(ConflictPolicy)) yield return "replication conflictPolicy is not supported";
         if (!Enum.IsDefined(CredentialCheck)) yield return "replication credentialCheck must be \"WARN\" or \"REFUSE\"";

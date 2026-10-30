@@ -70,14 +70,17 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         try { report = Json.ReadFile<ProgressEnvelope>(Path.Combine(state.Root, "desktop-status.json"), "Desktop progress"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Explicit unknown below. */ }
         var status = Resolve(journal, device ?? NoDevice, report, supervisorRunning, now);
+        var retry = ReplicaRetryStatus.Read(state, libraryId, now);
+        if (status.Phase == SessionPhase.Ready && retry is not null)
+            status = status with { Notice = $"Cloud retry (generation {retry.Generation}): {retry.Message}", Replica = retry.Target };
         try
         {
             var notice = Json.ReadFile<DesktopNotice>(Path.Combine(state.Root, "desktop-notice.json"), "Desktop notice");
-            if (now - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
+            if (status.Notice is null && now - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
         if (status.Notice is null && StorageReplication.Pending(state, libraryId) is { Count: > 0 } pending)
-            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending and retries on the next finish." };
+            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending. Run 'medal-sync replicate retry --apply' while Ready, or wait for the next finish." };
         if (status.Notice is null && StorageCheckReport.Outstanding(state, libraryId) is { Count: > 0 } problems)
             status = status with { Notice = "Storage needs attention: " + string.Join(" ", problems.Select(p => p.Detail))
                 + " Run 'medal-sync storage check' after fixing it." };
