@@ -15,6 +15,7 @@ internal sealed class FolderRemote(string root) : IReplicaRemote
     public Func<RemoteCheckOutcome?>? OnCheck { get; set; }
     public int? FailMoveAfter { get; set; }
     public int Moves { get; private set; }
+    public int ChecksFinished { get; private set; }
 
     public string Folder(string destination) => Path.Combine([root, .. destination.Replace(":", "/", StringComparison.Ordinal).Split('/')]);
 
@@ -28,9 +29,10 @@ internal sealed class FolderRemote(string root) : IReplicaRemote
             .ToArray();
     }
 
-    public RemoteCheckOutcome Check(string source, string destination, IReadOnlyList<string> files)
+    public RemoteCheckOutcome Check(string source, string destination, IReadOnlyList<string> files, Action? guard = null)
     {
         if (OnCheck?.Invoke() is { } injected) return injected;
+        guard?.Invoke(); // The real remote polls the guard while rclone reads.
         var results = new Dictionary<string, RemoteCheck>(StringComparer.Ordinal);
         foreach (string file in files)
         {
@@ -39,6 +41,7 @@ internal sealed class FolderRemote(string root) : IReplicaRemote
                 : File.ReadAllBytes(there).AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(source, file.Replace('/', '\\')))) ? RemoteCheck.Match
                 : RemoteCheck.Differs;
         }
+        ChecksFinished++;
         return new(results, null);
     }
 
@@ -53,6 +56,13 @@ internal sealed class FolderRemote(string root) : IReplicaRemote
             File.Move(from, to);
             Moves++;
         }
+    }
+
+    public void Mark(string destination, string folder, string name)
+    {
+        string path = Path.Combine(Folder(destination), folder.Replace('/', Path.DirectorySeparatorChar), name);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, []);
     }
 
     public void Purge(string destination, string folder) =>
@@ -196,6 +206,7 @@ public sealed class ReplicaMaintenanceTests : IDisposable
         var plan = Audit().Plan("cloud");
         _remote.OnCheck = () => { _idle = false; return null; };
         Assert.Throws<OperationCanceledException>(() => Audit().Apply(plan));
+        Assert.Equal(0, _remote.ChecksFinished);
         var history = Assert.Single(ReplicaAudit.Read(_state, _config.LibraryId).Targets);
         Assert.Null(history.LastComplete);
         Assert.Equal("canceled", Assert.Single(history.Attempts).Reason);
@@ -207,6 +218,8 @@ public sealed class ReplicaMaintenanceTests : IDisposable
         var plan = Audit().Plan("cloud");
         _remote.OnCheck = () => { Commit(DateTimeOffset.UtcNow); return null; };
         Assert.Throws<LibraryChangedException>(() => Audit().Apply(plan));
+        // The journal-aware guard stops the comparison itself, not only its result.
+        Assert.Equal(0, _remote.ChecksFinished);
         var history = Assert.Single(ReplicaAudit.Read(_state, _config.LibraryId).Targets);
         Assert.Null(history.LastComplete);
         Assert.Equal("library-changed", Assert.Single(history.Attempts).Reason);
@@ -310,6 +323,25 @@ public sealed class ReplicaMaintenanceTests : IDisposable
     }
 
     [Fact]
+    public void Prune_ARecentAbandonedAttemptBelowTheHeadStillProtectsItsFiles()
+    {
+        Clutter();
+        // An attempt that referenced old.mp4 was abandoned; a later switch without it committed a higher number.
+        MedalFixture.AddContent(_db, "old", video: @"M:\Clips\old.mp4");
+        long head = _store.ReadJournal().CommittedGeneration;
+        long abandoned = head + 1;
+        _store.Generations.Publish(abandoned, head, SessionCoordinator.NewId(), _first, LibraryDatabase.ReadSnapshot(_db, MedalFixture.AccountId),
+            new(1, [], []), Versions, _now.AddDays(-1));
+        MedalFixture.DeleteContent(_db, "old");
+        Commit(_now);
+        Assert.True(_store.ReadJournal().CommittedGeneration > abandoned);
+        Assert.DoesNotContain(Prune().Plan("cloud").Files, f => f.Path == "old.mp4");
+        // Once that attempt is older than the grace period it no longer protects anything.
+        _now = _now.AddDays(20);
+        Assert.Contains(Prune().Plan("cloud").Files, f => f.Path == "old.mp4");
+    }
+
+    [Fact]
     public void Prune_AnInterruptedApplyFinishesWhenAppliedAgain()
     {
         Clutter();
@@ -347,6 +379,19 @@ public sealed class ReplicaMaintenanceTests : IDisposable
         var before = Tree();
         Assert.Throws<OperationCanceledException>(() => Prune().Apply(plan));
         Assert.Equal(before, Tree());
+    }
+
+    [Fact]
+    public void PurgeTrash_CountsAgeFromTheMoveNotTheReview()
+    {
+        Clutter();
+        var plan = Prune().Plan("cloud");
+        _now = _now.AddDays(10);
+        Prune().Apply(plan);
+        var batch = Assert.Single(Prune().Trash("cloud"));
+        Assert.Equal(_now, batch.CreatedAt!.Value, TimeSpan.FromMilliseconds(1)); // The marker keeps milliseconds.
+        Assert.Empty(Prune().Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true));
+        Assert.True(File.Exists(Path.Combine(Destination, ".medal-sync-trash", plan.Id, "old.mp4")));
     }
 
     [Fact]

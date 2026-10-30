@@ -36,6 +36,8 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
 {
     public const string TrashRoot = ".medal-sync-trash";
     public const string HistoryRoot = ".medal-sync-history";
+    /// <summary>An empty file in a trash batch named after when files were moved into it: <c>.medal-sync-moved-yyyyMMddTHHmmssfffZ</c>.</summary>
+    public const string MovedMarker = ".medal-sync-moved-";
     public const string Unreferenced = "unreferenced";
     public const string History = "history";
     public const int DefaultGraceDays = 14;
@@ -110,7 +112,15 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
 
         var (remaining, alreadyMoved) = Remaining(plan, remote.List(destination));
         requireIdle();
-        remote.Move(destination, remaining.Select(f => f.Path).ToArray(), plan.TrashFolder);
+        if (remaining.Count > 0)
+        {
+            // Trash age counts from the move, not the review: a late or resumed apply still gets the full wait before purge.
+            // One marker before moving covers an interrupted move; one after covers a long one.
+            remote.Mark(destination, plan.TrashFolder, Marker(Now));
+            remote.Move(destination, remaining.Select(f => f.Path).ToArray(), plan.TrashFolder);
+            requireIdle();
+            remote.Mark(destination, plan.TrashFolder, Marker(Now));
+        }
         requireIdle();
         var (left, moved) = Remaining(plan, remote.List(destination));
         if (left.Count > 0) throw new IOException($"{left.Count} reviewed file(s) are still in place after the move; apply the same plan again.");
@@ -123,7 +133,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         return new(remaining.Count, plan.Files.Sum(f => f.Size), alreadyMoved, plan.TrashFolder);
     }
 
-    /// <summary>Trash batches at a destination, with their age read from the batch name.</summary>
+    /// <summary>Trash batches at a destination. A batch's age is its newest move marker; a batch without one has no age.</summary>
     public IReadOnlyList<ReplicaTrashBatch> Trash(string targetName)
     {
         requireIdle();
@@ -131,11 +141,17 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         var files = remote.List(ReplicationPlan.Destination(target, config.LibraryId));
         return files.Where(f => f.Path.StartsWith(TrashRoot + "/", StringComparison.Ordinal) && f.Path.Split('/').Length > 2)
             .GroupBy(f => f.Path.Split('/')[1], StringComparer.Ordinal)
-            .Select(g => new ReplicaTrashBatch(g.Key, BatchTime(g.Key), g.Count(), g.Sum(f => f.Size)))
+            .Select(g =>
+            {
+                var markers = g.Where(f => f.Path.Split('/') is { Length: 3 } parts && parts[2].StartsWith(MovedMarker, StringComparison.Ordinal)).ToArray();
+                var moved = markers.Select(f => MarkerTime(f.Path.Split('/')[2])).Where(t => t is not null).Max();
+                var media = g.Except(markers).ToArray();
+                return new ReplicaTrashBatch(g.Key, moved, media.Length, media.Sum(f => f.Size));
+            })
             .OrderBy(b => b.Name, StringComparer.Ordinal).ToArray();
     }
 
-    /// <summary>Deletes trash batches older than <paramref name="olderThanDays"/>. Batches without a readable date are kept.</summary>
+    /// <summary>Deletes trash batches whose files were moved at least <paramref name="olderThanDays"/> ago. Batches without a move marker are kept.</summary>
     public IReadOnlyList<ReplicaTrashBatch> Purge(string targetName, int olderThanDays, bool apply)
     {
         if (olderThanDays is < 0 or > 3650) throw new ArgumentOutOfRangeException(nameof(olderThanDays));
@@ -169,11 +185,21 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         return journal;
     }
 
-    /// <summary>Referenced by the committed generation, or by an uncommitted generation published after <paramref name="since"/>.</summary>
+    /// <summary>
+    /// Referenced by the committed generation, or by an uncommitted generation published after <paramref name="since"/>.
+    /// Uncommitted means outside the committed ancestry: an abandoned attempt can sit below the head once a later publish succeeds.
+    /// </summary>
     private HashSet<string> Protected(Library.LibrarySnapshot committed, long head, DateTimeOffset since)
     {
         var paths = ReplicationPlan.Media(committed, config.Capture).Select(m => m.Relative).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (long number in store.Generations.Numbered().Where(n => n > head))
+        HashSet<long> ancestry;
+        try { ancestry = store.Generations.Chain(head).Select(c => c.Generation).ToHashSet(); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException)
+        {
+            throw new UnsafeOperationException($"The committed history cannot be followed ({ex.Message}), so unfinished switches cannot be ruled out; nothing was planned. "
+                + "Run 'medal-sync history list' to see where it breaks.");
+        }
+        foreach (long number in store.Generations.Numbered().Where(n => !ancestry.Contains(n)))
         {
             try
             {
@@ -244,7 +270,14 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
 
     private static string ShortId() => Guid.NewGuid().ToString("N")[..12];
 
-    /// <summary>A trash batch is named after its plan: <c>yyyyMMddTHHmmssZ-id</c>.</summary>
+    private static string Marker(DateTimeOffset at) => MovedMarker + at.UtcDateTime.ToString("yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture);
+
+    internal static DateTimeOffset? MarkerTime(string name) =>
+        name.StartsWith(MovedMarker, StringComparison.Ordinal) && name.Length == MovedMarker.Length + 19
+        && DateTimeOffset.TryParseExact(name[MovedMarker.Length..], "yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var at) ? at : null;
+
+    /// <summary>A review ID, and so its trash batch name, starts with when the review was made: <c>yyyyMMddTHHmmssZ-id</c>.</summary>
     internal static DateTimeOffset? BatchTime(string name) =>
         name.Length > 17 && name[16] == '-' && DateTimeOffset.TryParseExact(name[..16], "yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture,
             DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var at) ? at : null;

@@ -22,11 +22,17 @@ internal interface IReplicaRemote
     /// <summary>Every file under <paramref name="destination"/>, recursively. A destination that does not exist is empty.</summary>
     IReadOnlyList<RemoteFile> List(string destination);
 
-    /// <summary>Reads back and compares exactly <paramref name="files"/> from the source; never copies or changes anything.</summary>
-    RemoteCheckOutcome Check(string source, string destination, IReadOnlyList<string> files);
+    /// <summary>
+    /// Reads back and compares exactly <paramref name="files"/> from the source; never copies or changes anything.
+    /// <paramref name="guard"/> runs while the comparison is in progress and stops it by throwing.
+    /// </summary>
+    RemoteCheckOutcome Check(string source, string destination, IReadOnlyList<string> files, Action? guard = null);
 
     /// <summary>Moves exactly <paramref name="files"/> under <paramref name="folder"/>, a relative folder inside the destination.</summary>
     void Move(string destination, IReadOnlyList<string> files, string folder);
+
+    /// <summary>Creates the empty file <paramref name="name"/> in <paramref name="folder"/>, a relative folder inside the destination.</summary>
+    void Mark(string destination, string folder, string name);
 
     /// <summary>Deletes <paramref name="folder"/>, a relative folder inside the destination, and everything in it.</summary>
     void Purge(string destination, string folder);
@@ -82,7 +88,7 @@ internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState sta
         return files.OrderBy(f => f.Path, StringComparer.Ordinal).ToArray();
     }
 
-    public RemoteCheckOutcome Check(string source, string destination, IReadOnlyList<string> files)
+    public RemoteCheckOutcome Check(string source, string destination, IReadOnlyList<string> files, Action? guard = null)
     {
         if (files.Count == 0) return new(new Dictionary<string, RemoteCheck>(), null);
         return WithFiles(files, list =>
@@ -95,7 +101,7 @@ internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState sta
                 if (config.Replication?.BandwidthLimitMiB is { } bandwidth)
                     arguments.AddRange(["--bwlimit", bandwidth.ToString(CultureInfo.InvariantCulture) + "Mi"]);
                 RcloneFailedException? failure = null;
-                try { Run(arguments); }
+                try { Run(arguments, guard: guard); }
                 catch (RcloneFailedException ex) { failure = ex; }
                 var results = File.Exists(combined) ? ParseCombined(File.ReadAllLines(combined)) : new Dictionary<string, RemoteCheck>(StringComparer.Ordinal);
                 // rclone exits 1 when it found differences; that is a finished check only if every file has a result.
@@ -134,6 +140,14 @@ internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState sta
         });
     }
 
+    public void Mark(string destination, string folder, string name)
+    {
+        RequireRelative(folder);
+        RequireRelative(name);
+        // touch creates the file when it is missing, along with any folder the provider needs.
+        Run(["touch", destination.TrimEnd('/') + "/" + folder + "/" + name, "--config", Credentials, .. Network]);
+    }
+
     public void Purge(string destination, string folder)
     {
         RequireRelative(folder);
@@ -158,9 +172,14 @@ internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState sta
         finally { File.Delete(list); }
     }
 
-    private string Run(IReadOnlyList<string> arguments, bool capture = false)
+    private string Run(IReadOnlyList<string> arguments, bool capture = false, Action? guard = null)
     {
-        requireIdle();
-        return new RcloneRunner(config.ExpandedRclonePath).Run(arguments, Timeout, requireIdle, capture);
+        void Poll()
+        {
+            requireIdle();
+            guard?.Invoke();
+        }
+        Poll();
+        return new RcloneRunner(config.ExpandedRclonePath).Run(arguments, Timeout, Poll, capture);
     }
 }

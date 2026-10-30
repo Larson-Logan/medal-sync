@@ -95,7 +95,8 @@ internal sealed class ReplicaAudit(MedalSyncConfig config, LocalState state, Coo
             {
                 Guard();
                 Report($"Checking '{target.Name}': reading back {files.Count} file(s), {StorageVolume.Gb(bytes)}.");
-                var outcome = remote.Check(plan.Source, target.Destination, files);
+                // The guard also runs while rclone reads, so another PC starting stops the download instead of only discarding it.
+                var outcome = remote.Check(plan.Source, target.Destination, files, Guard);
                 Guard();
                 attempt = Summarize(target, plan, started, files, outcome);
             }

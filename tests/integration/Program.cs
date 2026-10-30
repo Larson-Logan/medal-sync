@@ -263,7 +263,8 @@ internal static class Program
         string trashed = Path.Combine(folder, ".medal-sync-trash", plan.Id, "old [clip] #2.mp4");
         Check(result.Moved == 1 && !File.Exists(stale) && File.ReadAllText(trashed) == "unreferenced synthetic bytes"
             && File.Exists(destination) && File.Exists(recent), "real rclone moves exactly the reviewed file into the destination trash");
-        Check(prune.Trash("cloud").Single().Name == plan.Id, "trash batches are listed by review ID");
+        Check(prune.Trash("cloud").Single() is { } batch && batch.Name == plan.Id && batch.Files == 1 && batch.CreatedAt is not null,
+            "real rclone writes a move marker so trash age counts from the move");
         Check(prune.Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true).Count == 0 && File.Exists(trashed), "new trash is kept by purge");
         new ReplicaPrune(config, state, store, () => { }, remote, () => DateTimeOffset.UtcNow.AddDays(8)).Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true);
         Check(!Directory.Exists(Path.Combine(folder, ".medal-sync-trash", plan.Id)) && File.Exists(destination) && File.Exists(recent),

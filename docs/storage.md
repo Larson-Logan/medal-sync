@@ -409,8 +409,11 @@ differs from the review, then moves exactly the reviewed files into
 `.medal-sync-trash/<review ID>/` at the destination. Nothing is deleted. If the
 move is interrupted, apply the same review again: files already in its trash
 folder count as moved. `purge-trash` lists trash batches and, with `--apply`,
-permanently deletes batches older than `--older-than` days (default 7). Batches
-whose names carry no date are kept. Required targets are refused.
+permanently deletes batches whose files were moved at least `--older-than` days
+ago (default 7). Age counts from the move, not the review, so applying an old
+review still gets the full wait. Apply writes an empty `.medal-sync-moved-<time>`
+marker into the batch for this; batches without one are kept. Required targets
+are refused.
 
 ### Check sign-in before recording
 
