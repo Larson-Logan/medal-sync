@@ -32,6 +32,53 @@ public sealed class CliAndConfigTests : IDisposable
     }
 
     [Fact]
+    public void Cli_HelpListsEveryDispatchCommand()
+    {
+        string help = Run("--help").Output;
+        string[] commands =
+        [
+            "version",
+            "snapshot export",
+            "snapshot verify",
+            "dry-run-restore",
+            "audit",
+            "repair",
+            "capacity",
+            "config create",
+            "config validate",
+            "setup check",
+            "inspect",
+            "compatibility",
+            "diagnostics",
+            "status",
+            "history list",
+            "history diff",
+            "mount-plan",
+            "init",
+            "storage init-primary",
+            "storage check",
+            "replicate retry",
+            "replica verify",
+            "replica history",
+            "replica prune",
+            "replica purge-trash",
+            "retention",
+            "enroll",
+            "enroll recover",
+            "launch",
+            "finish",
+            "recover-start",
+            "refresh-media",
+            "abandon",
+            "relocate",
+            "promote",
+        ];
+
+        Assert.All(commands, command => Assert.Contains(command, help, StringComparison.Ordinal));
+        Assert.Contains("spike start|status|stop", help, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Snapshot_ExportVerifyAndDryRunAgainstAFixture()
     {
         string db = Library();
