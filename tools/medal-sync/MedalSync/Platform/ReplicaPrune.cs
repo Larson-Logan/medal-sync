@@ -80,7 +80,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
             files.Add(new(file.Path, file.Size, file.ModTime, Unreferenced));
         }
         var plan = new ReplicaPrunePlan(ReplicaPrunePlan.CurrentFormat,
-            now.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + "-" + ShortId(),
+            now.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + "-" + ShortId(),
             config.LibraryId, target.Name, destination, journal.CommittedGeneration, generation.Snapshot.Digest(), now, graceDays,
             historyOlderThanDays, listing.Count, Digest(listing), leftAlone, files);
         if (store.ReadJournal() != journal) throw new UnsafeOperationException("The library changed during the review; preview again.");
@@ -261,8 +261,10 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         text.AppendLine(CultureInfo.InvariantCulture, $"Cloud copy '{plan.Target}' ({plan.Destination}) against committed generation {plan.Generation}: {plan.Listed} file(s) listed.");
         foreach (var group in plan.Files.GroupBy(f => f.Category).OrderBy(g => g.Key, StringComparer.Ordinal))
             text.AppendLine(CultureInfo.InvariantCulture, $"  {group.Key}: {group.Count()} file(s), {StorageVolume.Gb(group.Sum(f => f.Size))}");
-        text.AppendLine(CultureInfo.InvariantCulture, $"Kept: every referenced file, files changed in the last {plan.GraceDays} day(s) and files of recent unfinished switches"
-            + (plan.HistoryOlderThanDays is { } d ? $"; version history newer than {d} day(s)." : "; all version history (add --history-older-than DAYS to include it)."));
+        string history = plan.HistoryOlderThanDays is { } d
+            ? string.Create(CultureInfo.InvariantCulture, $"; version history newer than {d} day(s).")
+            : "; all version history (add --history-older-than DAYS to include it).";
+        text.AppendLine(CultureInfo.InvariantCulture, $"Kept: every referenced file, files changed in the last {plan.GraceDays} day(s) and files of recent unfinished switches{history}");
         if (plan.LeftAlone > 0) text.AppendLine(CultureInfo.InvariantCulture, $"Left alone: {plan.LeftAlone} file(s) that are not clip media or not dated history.");
         text.Append(CultureInfo.InvariantCulture, $"Apply moves these {plan.Files.Count} file(s) ({StorageVolume.Gb(bytes)}) into {plan.TrashFolder}/ at the destination; nothing is deleted until you purge the trash.");
         return text.ToString();

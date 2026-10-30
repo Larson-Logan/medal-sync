@@ -352,6 +352,66 @@ Ready again. Configured bandwidth and per-command timeout limits still apply.
 `status`, `status --json` and the tray show progress and the last result without
 changing Ready ownership; stale progress is explicitly reported as stale.
 
+### Check cloud copies on demand
+
+A handoff verifies new and changed files. To read back the whole committed
+generation at a cloud copy at any time, preview and then run a check while the
+library is Ready and Medal is quit:
+
+```powershell
+medal-sync replica verify
+medal-sync replica verify --target offsite --apply
+medal-sync replica history [--target offsite] [--json]
+```
+
+The preview lists the committed generation, the number of referenced files and
+bytes, each target and the configured bandwidth and timeout limits. `--apply`
+compares every referenced file byte for byte from this PC's persistent copy,
+otherwise primary storage. It only reads: it never copies, replaces or deletes
+files and never takes ownership, so another PC can still start. A launch on this
+PC, Ctrl+C, Windows shutdown, a configuration change or another PC starting
+stops the check.
+
+Each attempt is recorded per target in `state/replication/audit-history.json`
+with counts only: matched, missing, different and not reached. The last 20
+attempts are kept. A result is **passed**, **failed** (missing or different
+files) or **incomplete** (offline, sign-in, configuration, canceled, library
+changed or error). An incomplete attempt never replaces the last complete
+result. A failed target loses its incremental verification receipt, so the next
+handoff reads every file back there, and an optional target is queued for
+`replicate retry`. A check never counts as the verification a handoff needs.
+Exit codes: 0 passed, 1 missing or different files, 3 incomplete or canceled.
+
+### Clean up a cloud copy
+
+Files the library no longer references stay at a cloud copy, as does version
+history when `replication.conflictPolicy` is `version`. Cleanup is a reviewed,
+two-step operation for optional targets only:
+
+```powershell
+medal-sync replica prune --target offsite --out C:\Private\offsite-cleanup.json
+medal-sync replica prune --in C:\Private\offsite-cleanup.json --apply
+medal-sync replica purge-trash --target offsite [--older-than 7] [--apply]
+```
+
+The review lists the destination and plans clip media and sidecars that the
+committed generation does not reference. It never plans a referenced file, a
+file changed in the last 14 days (`--grace-days N`), a file referenced by an
+uncommitted generation from that period, the storage marker, database folders
+or anything that is not clip media. Version history under
+`.medal-sync-history/` is planned only with `--history-older-than DAYS`, and
+only whole, dated attempts. The review file names private paths: keep it on
+this PC.
+
+Apply holds the journal writer lock, so no PC can start or finish meanwhile. It
+refuses if the committed generation changed or any file at the destination
+differs from the review, then moves exactly the reviewed files into
+`.medal-sync-trash/<review ID>/` at the destination. Nothing is deleted. If the
+move is interrupted, apply the same review again: files already in its trash
+folder count as moved. `purge-trash` lists trash batches and, with `--apply`,
+permanently deletes batches older than `--older-than` days (default 7). Batches
+whose names carry no date are kept. Required targets are refused.
+
 ### Check sign-in before recording
 
 Provider sign-ins do not last forever. Some providers expire a sign-in that
@@ -495,8 +555,43 @@ and generations from different Medal schemas. `--out` writes each clip's ID,
 title and paths to a new file; it never replaces an existing file. That file is
 private: keep it on this PC.
 
+Generations removed by [retention](#retention) are listed as removed ranges,
+not as damage, and `history diff` explains that a removed generation cannot be
+compared.
+
 Both commands report the committed head they read. A switch that finishes while
 they run appears the next time. They exit 3 when the server cannot be reached.
+
+### Retention
+
+Generations and this PC's recovery folders accumulate. Retention removes old
+ones after a review, while the library is Ready:
+
+```powershell
+medal-sync retention --out C:\Private\retention.json [--keep 20] [--keep-days 90] [--grace-days 30]
+medal-sync retention --in C:\Private\retention.json --apply
+```
+
+It always keeps the committed head, its `--keep` newest committed ancestors,
+anything from the last `--keep-days` days, the newest committed generation each
+PC published and the highest-numbered generation folder. Uncommitted attempts
+and interrupted `.staging-*` folders are kept for `--grace-days`. On this PC it
+keeps the newest `--keep` accepted-change reviews, media refresh backups and
+aborted-start folders plus any from the last `--keep-days` days; aborted-start
+evidence is kept while its cache still holds files. Clip media and the library
+database are never touched.
+
+Apply refuses unless the library is exactly as reviewed. It holds the journal
+writer lock and the single-instance lock, so no PC can start meanwhile. It first
+records what it removes in `generations/retention.json`, then renames each
+folder into a trash folder and deletes the trash. An interrupted apply leaves
+whole folders; apply the same review again. The record keeps the highest number
+ever used and the full committed chain, so numbers are never reused, `history
+list` shows removed ranges and a PC can still prove its library matches an
+older shared generation. A PC whose library matches only a removed generation
+needs `medal-sync launch --replace-local-library` (a backup is kept). Update
+every PC to 1.3.0 or later first; the review warns about any PC that last
+published with an older version.
 
 Cloud folders cannot replace the SMB ownership journal: consumer sync does
 not provide the locking used by this companion. An rclone primary holds media

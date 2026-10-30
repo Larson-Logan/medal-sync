@@ -207,10 +207,13 @@ internal sealed class ReplicaAudit(MedalSyncConfig config, LocalState state, Coo
         return text.ToString();
     }
 
-    public static string Render(ReplicaAuditAttempt attempt) => string.Create(CultureInfo.InvariantCulture,
-        $"{attempt.FinishedAt:yyyy-MM-dd HH:mm} UTC  generation {attempt.Generation} ({attempt.SnapshotDigest[..12]})  {attempt.Result}"
-        + (attempt.Reason is null ? "" : $" ({attempt.Reason})")
-        + $"  {attempt.Checked}/{attempt.Planned} checked: {attempt.Matched} matched, {attempt.Missing} missing, {attempt.Mismatched} different, {attempt.Unknown} unknown");
+    public static string Render(ReplicaAuditAttempt attempt)
+    {
+        string reason = attempt.Reason is null ? "" : $" ({attempt.Reason})";
+        return string.Create(CultureInfo.InvariantCulture,
+            $"{attempt.FinishedAt:yyyy-MM-dd HH:mm} UTC  generation {attempt.Generation} ({attempt.SnapshotDigest[..12]})  {attempt.Result}{reason}"
+            + $"  {attempt.Checked}/{attempt.Planned} checked: {attempt.Matched} matched, {attempt.Missing} missing, {attempt.Mismatched} different, {attempt.Unknown} unknown");
+    }
 
     public static string Render(ReplicaAuditHistory history, IEnumerable<ReplicaTarget> configured, string? targetName)
     {
@@ -222,9 +225,11 @@ internal sealed class ReplicaAudit(MedalSyncConfig config, LocalState state, Coo
         {
             var target = history.Targets.FirstOrDefault(t => t.Target.Equals(name, StringComparison.OrdinalIgnoreCase));
             if (target is null || target.Attempts.Count == 0) { text.AppendLine(CultureInfo.InvariantCulture, $"{name}: never checked."); continue; }
-            text.AppendLine(CultureInfo.InvariantCulture, $"{name}: last complete check "
-                + (target.LastComplete is { } complete ? $"{complete.Result} at {complete.FinishedAt:yyyy-MM-dd HH:mm} UTC (generation {complete.Generation})" : "none")
-                + "; last pass " + (target.LastPassed is { } passed ? $"{passed.FinishedAt:yyyy-MM-dd HH:mm} UTC (generation {passed.Generation})." : "none."));
+            string lastComplete = target.LastComplete is { } complete
+                ? string.Create(CultureInfo.InvariantCulture, $"{complete.Result} at {complete.FinishedAt:yyyy-MM-dd HH:mm} UTC (generation {complete.Generation})") : "none";
+            string lastPass = target.LastPassed is { } passed
+                ? string.Create(CultureInfo.InvariantCulture, $"{passed.FinishedAt:yyyy-MM-dd HH:mm} UTC (generation {passed.Generation}).") : "none.";
+            text.AppendLine(CultureInfo.InvariantCulture, $"{name}: last complete check {lastComplete}; last pass {lastPass}");
             foreach (var attempt in target.Attempts) text.AppendLine("  " + Render(attempt));
         }
         if (names.Length == 0) text.AppendLine("No cloud copies are configured or checked.");

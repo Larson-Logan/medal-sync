@@ -86,7 +86,10 @@ internal static class GenerationHistory
 
     private static IReadOnlyList<PrunedRange> PrunedRanges(GenerationStore generations)
     {
-        var pruned = (generations.ReadRetention()?.Pruned ?? []).Where(p => !generations.Exists(p.Generation)).OrderBy(p => p.Generation).ToArray();
+        GenerationRetention? retention;
+        try { retention = generations.ReadRetention(); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException) { return []; }
+        var pruned = (retention?.Pruned ?? []).Where(p => !generations.Exists(p.Generation)).OrderBy(p => p.Generation).ToArray();
         var ranges = new List<PrunedRange>();
         foreach (var p in pruned)
         {
@@ -136,9 +139,9 @@ internal static class GenerationHistory
             if (!generations.Exists(number) && retention?.Find(number) is not null)
             {
                 chain[number] = (null, PrunedProblem);
-                var (known, parent) = retention.ParentOf(number);
+                var (known, prunedParent) = retention.ParentOf(number);
                 if (!known) return (chain, false, $"History before generation {number} was removed by retention and is not recorded; older history is unknown.");
-                current = parent;
+                current = prunedParent;
                 continue;
             }
             if (!generations.Exists(number))
@@ -334,9 +337,12 @@ internal static class GenerationHistory
         if (list.Entries.Any(e => e.Committed == false))
             text.AppendLine("Uncommitted generations were left by an abandoned or unfinished switch. They are not part of the shared history.");
         foreach (var range in list.Pruned ?? [])
-            text.AppendLine(CultureInfo.InvariantCulture, range.From == range.To
-                ? $"Generation {range.From} was removed by retention on {range.PrunedAt:yyyy-MM-dd}; this is not damage."
-                : $"Generations {range.From}-{range.To} were removed by retention on {range.PrunedAt:yyyy-MM-dd}; this is not damage.");
+        {
+            if (range.From == range.To)
+                text.AppendLine(CultureInfo.InvariantCulture, $"Generation {range.From} was removed by retention on {range.PrunedAt:yyyy-MM-dd}; this is not damage.");
+            else
+                text.AppendLine(CultureInfo.InvariantCulture, $"Generations {range.From}-{range.To} were removed by retention on {range.PrunedAt:yyyy-MM-dd}; this is not damage.");
+        }
         if (!list.Complete) text.AppendLine(CultureInfo.InvariantCulture, $"History is incomplete: {list.Problem} Generations marked unknown may or may not have been committed.");
         if (list.NextBefore is { } next) text.AppendLine(CultureInfo.InvariantCulture, $"More: history list --before {next}");
         return text.ToString().TrimEnd();

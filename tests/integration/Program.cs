@@ -35,6 +35,7 @@ internal static class Program
             if (!File.Exists(rclone)) throw new IOException("An explicit pinned rclone executable is required.");
             TestReplication(rclone);
             TestIncrementalAndReadyRetry(rclone);
+            TestReplicaAuditAndPrune(rclone);
             TestCloudPrimary(rclone);
             TestInterruptedTransfer(rclone);
             if (args.Contains("--mount"))
@@ -217,6 +218,57 @@ internal static class Program
         File.Delete(destination);
         Check(replication.Publish(snapshot).Deferred.SequenceEqual(["cloud"]), "incremental size check catches deleted unchanged media");
         Check(retry.Apply(retry.Plan()).ReadBackFiles == 2, "failed listing invalidates receipts so Ready retry verifies the whole destination");
+    }
+
+    private static void TestReplicaAuditAndPrune(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone) with { Replication = new(null, Remotes(fixture), [new("cloud", "onedrive:MedalSync")]) };
+        Seed(config);
+        string db = fixture.CreateLibrary("audit");
+        MedalFixture.AddContent(db, "one", video: config.Capture.Append("#clip [test].mp4").Display);
+        var snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        var state = new LocalState(fixture.PathFor("state"));
+        new StorageReplication(config, state, () => { }).Publish(snapshot);
+        var store = CoordinationStore.Create(config.LibraryCoordinationDirectory, config.LibraryId, snapshot, new(1, [], []),
+            new(new string('d', 32), "Synthetic PC"), new string('e', 32), Versions, DateTimeOffset.UtcNow.AddDays(-100));
+        var before = store.ReadJournal();
+        var remote = new RcloneReplicaRemote(config, state, () => { });
+        var audit = new ReplicaAudit(config, state, store, () => { }, remote);
+        string destination = ReplicaFile(fixture, "onedrive", "#clip [test].mp4");
+        string folder = Path.GetDirectoryName(destination)!;
+
+        var passed = audit.Apply(audit.Plan()).Single();
+        Check(passed.Result == ReplicaAudit.Passed && passed.Matched == 1, "real rclone check reads back the committed generation and passes");
+        File.WriteAllText(destination, "different synthetic bytes");
+        var different = audit.Apply(audit.Plan()).Single();
+        Check(different.Result == ReplicaAudit.Failed && different.Mismatched == 1 && File.ReadAllText(destination) == "different synthetic bytes",
+            "real rclone check reports a different file and never repairs it");
+        File.Delete(destination);
+        var missing = audit.Apply(audit.Plan()).Single();
+        Check(missing.Result == ReplicaAudit.Failed && missing.Missing == 1 && !File.Exists(destination), "real rclone check reports a missing file and never copies it");
+        Check(StorageReplication.Pending(state, config.LibraryId).Single().Name == "cloud", "a failed check queues the optional target for a Ready retry");
+        Check(store.ReadJournal() == before, "replica checks never acquire ownership or change the journal");
+        File.WriteAllText(destination, "synthetic media bytes");
+
+        string stale = Path.Combine(folder, "old [clip] #2.mp4");
+        File.WriteAllText(stale, "unreferenced synthetic bytes");
+        File.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-60));
+        string recent = Path.Combine(folder, "recent.mp4");
+        File.WriteAllText(recent, "recent synthetic bytes");
+        var prune = new ReplicaPrune(config, state, store, () => { }, remote);
+        var plan = prune.Plan("cloud");
+        Check(plan.Files.Select(f => f.Path).SequenceEqual(["old [clip] #2.mp4"]), "real listing plans only the old unreferenced file");
+        var result = prune.Apply(plan);
+        string trashed = Path.Combine(folder, ".medal-sync-trash", plan.Id, "old [clip] #2.mp4");
+        Check(result.Moved == 1 && !File.Exists(stale) && File.ReadAllText(trashed) == "unreferenced synthetic bytes"
+            && File.Exists(destination) && File.Exists(recent), "real rclone moves exactly the reviewed file into the destination trash");
+        Check(prune.Trash("cloud").Single().Name == plan.Id, "trash batches are listed by review ID");
+        Check(prune.Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true).Count == 0 && File.Exists(trashed), "new trash is kept by purge");
+        new ReplicaPrune(config, state, store, () => { }, remote, () => DateTimeOffset.UtcNow.AddDays(8)).Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true);
+        Check(!Directory.Exists(Path.Combine(folder, ".medal-sync-trash", plan.Id)) && File.Exists(destination) && File.Exists(recent),
+            "real rclone purge deletes only old trash");
+        Check(remote.List("onedrive:Absent/folder").Count == 0, "a destination folder that does not exist lists as empty");
     }
 
     private static void TestCloudPrimary(string rclone)
