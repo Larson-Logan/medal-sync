@@ -26,7 +26,7 @@ internal static class CommandRunner
         medal-sync: SSD-cached Medal storage and one-PC-at-a-time library handoff.
 
         Read-only:
-          version                                 Print the Medal Sync version and supported Medal schema
+          version                                Print the Medal Sync version and supported Medal schema
           setup check [--state-root DIR] [--out FILE]  Verify readiness for Windows setup; no library changes
           config validate --config FILE          Validate a candidate config without reading Medal or the share
           inspect [--json]                       Phase 0 inventory of this PC (Gate A evidence)
