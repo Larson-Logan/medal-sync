@@ -298,16 +298,15 @@ internal sealed class SessionCoordinator(
         string digest = local.Digest();
         if (digest == target.Manifest.SnapshotDigest) return;
         if (local.RowCount("contents") == 0 && local.RowCount("deleted_contents") == 0) return;
-        long current = target.Manifest.Generation;
-        for (long? parent = target.Manifest.ParentGeneration; parent is { } generation; )
+        bool pruned = false;
+        foreach (var (_, manifest) in store.Generations.Chain(target.Manifest.Generation).Skip(1))
         {
-            if (generation >= current) throw new InvalidDataException($"Generation {current} names a later parent, {generation}.");
-            var manifest = store.Generations.ReadManifest(generation);
+            if (manifest is null) { pruned = true; continue; }
             if (manifest.SnapshotDigest == digest) return;
-            (current, parent) = (generation, manifest.ParentGeneration);
         }
         throw new UnsafeOperationException(
             "This PC's Medal library has changes that were never shared, usually because Medal was opened without medal-sync. "
+            + (pruned ? "Older shared generations were removed by retention, so a library that matches one of them can no longer be recognized. " : "")
             + "Nothing was changed. Keep a copy with 'medal-sync snapshot export --out FILE', then run "
             + "'medal-sync launch --replace-local-library' to replace it with the shared library (a backup is kept).");
     }
@@ -521,7 +520,8 @@ internal sealed class SessionCoordinator(
         long generation = later.FirstOrDefault(g => IsThisAttempt(g, committed, session, digest, versions), -1L);
         if (generation < 0)
         {
-            generation = later.Count > 0 ? later.Max() + 1 : committed + 1;
+            // Also above the retention high-water mark, so a pruned attempt's number is never reused.
+            generation = store.Generations.Next(committed);
             store.Generations.Publish(generation, committed, session, Me, snapshot, AssetManifest.From(onServer), versions, clock.Now);
         }
         shutdown?.RequireTime();
