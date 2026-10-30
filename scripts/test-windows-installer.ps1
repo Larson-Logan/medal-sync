@@ -24,11 +24,31 @@ $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) "$group/Medal S
 if (Test-Path -LiteralPath (Split-Path -Parent $shortcut)) { throw 'An existing shortcut group is present; refusing an integration test.' }
 New-Item -ItemType Directory -Path $scratch -Force | Out-Null
 $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',('/DIR="{0}"' -f $app),('/LOG="{0}"' -f (Join-Path $scratch 'setup.log')))
-function Run-Setup {
-    $process = Start-Process -FilePath $setup -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
+function Run-Setup([string[]]$Extra = @()) {
+    $process = Start-Process -FilePath $setup -ArgumentList ($arguments + $Extra) -WindowStyle Hidden -Wait -PassThru
     return $process.ExitCode
 }
-if ((Run-Setup) -ne 0) { throw 'Native fresh install failed. Inspect the setup log.' }
+# Per-user setup edits the user PATH, which is disposable on this runner.
+$bin = [IO.Path]::GetFullPath((Join-Path $app 'bin'))
+function Get-UserPathEntries {
+    $value = (Get-Item -LiteralPath 'HKCU:\Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+    return @($value -split ';' | Where-Object { $_.Trim() })
+}
+function Get-BinPathCount {
+    return @(Get-UserPathEntries | Where-Object {
+        try { [IO.Path]::GetFullPath($_.Trim().Trim('"')).TrimEnd('\') -ieq $bin.TrimEnd('\') } catch { $false }
+    }).Count
+}
+$originalPath = Get-UserPathEntries
+if ((Get-BinPathCount) -ne 0) { throw 'The test program folder is already on PATH.' }
+if ((Run-Setup @('/MERGETASKS="addtopath"')) -ne 0) { throw 'Native fresh install failed. Inspect the setup log.' }
+if ((Get-BinPathCount) -ne 1) { throw 'Setup did not add the program folder to PATH once.' }
+$savedPath = $env:Path
+try {
+    $env:Path = (Get-UserPathEntries) -join ';'
+    $resolved = (Get-Command 'medal-sync' -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+} finally { $env:Path = $savedPath }
+if ([IO.Path]::GetFullPath($resolved) -ine (Join-Path $bin 'medal-sync.exe')) { throw "medal-sync resolved to $resolved instead of the installed CLI." }
 if (-not (Test-Path -LiteralPath $key) -or -not (Test-Path -LiteralPath $shortcut)) {
     Write-Output "Expected registration: $key; exists=$(Test-Path -LiteralPath $key)"
     Write-Output "Expected shortcut: $shortcut; exists=$(Test-Path -LiteralPath $shortcut)"
@@ -45,6 +65,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $app 'bin/rclone.exe')) -or -not (Te
 $sentinel = Join-Path $app 'unowned-user-file.txt'
 'preserve me' | Set-Content -LiteralPath $sentinel
 if ((Run-Setup) -ne 0) { throw 'Native in-place upgrade/repair failed.' }
+if ((Get-BinPathCount) -ne 1) { throw 'Repair did not keep exactly one PATH entry.' }
+if ((Run-Setup @('/MERGETASKS="!addtopath"')) -ne 0) { throw 'Repair without the PATH option failed.' }
+if ((Get-BinPathCount) -ne 0) { throw 'Clearing the PATH option did not remove its entry.' }
+if ((Run-Setup @('/MERGETASKS="addtopath"')) -ne 0) { throw 'Repair with the PATH option failed.' }
+if ((Get-BinPathCount) -ne 1) { throw 'Selecting the PATH option again did not restore its entry.' }
 $mutex = [Threading.Mutex]::new($false, 'Local\LarsonServer.MedalSync')
 try { if ((Run-Setup) -eq 0) { throw 'Setup did not refuse an active session mutex.' } } finally { $mutex.Dispose() }
 $cli = Join-Path $app 'bin/medal-sync.exe'
@@ -59,4 +84,6 @@ $uninstall = Start-Process -FilePath (Join-Path $app 'unins000.exe') -ArgumentLi
 if ($uninstall.ExitCode -ne 0) { throw 'Native uninstall failed.' }
 if ((Test-Path -LiteralPath $key) -or (Test-Path -LiteralPath $shortcut) -or (Test-Path -LiteralPath $cli)) { throw 'Uninstall left managed registration, shortcut or executable behind.' }
 if ((Get-Content -LiteralPath $sentinel -Raw).Trim() -ne 'preserve me') { throw 'Uninstall removed unowned user files.' }
-Write-Output 'PASS: native installation, registration, shortcuts, in-place upgrade, busy refusal and safe uninstall'
+if ((Get-BinPathCount) -ne 0) { throw 'Uninstall left the program folder on PATH.' }
+if (($originalPath -join ';') -cne ((Get-UserPathEntries) -join ';')) { throw 'Setup changed other PATH entries.' }
+Write-Output 'PASS: native installation, registration, shortcuts, PATH option, in-place upgrade, busy refusal and safe uninstall'

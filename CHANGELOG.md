@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Setup can add `medal-sync` to PATH, so the CLI runs from any new terminal.
+  The option is off by default. It appends the program folder's `bin`
+  directory to the system or user PATH, which also exposes the bundled
+  `rclone` after any copy already on PATH. Clearing it on upgrade or repair
+  removes only an entry setup added; uninstall removes the entry for the
+  deleted folder.
 - Check cloud copies on demand with `replica verify [--target NAME] [--apply]`.
   It reads back every file of the committed generation while Ready, never
   copies, replaces or deletes, and records per-target results (counts only) in

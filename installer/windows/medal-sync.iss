@@ -75,6 +75,8 @@ SetupMutex=Global\LarsonServer.MedalSync.Setup
 AppMutex=Local\LarsonServer.MedalSync
 #endif
 Uninstallable=yes
+; Tells Explorer and new terminals to reload PATH after setup or uninstall changes it.
+ChangesEnvironment=yes
 UninstallLogMode=append
 VersionInfoVersion={#AppVersion}
 
@@ -83,6 +85,7 @@ ConfirmUninstall=Remove %1 and its program shortcuts?%n%nYour settings, device i
 
 [Tasks]
 Name: desktopicon; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
+Name: addtopath; Description: "Add medal-sync to PATH so it runs from any new terminal"; GroupDescription: "Command line:"; Flags: unchecked
 Name: winfsp; Description: "Install the pinned WinFsp clip-drive driver if it is missing (all-users setup)"; GroupDescription: "Storage dependencies:"; Check: ShouldOfferWinFsp
 
 [Files]
@@ -120,6 +123,106 @@ Filename: "{app}\bin\medal-sync-launch.exe"; Description: "Open Medal Sync"; Fla
 var
   CheckNumber: Integer;
   StoragePage: TOutputMsgWizardPage;
+  PathTaskWasSelected: Boolean;
+
+{ PATH lives in a different key for all-users and per-user installations. }
+function PathRoot(): Integer;
+begin
+  if IsAdminInstallMode then Result := HKLM else Result := HKCU;
+end;
+
+function PathKey(): String;
+begin
+  if IsAdminInstallMode then
+    Result := 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+  else
+    Result := 'Environment';
+end;
+
+function SamePathEntry(Entry, Directory: String): Boolean;
+begin
+  Entry := Trim(Entry);
+  if (Length(Entry) >= 2) and (Entry[1] = '"') and (Entry[Length(Entry)] = '"') then
+    Entry := Copy(Entry, 2, Length(Entry) - 2);
+  Result := (Entry <> '') and
+    (CompareText(RemoveBackslashUnlessRoot(Entry), RemoveBackslashUnlessRoot(Directory)) = 0);
+end;
+
+{ Returns Path without any entry for Directory, and whether one was found. }
+function PathWithout(Path, Directory: String; var Found: Boolean): String;
+var
+  Rest, Entry: String;
+  Separator: Integer;
+begin
+  Result := '';
+  Found := False;
+  Rest := Path;
+  while Rest <> '' do begin
+    Separator := Pos(';', Rest);
+    if Separator = 0 then begin
+      Entry := Rest;
+      Rest := '';
+    end else begin
+      Entry := Copy(Rest, 1, Separator - 1);
+      Rest := Copy(Rest, Separator + 1, Length(Rest));
+    end;
+    if SamePathEntry(Entry, Directory) then
+      Found := True
+    else if Trim(Entry) <> '' then begin
+      if Result <> '' then Result := Result + ';';
+      Result := Result + Entry;
+    end;
+  end;
+end;
+
+{ Appends the bin folder, so programs already on PATH (such as another rclone) keep priority. }
+procedure AddProgramsToPath();
+var
+  Path, Directory, Unused: String;
+  Found: Boolean;
+begin
+  Directory := ExpandConstant('{app}\bin');
+  if not RegQueryStringValue(PathRoot(), PathKey(), 'Path', Path) then Path := '';
+  Unused := PathWithout(Path, Directory, Found);
+  if Found then exit;
+  if (Path <> '') and (Path[Length(Path)] <> ';') then Path := Path + ';';
+  if not RegWriteExpandStringValue(PathRoot(), PathKey(), 'Path', Path + Directory) then
+    Log('Could not add ' + Directory + ' to PATH.');
+end;
+
+procedure RemoveProgramsFromPath();
+var
+  Path, Directory, Remaining: String;
+  Found: Boolean;
+begin
+  Directory := ExpandConstant('{app}\bin');
+  if not RegQueryStringValue(PathRoot(), PathKey(), 'Path', Path) then exit;
+  Remaining := PathWithout(Path, Directory, Found);
+  if not Found then exit;
+  if Remaining = '' then begin
+    if not RegDeleteValue(PathRoot(), PathKey(), 'Path') then Log('Could not remove ' + Directory + ' from PATH.');
+  end else if not RegWriteExpandStringValue(PathRoot(), PathKey(), 'Path', Remaining) then
+    Log('Could not remove ' + Directory + ' from PATH.');
+end;
+
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+begin
+  if WizardIsTaskSelected('addtopath') then
+    SetPreviousData(PreviousDataKey, 'AddToPath', 'yes')
+  else
+    SetPreviousData(PreviousDataKey, 'AddToPath', 'no');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then begin
+    if WizardIsTaskSelected('addtopath') then
+      AddProgramsToPath()
+    { Only undo an entry an earlier setup added, never one the user added by hand. }
+    else if PathTaskWasSelected then
+      RemoveProgramsFromPath();
+  end;
+end;
 
 function RegisteredInstallation(var Directory, Version: String): Boolean;
 var
@@ -301,6 +404,8 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Error: String;
 begin
+  { The bin folder is gone after uninstall, so its PATH entry would point nowhere. }
+  if CurUninstallStep = usPostUninstall then RemoveProgramsFromPath();
   { The initial check precedes the confirmation dialog. Recheck after the user confirms. }
   if CurUninstallStep = usUninstall then begin
     Error := CheckReady(True);
@@ -316,6 +421,8 @@ procedure InitializeWizard();
 var
   WinFspDirectory, DependencyStatus: String;
 begin
+  { Read before setup rewrites its registration with this run's choices. }
+  PathTaskWasSelected := GetPreviousData('AddToPath', '') = 'yes';
   if RegQueryStringValue(HKLM32, 'SOFTWARE\WinFsp', 'InstallDir', WinFspDirectory) and
      FileExists(AddBackslash(WinFspDirectory) + 'bin\winfsp-x64.dll') then
     DependencyStatus := 'WinFsp is installed.'
