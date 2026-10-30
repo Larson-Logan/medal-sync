@@ -8,7 +8,9 @@
   Update checks, the portable updater and setup compare the counter
   numerically and still recognize earlier three-part versions. The first such
   release is tagged with three parts (for example `v1.3.0`) so 1.2.0 and
-  earlier can still find it. Releases are published through the private
+  earlier can still find it. Update 1.2.0 and earlier to it before the first
+  hotfix is published; after that, those versions no longer see updates and
+  need the newest setup downloaded from the Releases page once. Releases are published through the private
   `medal-sync-release` GitHub App, the only non-administrator allowed to
   create `v*` tags.
 - Setup can add `medal-sync` to PATH, so the CLI runs from any new terminal.
