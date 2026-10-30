@@ -34,6 +34,7 @@ internal static class Program
             string rclone = args[Array.IndexOf(args, "--rclone") + 1];
             if (!File.Exists(rclone)) throw new IOException("An explicit pinned rclone executable is required.");
             TestReplication(rclone);
+            TestIncrementalAndReadyRetry(rclone);
             TestCloudPrimary(rclone);
             TestInterruptedTransfer(rclone);
             if (args.Contains("--mount"))
@@ -174,6 +175,48 @@ internal static class Program
         string history = Path.Combine(Path.GetDirectoryName(ReplicaFile(fixture, "onedrive", "#clip [test].mp4"))!, ".medal-sync-history");
         Check(Directory.EnumerateFiles(history, "*.mp4", SearchOption.AllDirectories).Any(f => File.ReadAllText(f) == "prior destination version"), "versioned replication preserves the previous destination before updating");
         Check(File.ReadAllText(ReplicaFile(fixture, "onedrive", "#clip [test].mp4")) == "synthetic media bytes", "versioned replication verifies the updated destination");
+    }
+
+    private static void TestIncrementalAndReadyRetry(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone) with { Replication = new(null, Remotes(fixture), [new("cloud", "onedrive:MedalSync")])
+            { FullVerifyEveryHandoffs = 3 } };
+        Seed(config);
+        string db = fixture.CreateLibrary("incremental");
+        MedalFixture.AddContent(db, "one", video: config.Capture.Append("#clip [test].mp4").Display);
+        var snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        var state = new LocalState(fixture.PathFor("state"));
+        List<IReadOnlyList<string>> commands = [];
+        void Execute(IReadOnlyList<string> arguments)
+        {
+            commands.Add(arguments);
+            new RcloneRunner(rclone).Run(arguments, TimeSpan.FromSeconds(30));
+        }
+        var replication = new StorageReplication(config, state, () => { }, Execute);
+        Check(replication.Publish(snapshot).ReadBackFiles == 1, "incremental first pass byte-verifies every file using real rclone");
+        commands.Clear();
+        Check(replication.Publish(snapshot).ReadBackFiles == 0 && commands.Count == 1 && commands[0].Contains("--size-only")
+            && !commands[0].Contains("--download"), "unchanged library performs only a presence/size check without media read-back");
+        File.WriteAllText(config.ServerCapture.Append("new.mp4").Display, "new synthetic media");
+        MedalFixture.AddContent(db, "two", video: config.Capture.Append("new.mp4").Display);
+        snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        Check(replication.Publish(snapshot).ReadBackFiles == 1, "one added clip reads back only its bytes while old clips get a size check");
+        string destination = ReplicaFile(fixture, "onedrive", "#clip [test].mp4");
+        File.WriteAllText(destination, new string('x', "synthetic media bytes".Length));
+        Check(replication.Publish(snapshot).Deferred.SequenceEqual(["cloud"]), "scheduled full check catches same-size corruption of previously unchanged media");
+        File.Delete(destination);
+        var store = CoordinationStore.Create(config.LibraryCoordinationDirectory, config.LibraryId, snapshot, new(1, [], []),
+            new(new string('d', 32), "Synthetic PC"), new string('e', 32), Versions, DateTimeOffset.UtcNow);
+        var before = store.ReadJournal();
+        var retry = new ReadyReplicaRetry(config, state, store, () => { }, Execute);
+        Check(retry.Plan().Targets.SequenceEqual(["cloud"]), "Ready retry previews the exact pending optional target");
+        Check(retry.Apply(retry.Plan()).Deferred.Count == 0 && StorageReplication.Pending(state, config.LibraryId).Count == 0
+            && File.ReadAllText(destination) == "synthetic media bytes", "Ready retry copies and byte-verifies a repaired target and clears pending evidence");
+        Check(store.ReadJournal() == before, "real Ready retry never acquires ownership or changes the journal");
+        File.Delete(destination);
+        Check(replication.Publish(snapshot).Deferred.SequenceEqual(["cloud"]), "incremental size check catches deleted unchanged media");
+        Check(retry.Apply(retry.Plan()).ReadBackFiles == 2, "failed listing invalidates receipts so Ready retry verifies the whole destination");
     }
 
     private static void TestCloudPrimary(string rclone)

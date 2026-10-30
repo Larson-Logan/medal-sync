@@ -112,8 +112,10 @@ internal static class SessionCommands
         if (json)
         {
             var desktop = DesktopStatus.Read(state, config.LibraryId, journal, device, (supervisorRunning ?? AnotherInstanceRunning)(), now);
-            output.WriteLine(StatusReport.Reached(config.LibraryId, journal, device, desktop, store.PendingRequests(now), store.StaleRequests(now),
-                StorageReplication.Pending(state, config.LibraryId), StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now).ToJson());
+            var report = StatusReport.Reached(config.LibraryId, journal, device, desktop, store.PendingRequests(now), store.StaleRequests(now),
+                StorageReplication.Pending(state, config.LibraryId), StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now)
+                with { ReplicaRetry = ReplicaRetryStatus.Read(state, config.LibraryId, now) };
+            output.WriteLine(report.ToJson());
             return 0;
         }
         output.WriteLine(StatusText.For(journal, device ?? DesktopStatus.NoDevice, Directory.Exists(config.DriveRoot.Display)));
@@ -121,7 +123,9 @@ internal static class SessionCommands
         foreach (var request in store.StaleRequests(now))
             output.WriteLine($"Old switch request from {request.Device.DisplayName} ({request.RequestedAt:yyyy-MM-dd HH:mm} UTC) is ignored; the next session removes it.");
         foreach (var replica in StorageReplication.Pending(state, config.LibraryId))
-            output.WriteLine($"Cloud copy '{replica.Name}' is pending since {replica.Since:yyyy-MM-dd HH:mm} UTC; it retries on the next finish.");
+            output.WriteLine($"Cloud copy '{replica.Name}' is pending since {replica.Since:yyyy-MM-dd HH:mm} UTC; retry while Ready with 'medal-sync replicate retry --apply', or on the next finish.");
+        if (ReplicaRetryStatus.Read(state, config.LibraryId, now) is { } retry)
+            output.WriteLine($"Cloud retry (generation {retry.Generation}): {retry.Message}");
         foreach (var item in StorageCheckReport.Outstanding(state, config.LibraryId))
             output.WriteLine($"Storage needs attention: {item.Detail} Run 'medal-sync storage check' after fixing it.");
         return 0;
@@ -257,6 +261,7 @@ internal static class SessionCommands
         var context = Load();
         using var instance = SingleInstance();
         shutdown ??= new SessionShutdown(new SystemClock());
+        using var retry = ReplicaRetryInterlock.Launch();
         using var status = new DesktopStatusPublisher(context.State, context.Config.LibraryId, context.Config.AccountId, context.Device.DeviceId);
         using var sessionEnd = new WindowsSessionEnd(shutdown, context.Log.Write);
         // At sign-in the network or WARP can still be starting; an unreachable
@@ -374,6 +379,7 @@ internal static class SessionCommands
         var context = Load();
         using var instance = SingleInstance();
         var shutdown = new SessionShutdown(new SystemClock());
+        using var retry = ReplicaRetryInterlock.Launch();
         using var sessionEnd = new WindowsSessionEnd(shutdown, context.Log.Write);
         using var status = new DesktopStatusPublisher(context.State, context.Config.LibraryId, context.Config.AccountId, context.Device.DeviceId);
         var (coordinator, store, mount) = Coordinator(context, accept, shutdown: shutdown, progress: status.Report);

@@ -104,6 +104,7 @@ library, for example a copy.
 | `enroll --out DIR [--apply]` | Adds this PC to an existing library. The preview writes a review of the merged library to `DIR`; apply uses that exact review. |
 | `enroll recover --out DIR [--apply]` | Restores the merged library and this PC's original device settings from an interrupted enrollment's review. Run `finish` afterwards. |
 | `storage init-primary [--apply]` | Marks a new, empty primary folder or rclone remote for this library, so you can [switch primaries](storage.md#switch-primaries). Needs `replication.localCopyRoot` and a Ready library. |
+| `replicate retry [--target NAME] [--apply]` | Previews pending optional cloud copies of the committed generation while Ready. `--apply` copies and verifies from this PC's persistent copy, otherwise primary storage, without taking ownership. Launch, shutdown or a changed journal/configuration cancels unfinished work. Exit 3 means canceled or still pending. See [retry cloud copies](storage.md#retry-cloud-copies-while-ready). |
 
 ### `config create` options
 

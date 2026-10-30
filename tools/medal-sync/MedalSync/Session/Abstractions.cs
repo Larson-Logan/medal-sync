@@ -112,6 +112,10 @@ internal interface IStorageReplication
 internal sealed record ReplicationResult(IReadOnlyList<string> Deferred)
 {
     public static readonly ReplicationResult None = new([]);
+    public int ReadBackFiles { get; init; }
+    public long ReadBackBytes { get; init; }
+    public int VerifiedDestinations { get; init; }
+    public string Summary => VerifiedDestinations == 0 ? "" : $" Verification read back {ReadBackFiles} file(s), {ReadBackBytes} bytes across {VerifiedDestinations} destination(s); unchanged files passed size checks.";
 }
 
 internal sealed record PendingReplica(string Name, DateTimeOffset Since, DateTimeOffset LastAttempt);

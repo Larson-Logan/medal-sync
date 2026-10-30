@@ -41,7 +41,7 @@ internal static class ReplicationPlan
         return files.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => (f.Key, f.Value)).ToArray();
     }
 
-    public static IReadOnlyList<string> Arguments(string command, string source, string target, string fileList, string configPath, int? bandwidthLimitMiB = null, string? versionDirectory = null)
+    public static IReadOnlyList<string> Arguments(string command, string source, string target, string fileList, string configPath, int? bandwidthLimitMiB = null, string? versionDirectory = null, bool sizeOnly = false)
     {
         if (command is not ("copy" or "check")) throw new ArgumentException("Unsupported replication command.", nameof(command));
         List<string> arguments = [command, source, target, "--config", configPath, "--files-from-raw", fileList,
@@ -53,7 +53,7 @@ internal static class ReplicationPlan
             if (versionDirectory is null) arguments.Add("--immutable");
             else arguments.AddRange(["--backup-dir", versionDirectory]);
         }
-        else arguments.AddRange(["--one-way", "--download"]);
+        else arguments.AddRange(["--one-way", sizeOnly ? "--size-only" : "--download"]);
         if (bandwidthLimitMiB is { } bandwidth)
         {
             if (bandwidth is < 1 or > 10000) throw new ArgumentOutOfRangeException(nameof(bandwidthLimitMiB));

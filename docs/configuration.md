@@ -81,6 +81,8 @@ cache. See the [storage guide](storage.md) for how each choice behaves.
 | `targets` | `[]` | At most 8 | Cloud copies; see below. |
 | `conflictPolicy` | `"STOP"` | `"STOP"` or `"VERSION"` | What to do when a destination already has a different file. `"STOP"` refuses; `"VERSION"` moves the old file into `.medal-sync-history/` first. See [verification, conflicts and recovery](storage.md#verification-conflicts-and-recovery). |
 | `timeoutMinutes` | `240` | 1 to 1440 | Time limit for each copy or verification command. |
+| `fullVerifyEveryHandoffs` | `1` | 1 to 100 | Verify all media bytes every N replication passes per destination. `1` keeps always-full verification; larger values opt into incremental checks between full passes. Retries also count as passes. |
+| `fullVerifyEveryDays` | `7` | 1 to 30 | Maximum age in days of a full verification when incremental checks are enabled. Missing, invalid or failed receipts always force a full pass sooner. |
 | `bandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Transfer limit in MiB/s for copies to rclone remotes: cloud targets and an rclone primary. Copies to an SMB share are not limited. |
 | `credentialCheck` | `"WARN"` | `"WARN"` or `"REFUSE"` | What launch does when an rclone primary or a required target fails its sign-in check. `"WARN"` starts Medal with a notice; `"REFUSE"` keeps Medal closed and the library Ready. Optional targets and outages only ever produce a notice. See [check sign-in before recording](storage.md#check-sign-in-before-recording). |
 
