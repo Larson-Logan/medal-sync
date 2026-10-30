@@ -7,8 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $root 'scripts/storage/medal-sync/MedalSync.Update.psm1') -Force
-$version = ([xml](Get-Content -LiteralPath (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.VersionPrefix
-$null = Assert-MedalVersion $version
+$version = Get-MedalBuildVersion $root
 if (-not $SkipBuild) {
     & (Join-Path $root 'scripts/storage/medal-sync/publish-medal-sync.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }

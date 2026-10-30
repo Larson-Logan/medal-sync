@@ -66,7 +66,9 @@ check. Ordinary direct pushes cannot use this bypass. Keep the bypass limited
 to repository administrators.
 
 The **release tags** ruleset restricts creation, updates and deletion of
-`refs/tags/v*` to repository administrators. Preserve published version tags
+`refs/tags/v*` to repository administrators and GitHub Actions, which
+publishes a release for every merge to `main`. Only the release workflow has
+contents-write permission. Preserve published version tags
 and assets; publish a new version to correct an existing release. Follow the [release process](releases.md).
 
 Require full commit SHA pins for Actions. Allow `actions/*` and
