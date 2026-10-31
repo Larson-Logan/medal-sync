@@ -10,14 +10,18 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def step_script(name):
+    workflow = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+    # Read the literal PowerShell step without adding a YAML dependency to CI.
+    step = workflow.split(f'- name: {name}\n', 1)[1]
+    step = step.split('      - name:', 1)[0]
+    return textwrap.dedent(step.split('        run: |\n', 1)[1])
+
+
 class ReleaseAssetTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        workflow = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
-        # Read the literal PowerShell step without adding a YAML dependency to CI.
-        step = workflow.split('- name: Verify planned asset names and checksums\n', 1)[1]
-        step = step.split('      - name:', 1)[0]
-        cls.script = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        cls.script = step_script('Verify planned asset names and checksums')
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='release-assets-')
@@ -84,6 +88,46 @@ class ReleaseAssetTests(unittest.TestCase):
         path = self.assets / f'{self.setup}.sha256'
         path.write_text(path.read_text(encoding='ascii').replace(self.setup, self.archive), encoding='ascii')
         self.verify(succeeds=False)
+
+
+class ReleasePublishTests(unittest.TestCase):
+    def test_publishes_to_the_explicit_repository_without_a_checkout(self):
+        with tempfile.TemporaryDirectory(prefix='release-publish-') as temporary:
+            root = Path(temporary)
+            # A fake CLI prevents network access and checks the arguments of the
+            # actual publish step. No repository or remotes exist in this folder.
+            stub = textwrap.dedent('''\
+                $ErrorActionPreference = 'Stop'
+                $global:releaseCalls = @()
+                function gh {
+                    $global:LASTEXITCODE = 0
+                    if ($args[0] -eq 'api') { return }
+                    if ($args[0] -ne 'release') { throw 'Unexpected gh command.' }
+                    $repositoryIndex = [Array]::IndexOf($args, '--repo')
+                    if ($repositoryIndex -lt 0 -or $args[$repositoryIndex + 1] -cne $env:GITHUB_REPOSITORY) {
+                        throw 'Release command requires the explicit target repository.'
+                    }
+                    $global:releaseCalls += $args[1]
+                    if ($args[1] -eq 'create') { 'https://example.com/release' }
+                }
+            ''')
+            assertions = textwrap.dedent('''\
+                if (($global:releaseCalls -join ',') -cne 'create,edit') {
+                    throw 'Expected draft creation followed by publication.'
+                }
+            ''')
+            script = root / 'publish.ps1'
+            script.write_text(stub + step_script('Publish GitHub release') + assertions, encoding='utf-8')
+            summary = root / 'summary.md'
+            environment = {**os.environ, 'GITHUB_REPOSITORY': 'example/project',
+                           'GITHUB_SHA': 'a' * 40, 'GITHUB_STEP_SUMMARY': str(summary),
+                           'VERSION': '1.3.0.02'}
+            result = subprocess.run(
+                ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(script)],
+                cwd=root, env=environment, capture_output=True, text=True,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn('https://example.com/release', summary.read_text(encoding='utf-8'))
 
 
 if __name__ == '__main__':

@@ -208,8 +208,8 @@ jobs:
           # Upload everything to a draft first, so a failed upload never leaves a
           # published release with missing files. Publishing creates the tag on
           # this exact commit.
-          $url = gh release create $tag $setup "$setup.sha256" $archive "$archive.sha256" --target $env:GITHUB_SHA --draft --generate-notes --title "Medal Sync $version"
+          $url = gh release create $tag $setup "$setup.sha256" $archive "$archive.sha256" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --draft --generate-notes --title "Medal Sync $version"
           if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed; existing releases are never overwritten.' }
-          gh release edit $tag --draft=false --latest
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw "Publishing failed. The draft is still available: $url" }
           "Published Medal Sync $version`: $url" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
