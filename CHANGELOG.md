@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed: transient SSD cache cleanup trouble keeps finish supervision running.
+  Failed upload retries now appear in status and the tray with storage guidance;
+  a queue entry still failing after 15 minutes needs action and retries with backoff.
 - Fixed: simultaneous status and cloud-operation checks no longer mistake each
   other for a running session and cancel an otherwise safe cloud operation.
 - Fixed: editing configuration in the setup wizard preserves required cloud

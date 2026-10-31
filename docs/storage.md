@@ -305,6 +305,13 @@ file names; only the kind of problem is kept. The last verification receipt is
 `replication/last-verified.json` under the configured state root; it lists
 verified and deferred targets.
 
+The clip drive also reports uploads that failed or were canceled and are waiting
+for rclone to retry. Check that primary storage accepts writes and has free
+space. When the same queue entry keeps failing for 15 minutes after Medal exits,
+finish shows *Action needed* and retries with backoff. SSD cache cleanup trouble
+is reported separately and keeps supervision running while the cache cleaner
+retries. Ownership and cached clips remain on this PC throughout.
+
 ### Incremental verification
 
 Always-full byte verification remains the default. To reduce read-back for a
