@@ -15,7 +15,7 @@
     "cachePollSeconds": 30,
     "dirCacheHours": 1000,
     "transfers": 2,
-    "controlPort": 53682
+    "controlPort": 53684
   },
   "maxSessionHours": 4,
   "syncExclusions": [
