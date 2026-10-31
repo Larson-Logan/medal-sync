@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed: transient SSD cache cleanup trouble keeps finish supervision running.
+  Failed upload retries now appear in status and the tray with storage guidance;
+  a queue entry still failing after 15 minutes needs action and retries with backoff.
 - Fixed: editing configuration in the setup wizard preserves required cloud
   copies. Targets can be explicitly required or optional, and Review calls out
   requirement changes and added or removed targets.
