@@ -9,6 +9,8 @@ Medal Sync installs two programs in its `bin` folder:
 
 The examples assume `$cli` names `medal-sync.exe` in the folder you chose in
 setup, as in [getting started](getting-started.md#plan-configuration-before-using-live-data).
+If you selected **Add medal-sync to PATH** in setup, you can type `medal-sync`
+in any terminal opened after setup instead.
 
 ## How commands behave
 
@@ -105,6 +107,13 @@ library, for example a copy.
 | `enroll recover --out DIR [--apply]` | Restores the merged library and this PC's original device settings from an interrupted enrollment's review. Run `finish` afterwards. |
 | `storage init-primary [--apply]` | Marks a new, empty primary folder or rclone remote for this library, so you can [switch primaries](storage.md#switch-primaries). Needs `replication.localCopyRoot` and a Ready library. |
 | `replicate retry [--target NAME] [--apply]` | Previews pending optional cloud copies of the committed generation while Ready. `--apply` copies and verifies from this PC's persistent copy, otherwise primary storage, without taking ownership. Launch, shutdown or a changed journal/configuration cancels unfinished work. Exit 3 means canceled or still pending. See [retry cloud copies](storage.md#retry-cloud-copies-while-ready). |
+| `replica verify [--target NAME] [--apply]` | Previews, then reads back every file of the committed generation at each cloud copy while Ready. Never copies, replaces or deletes. Exit 1 means missing or different files, 3 incomplete. See [check cloud copies](storage.md#check-cloud-copies-on-demand). |
+| `replica history [--target NAME] [--json]` | Shows past checks per cloud copy: counts only, the last complete and last passing result. Read-only. |
+| `replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]` | Reviews unreferenced media and, if asked, old version history at an optional cloud copy. Writes a private review file. |
+| `replica prune --in FILE --apply` | Moves exactly the reviewed files into the copy's `.medal-sync-trash` folder. Refuses if anything changed since the review. See [clean up a cloud copy](storage.md#clean-up-a-cloud-copy). |
+| `replica purge-trash --target NAME [--older-than D] [--apply]` | Lists trash batches and permanently deletes those whose files were moved at least `D` days ago (default 7). |
+| `retention --out FILE [--keep N] [--keep-days D] [--grace-days G]` | Reviews old generations and this PC's old recovery folders to remove. Read-only. |
+| `retention --in FILE --apply` | Removes exactly the reviewed folders while every PC stays Ready. See [retention](storage.md#retention). |
 
 ### `config create` options
 

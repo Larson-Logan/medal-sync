@@ -3,26 +3,40 @@ name: Release Medal Sync
 # repository. Release builds deliberately use no caches.
 #
 # Releases are built only from main, which only accepts promotions from dev.
-# Promoting a version bump to main builds and verifies that commit, then creates
-# a draft release targeting it. Publishing the draft creates the v* tag as the
-# maintainer, so the admin-only tag ruleset stays in force.
+# Every merge to main builds, verifies and publishes a release tagged
+# vMAJOR.MINOR.PATCH.NN. MAJOR.MINOR.PATCH is VersionPrefix in
+# Directory.Build.props; NN is a two-digit hotfix counter. A merge that raises
+# VersionPrefix starts at .00, and every later merge adds one.
+#
+# Updaters in 1.2.0 and earlier only recognize three-part tags. So the first
+# release newer than LAST_LEGACY_RELEASE is a three-part bridge (for example
+# v1.3.0) whose updater understands both formats; its hotfixes continue at .01.
+#
+# Only administrators and the medal-sync-release GitHub App may create v* tags
+# (see .github/rulesets/release-tags.json), and rulesets cannot exempt
+# github-actions[bot]. So only the publish step uses a short-lived app token;
+# everything else uses github.token. Because the app publishes the release,
+# the milestones workflow sees it and closes the version's milestone.
 on:
   push:
     branches: [main]
-    paths: [Directory.Build.props]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
+  # One release at a time, so two merges never take the same counter. A newer
+  # queued merge replaces an older queued one; it contains the older changes.
   group: release
   cancel-in-progress: false
 env:
+  # Newest release whose updater only understands vMAJOR.MINOR.PATCH tags.
+  LAST_LEGACY_RELEASE: 1.2.0
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
   NUGET_XMLDOC_MODE: skip
 jobs:
   plan:
-    name: Decide whether this version needs a release
+    name: Choose the release version
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -32,6 +46,7 @@ jobs:
       issues: read
     outputs:
       version: ${{ steps.plan.outputs.version }}
+      revision: ${{ steps.plan.outputs.revision }}
       release: ${{ steps.plan.outputs.release }}
     steps:
       - id: plan
@@ -40,42 +55,100 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
-          props="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/Directory.Build.props?ref=$SHA")"
-          version="$(sed -n 's:.*<VersionPrefix>\([^<]*\)</VersionPrefix>.*:\1:p' <<<"$props")"
-          if ! grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' <<<"$version"; then
-            echo "::error::VersionPrefix '$version' is not MAJOR.MINOR.PATCH."
+          version_at() {
+            gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/Directory.Build.props?ref=$1" \
+              | sed -n 's:.*<VersionPrefix>\([^<]*\)</VersionPrefix>.*:\1:p'
+          }
+          prefix="$(version_at "$SHA")"
+          if ! grep -Eqx '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)' <<<"$prefix"; then
+            echo "::error::VersionPrefix '$prefix' is not MAJOR.MINOR.PATCH."
             exit 1
           fi
-          echo "version=$version" >>"$GITHUB_OUTPUT"
-          export TAG="v$version"
-          existing="$(gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.tag_name == env.TAG) | .html_url')"
+
+          # Only the tip of main is released. A rerun for an older commit would
+          # otherwise publish older code under a newer number than a later fix.
+          head="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          if [ "$head" != "$SHA" ]; then
+            echo "release=false" >>"$GITHUB_OUTPUT"
+            echo "main has moved on to $head, which is released instead, so nothing was built." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # A rerun for a commit that already has a release, draft or published, does nothing.
+          existing="$(gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.target_commitish == env.SHA) | .html_url')"
           if [ -n "$existing" ]; then
             echo "release=false" >>"$GITHUB_OUTPUT"
-            echo "A release for v$version already exists, so nothing was built: $existing" >>"$GITHUB_STEP_SUMMARY"
+            echo "This commit already has a release, so nothing was built: $existing" >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Highest hotfix counter already used by a release or tag for this
+          # VersionPrefix. A three-part bridge release counts as 00.
+          export PREFIX="$prefix"
+          used="$( {
+              gh api --paginate "repos/$REPO/releases" --jq '.[].tag_name'
+              gh api --paginate "repos/$REPO/git/matching-refs/tags/v$prefix." --jq '.[].ref | ltrimstr("refs/tags/")'
+            } | awk -v p="v$PREFIX." '$0 == substr(p, 1, length(p) - 1) { print 0 } index($0, p) == 1 { n = substr($0, length(p) + 1); if (n ~ /^[0-9][0-9]+$/) print n + 0 }' \
+            | sort -n | tail -n 1)"
+          parent="$(gh api "repos/$REPO/commits/$SHA" --jq '.parents[0].sha')"
+          previous="$(version_at "$parent")"
+          if [ "$prefix" != "$previous" ]; then
+            # This merge changed VersionPrefix in Directory.Build.props: reset the counter.
+            if [ -n "$used" ]; then
+              echo "::error::This merge changes the version to $prefix, but v$prefix.* is already released. Raise VersionPrefix instead."
+              exit 1
+            fi
+            revision=00
+          elif [ -z "$used" ]; then
+            revision=00
           else
-            echo "release=true" >>"$GITHUB_OUTPUT"
-            # Publishing closes the milestone, so list anything still open in it now.
-            export VERSION="$version"
-            milestone="$(gh api --paginate "repos/$REPO/milestones?state=open&per_page=100" --jq '.[] | select(.title == env.VERSION) | .number')"
+            revision="$(printf '%02d' $((used + 1)))"
+          fi
+          version="$prefix.$revision"
+          if [ "$revision" = 00 ]; then
+            # No release is newer than LAST_LEGACY_RELEASE yet: publish the bridge.
+            newest="$( { echo "$LAST_LEGACY_RELEASE"
+                gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.draft == false) | .tag_name | ltrimstr("v")'
+              } | sort -V | tail -n 1)"
+            if [ "$newest" = "$LAST_LEGACY_RELEASE" ]; then
+              revision=none
+              version="$prefix"
+              echo "Older updaters only find three-part tags, so this bridge release is v$version; hotfixes continue at .01." >>"$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          {
+            echo "version=$version"
+            echo "revision=$revision"
+            echo "release=true"
+          } >>"$GITHUB_OUTPUT"
+          echo "Releasing $version (VersionPrefix $prefix, hotfix $revision)." >>"$GITHUB_STEP_SUMMARY"
+
+          # The first release of a version closes its milestone, so list anything still open in it now.
+          if [ "$revision" = 00 ] || [ "$revision" = none ]; then
+            milestone="$(gh api --paginate "repos/$REPO/milestones?state=open&per_page=100" --jq '.[] | select(.title == env.PREFIX) | .number')"
             if [ -n "$milestone" ]; then
               remaining="$(gh api --paginate "repos/$REPO/issues?milestone=$milestone&state=open&per_page=100" --jq '.[] | "- #\(.number) \(.title)"')"
               if [ -n "$remaining" ]; then
-                echo "::warning::Milestone $version still has open items. Finish or move them before publishing."
-                { echo "Open in milestone $version:"; echo "$remaining"; } >>"$GITHUB_STEP_SUMMARY"
+                echo "::warning::Milestone $prefix still has open items. Move them to the next milestone."
+                { echo "Open in milestone $prefix:"; echo "$remaining"; } >>"$GITHUB_STEP_SUMMARY"
               fi
             fi
           fi
 
   release:
-    name: Build, verify and draft release
+    name: Build, verify and publish release
     needs: plan
     if: needs.plan.outputs.release == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
+    # The release itself is published with the app token, so github.token only reads.
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
+    env:
+      # Read by MSBuild (Directory.Build.props) and the packaging scripts.
+      MedalReleaseRevision: ${{ needs.plan.outputs.revision }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -99,13 +172,14 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.VersionPrefix
+          Import-Module ./scripts/storage/medal-sync/MedalSync.Update.psm1
+          $version = Get-MedalBuildVersion (Get-Location).Path
           if ($version -cne $env:VERSION) { throw 'Checked-out version differs from the planned version.' }
           git merge-base --is-ancestor HEAD origin/main
           if ($LASTEXITCODE -ne 0) { throw 'Release commit must be on main.' }
           $tagged = git rev-parse --verify --quiet "refs/tags/v$version^{commit}"
           if ($tagged -and $tagged -ne (git rev-parse HEAD)) {
-            throw "Tag v$version already exists on another commit. Raise the version instead."
+            throw "Tag v$version already exists on another commit. Rerun the workflow to take the next hotfix number."
           }
           $global:LASTEXITCODE = 0
       - name: Validate
@@ -123,22 +197,34 @@ jobs:
           subject-path: |
             .medal-sync-dist/medal-sync-*-setup-win-x64.exe
             .medal-sync-dist/medal-sync-*-win-x64.zip
-      - name: Create draft GitHub release
+      - name: Get a release app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+      - name: Publish GitHub release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          # The app may create v* tags; github.token may not.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:VERSION
           $tag = $env:TAG = "v$version"
-          # Re-check just before creating, so a draft made meanwhile is never duplicated.
+          # Re-check just before creating, so a release made meanwhile is never duplicated.
           $existing = gh api --paginate "repos/$env:GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == env.TAG) | .html_url'
           if ($LASTEXITCODE -ne 0) { throw 'Could not list releases.' }
           if ($existing) { throw "A release for $tag already exists: $existing" }
           $archive = ".medal-sync-dist/medal-sync-$version-win-x64.zip"
           $setup = ".medal-sync-dist/medal-sync-$version-setup-win-x64.exe"
-          # The draft targets this exact commit. Publishing it creates the tag.
+          # Upload everything to a draft first, so a failed upload never leaves a
+          # published release with missing files. Publishing creates the tag on
+          # this exact commit.
           $url = gh release create $tag $setup "$setup.sha256" $archive "$archive.sha256" --target $env:GITHUB_SHA --draft --generate-notes --title "Medal Sync $version"
           if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed; existing releases are never overwritten.' }
-          "Draft release ready to review and publish: $url" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          gh release edit $tag --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw "Publishing failed. The draft is still available: $url" }
+          "Published Medal Sync $version`: $url" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY

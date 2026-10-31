@@ -10,7 +10,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'Native installer integration requires Windows.' }
 $root = Split-Path -Parent $PSScriptRoot
-$version = ([xml](Get-Content -LiteralPath (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.VersionPrefix
+Import-Module (Join-Path $PSScriptRoot 'storage/medal-sync/MedalSync.Update.psm1') -Force
+$version = Get-MedalBuildVersion $root
 $id = [guid]::NewGuid().ToString('D')
 $scratch = Join-Path $root ('.validation/native-isolated-' + $id)
 $state = Join-Path $scratch 'synthetic-state'
@@ -22,7 +23,6 @@ if ((Test-Path -LiteralPath $key) -or (Test-Path -LiteralPath $shortcutGroup)) {
 New-Item -ItemType Directory -Path $scratch,$state -Force | Out-Null
 $compiler = & (Join-Path $PSScriptRoot 'setup-installer-toolchain.ps1')
 $dependencies = & (Join-Path $PSScriptRoot 'setup-storage-toolchain.ps1')
-Import-Module (Join-Path $PSScriptRoot 'storage/medal-sync/MedalSync.Update.psm1') -Force
 $archive = Join-Path $root ".medal-sync-dist/medal-sync-$version-win-x64.zip"
 $hash = ((Get-Content -LiteralPath "$archive.sha256" -Raw) -split '\s+')[0]
 $payload = Join-Path $scratch 'payload'

@@ -190,7 +190,7 @@ internal static class EnrollmentCommands
             store.Update(r => Ownership.MarkActive(r, device, session, DateTimeOffset.UtcNow), TimeSpan.FromSeconds(5));
             store.Update(r => Ownership.BeginDrain(r, device, session, DateTimeOffset.UtcNow), TimeSpan.FromSeconds(5));
             store.Update(r => Ownership.BeginPublish(r, device, session, DateTimeOffset.UtcNow), TimeSpan.FromSeconds(5));
-            long next = store.Generations.Numbered().Max() + 1;
+            long next = store.Generations.Next(review.Generation);
             store.Generations.Publish(next, review.Generation, session, device, candidate, AssetManifest.From(checker.OnServer(candidate)), install.Versions, DateTimeOffset.UtcNow);
             store.Update(r => Ownership.CompletePublish(r, device, session, next, DateTimeOffset.UtcNow), TimeSpan.FromSeconds(5));
             Save("completed", next);

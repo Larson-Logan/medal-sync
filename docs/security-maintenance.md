@@ -66,8 +66,43 @@ check. Ordinary direct pushes cannot use this bypass. Keep the bypass limited
 to repository administrators.
 
 The **release tags** ruleset restricts creation, updates and deletion of
-`refs/tags/v*` to repository administrators. Preserve published version tags
+`refs/tags/v*` to repository administrators and the `medal-sync-release`
+GitHub App, which the release workflow uses to publish a release for every
+merge to `main`. Rulesets cannot exempt `github-actions[bot]`, and GitHub
+accepts the app as a bypass actor only while it is installed on this
+repository, so install it before running the ruleset script. Only the release
+workflow has contents-write permission. Preserve published version tags
 and assets; publish a new version to correct an existing release. Follow the [release process](releases.md).
+
+### Release app
+
+`medal-sync-release` is a private GitHub App owned by `Larson-Logan` and
+installed on this repository only. It has Contents read and write and
+Metadata read-only permissions, no webhook and no events. The release workflow
+mints a token for it, limited to contents-write, only in the step that
+publishes the release.
+
+- `RELEASE_APP_CLIENT_ID` (repository variable) holds the app's client ID,
+  which the workflow uses to mint its token.
+- `RELEASE_APP_ID` (repository variable) records the app's numeric ID. The
+  release tags ruleset names the same ID as its `Integration` bypass actor.
+- `RELEASE_APP_PRIVATE_KEY` (repository secret) holds its private key. No copy
+  is kept anywhere else; never commit, log or attach it.
+
+Rotate the key at least yearly, when a maintainer with access leaves, and at
+once if it may have been exposed:
+
+1. In the app's settings (**Settings → Developer settings → GitHub Apps →
+   medal-sync-release**), choose **Generate a private key**. A `.pem` file
+   downloads.
+2. Store it: `gh secret set RELEASE_APP_PRIVATE_KEY --repo Larson-Logan/medal-sync < path\to\key.pem`.
+3. Delete the downloaded `.pem`, then delete the old key in the app's settings.
+   Tokens already minted from it expire within an hour.
+
+The new key is first used by the next promotion to `main`. If the app is ever
+replaced, update `RELEASE_APP_CLIENT_ID`, `RELEASE_APP_ID` and the actor ID in
+[release-tags.json](../.github/rulesets/release-tags.json), install the new
+app, then run the ruleset script.
 
 Require full commit SHA pins for Actions. Allow `actions/*` and
 `github/codeql-action/*`; review an action's source and requested permissions

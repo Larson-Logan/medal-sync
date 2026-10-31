@@ -208,6 +208,16 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { return []; }
     }
 
+    /// <summary>Queues one optional target for <c>replicate retry</c>, keeping any existing entry as it is.</summary>
+    internal static void MarkPending(LocalState state, string libraryId, string name, DateTimeOffset now)
+    {
+        var pending = Pending(state, libraryId).ToList();
+        if (pending.Any(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return;
+        pending.Add(new PendingReplica(name, now, now));
+        Directory.CreateDirectory(Path.GetDirectoryName(PendingPath(state))!);
+        AtomicFile.Replace(PendingPath(state), Json.Serialize(new PendingReplicas(1, libraryId, pending.ToArray())));
+    }
+
     private void RecordPending(IReadOnlyList<string> deferred, DateTimeOffset now, string? attempted = null)
     {
         var previous = Pending(state, config.LibraryId).ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);

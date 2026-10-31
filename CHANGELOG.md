@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- Every merge to `main` now publishes a release automatically, tagged
+  `vMAJOR.MINOR.PATCH.NN`. `NN` is a hotfix counter: `.00` when the merge
+  changes the version in `Directory.Build.props`, then `.01`, `.02` and so on.
+  Update checks, the portable updater and setup compare the counter
+  numerically and still recognize earlier three-part versions. The first such
+  release is tagged with three parts (for example `v1.3.0`) so 1.2.0 and
+  earlier can still find it. Update 1.2.0 and earlier to it before the first
+  hotfix is published; after that, those versions no longer see updates and
+  need the newest setup downloaded from the Releases page once. Releases are published through the private
+  `medal-sync-release` GitHub App, the only non-administrator allowed to
+  create `v*` tags.
+- Setup can add `medal-sync` to PATH, so the CLI runs from any new terminal.
+  The option is off by default. It appends the program folder's `bin`
+  directory to the system or user PATH, which also exposes the bundled
+  `rclone` after any copy already on PATH. Clearing it on upgrade or repair
+  removes only an entry setup added; uninstall removes the entry for the
+  deleted folder.
+- Check cloud copies on demand with `replica verify [--target NAME] [--apply]`.
+  It reads back every file of the committed generation while Ready, never
+  copies, replaces or deletes, and records per-target results (counts only) in
+  `replica history`. Incomplete attempts never replace the last complete result.
+  Missing or different files invalidate that target's incremental receipt and
+  queue an optional target for `replicate retry`.
+- Clean up unreferenced files and old version history at an optional cloud copy
+  with a reviewed `replica prune --target NAME --out FILE`, then
+  `replica prune --in FILE --apply`. Apply holds the journal writer lock, refuses
+  any change since the review and only moves files into `.medal-sync-trash/`;
+  `replica purge-trash` deletes old trash separately. Referenced and recent
+  files are never planned.
+- Remove old generations and this PC's old recovery folders with a reviewed
+  `retention --out FILE`, then `retention --in FILE --apply`. The head, recent
+  ancestors, recent generations, each PC's latest generation and the
+  highest-numbered folder are kept. `generations/retention.json` records what
+  was removed, so numbers are never reused and `history list` shows removed
+  ranges instead of damage. Update every PC to 1.3.0 before applying.
+- Fixed: invalidating a cloud copy's verification receipt no longer fails when
+  no receipt was ever written.
+- Fixed: rclone commands no longer wait on an invisible password prompt. The
+  runner disables prompts and closes stdin so encrypted configs fail promptly
+  through the existing configuration guidance.
+
 ## 1.2.0 — 2026-10-29
 
 - Retry pending optional cloud copies while Ready with

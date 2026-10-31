@@ -11,7 +11,11 @@ maintainer publishes a release. This is the normal Windows installer.
 2. Review storage guidance, dependency status, license and program folder.
    All-users setup defaults to `C:\Program Files\Medal Sync`; per-user setup
    uses your local Programs folder.
-3. Choose whether to add a desktop shortcut, then select **Install**.
+3. Choose whether to add a desktop shortcut and whether to add `medal-sync` to
+   PATH, then select **Install**. The PATH option lets you type `medal-sync` in
+   any terminal opened after setup. It adds the program folder's `bin` directory
+   to the end of the system PATH (all users) or your user PATH (just you), so
+   the bundled `rclone` is on PATH too, after any copy you already had.
 4. Read **Medal Sync Setup Guide** from the completion page or Start menu,
    then open **Medal Sync** once configuration and enrollment are complete.
 
@@ -53,7 +57,9 @@ an explicit advanced migration performed as the owning Windows user.
 
 Run a newer setup EXE and select the same program folder. It upgrades the
 existing installation with the same Installed apps identity and retains data.
-Running the same setup again repairs its managed program files. Older versions
+Running the same setup again repairs its managed program files. Clearing the
+PATH option during an upgrade or repair removes the entry an earlier setup added;
+an entry you added yourself is left alone. Older versions
 are refused, including when the installed CLI is damaged or missing. Repair uses
 the registered version and can restore a damaged CLI. Reuse the registered program
 folder; uninstall before moving the programs to another folder.
@@ -90,8 +96,8 @@ It checks again after confirmation, immediately before removing programs.
 If you supplied credentials for a different administrator account, quit all
 sessions and verify the original user's Ready status before uninstalling.
 
-Uninstall removes managed program files, its own shortcuts and Installed apps
-registration. User settings, identity, recordings, cache, backups and unowned
+Uninstall removes managed program files, its own shortcuts, its PATH entry and
+Installed apps registration. User settings, identity, recordings, cache, backups and unowned
 files are retained. Other accounts' personal state is not modified. The installer
 does not support automatically purging user data. Existing portable installations
 and their startup integration remain separate.
@@ -120,8 +126,8 @@ explicit `-Install -Apply`, update `-Apply`, and `-Uninstall -Apply`, with an
 explicit `-StateRoot` and trusted package digest. It keeps transactional backups
 and receipts under the state root's `updates` directory.
 Applying a portable change also blocks native setup and new library operations
-for the duration of the transaction. Bare release versions such as `0.4.0` and
-full tags such as `v0.4.0` both resolve to the exact stable release tag.
+for the duration of the transaction. Bare release versions such as `1.3.0.01` and
+full tags such as `v1.3.0.01` both resolve to the exact stable release tag.
 
 Use the native setup and Windows uninstaller for Program Files installations;
 the portable script refuses a native installation layout.

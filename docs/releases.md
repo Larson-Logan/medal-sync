@@ -1,7 +1,10 @@
 # Releasing Medal Sync
 
-`Directory.Build.props` is the single version source for both programs. Stable
-releases use `MAJOR.MINOR.PATCH` and the exact tag `vMAJOR.MINOR.PATCH`.
+`Directory.Build.props` holds `VersionPrefix` (`MAJOR.MINOR.PATCH`) for both
+programs. Every merge to `main` publishes a release tagged
+`vMAJOR.MINOR.PATCH.NN`, where `NN` is a hotfix counter: `.00` when the merge
+changes `VersionPrefix`, otherwise one more than the last release of that
+version.
 [Versions and schemas](versioning.md) explains which part to raise and how file
 formats and Medal schemas are versioned. Changelog entries remain Unreleased
 until publication.
@@ -12,6 +15,9 @@ until publication.
 pwsh -File scripts/validate.ps1
 pwsh -File scripts/package-windows-installer.ps1
 ```
+
+Local builds are numbered `VERSIONPREFIX.00`. Set the `MedalReleaseRevision`
+environment variable, for example to `03`, to build another hotfix number.
 
 The first setup build downloads the compiler version pinned in
 `installer/windows/toolchain.json`, verifies its SHA-256 and Authenticode
@@ -102,25 +108,58 @@ close join it automatically, so before raising the version check the project's
 Releases view for anything still open in that milestone and finish it or move
 it to the next one.
 
-Update the version and changelog in a pull request to `dev`, merge it, then
-promote `dev` to `main`. The
-[release workflow](../.github/workflows/release.yml) starts on its own when a
-push to `main` changes `Directory.Build.props`, or from **Run workflow** on the
-Actions tab for `main`; it never builds another branch. It does nothing when a release, draft or published, already exists
-for that version, so other edits to the file never rebuild a release.
+Every promotion to `main` is a release. To start a new version, raise
+`VersionPrefix` and update the changelog in a pull request to `dev`, merge it,
+then promote `dev` to `main`; that release is `.00`. To ship a hotfix, merge
+the fix to `dev` and promote it without touching `VersionPrefix`; it is
+released as the next number, such as `.01`. Changing `VersionPrefix` to a
+version that already has a release is refused.
+
+The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) is a
+three-part bridge such as `v1.3.0`, because update checks in 1.2.0 and earlier
+ignore four-part tags. It counts as `.00`; installs that update to it can then
+find every later release.
+
+Older installs only check the release marked Latest, and the first hotfix
+(such as `v1.3.0.01`) replaces the bridge as Latest. From then on, a 1.2.0 or
+earlier install that never took the bridge sees no update: the desktop check
+stays silent and the portable updater reports that it expected a stable
+release. Its user must download the newest setup from the
+[Releases page](https://github.com/Larson-Logan/medal-sync/releases) once;
+later updates are found normally. To give older installs time to take the
+bridge, leave a few days before promoting the first hotfix unless the fix is
+urgent.
+
+The [release workflow](../.github/workflows/release.yml) starts on its own for
+every push to `main`, or from **Run workflow** on the Actions tab for `main`;
+it never builds another branch. Runs never overlap, so two merges never take
+the same number. It does nothing when the commit is no longer the tip of
+`main`, so rerunning an older failed run never publishes older code under a
+newer number, or when a release, draft or published, already targets that
+commit, so a rerun never publishes twice.
 
 Otherwise it checks the version format and main ancestry, refuses a `v*` tag
-that already points at a different commit, runs tests, builds both packages,
-verifies native installation and creates a **draft** GitHub release with setup
-EXE, portable ZIP, checksums and generated notes. The run summary links the
-draft. It uses no caches. Only the release jobs have contents-write permission.
-Existing releases cause failure rather than replacement.
+that already points at a different commit, runs tests, builds both packages
+with the chosen number, verifies native installation, uploads setup EXE,
+portable ZIP, checksums and generated notes to a draft, then publishes it. The
+run summary links the release. It uses no caches. Only the planning job, which
+must see drafts, and the app token have contents-write permission. Existing releases cause failure rather than
+replacement.
 
-The draft targets the exact commit that was built; no tag exists yet. Publishing
-the draft creates the version tag on that commit as the maintainer who
-publishes, so tag creation stays limited to administrators. Do not create a
-release or push a tag by hand. To rebuild, delete the draft and choose **Run
-workflow**.
+Publishing creates the version tag on the exact commit that was built. The
+release tag ruleset lets only administrators and the private
+`medal-sync-release` GitHub App create, move or delete a `v*` tag; rulesets
+cannot exempt `github-actions[bot]`. So the publish step alone uses a
+short-lived token for that app, minted by
+[create-github-app-token](https://github.com/actions/create-github-app-token)
+with contents-write only; every other step uses the workflow's own read-only
+token. The app is installed on this repository only. Its client ID is the
+repository variable `RELEASE_APP_CLIENT_ID` and its private key the repository
+secret `RELEASE_APP_PRIVATE_KEY`; see
+[security maintenance](security-maintenance.md#release-app) to rotate it. Do
+not create a release or push a tag by hand. If publishing fails after the
+upload, the draft stays: review it and publish it by hand, or delete it and
+choose **Run workflow**.
 
 The release job also records a signed [build provenance attestation](https://docs.github.com/en/actions/concepts/security/artifact-attestations)
 for the setup EXE and portable ZIP. Anyone can check that a download was built
@@ -134,12 +173,16 @@ Generated notes use [.github/release.yml](../.github/release.yml) to group PRs
 by their type labels. Label merged work accurately; notes include a catch-all
 for uncategorized changes and still require maintainer review.
 
-The draft's run summary also lists any item still open in the version's
-milestone. Publishing the release closes that milestone once it is empty.
+For a `.00` or bridge release, the run summary also lists any item still open in the
+version's milestone. Because the app publishes the release, the
+[milestones workflow](../.github/workflows/milestones.yml) runs on it and
+closes that milestone once it is empty. Milestones are titled
+`MAJOR.MINOR.PATCH`; hotfix releases do not have their own.
 
-Review assets, versions, hashes and release notes before publishing the draft.
-Drafts and prereleases are invisible to automatic update checks. A published
-stable setup is advertised on the next desktop launch; installation stays
+Releases are published without a manual review, so `validate` on the
+promotion pull request is the last gate. Drafts and prereleases are invisible
+to automatic update checks. A published stable setup is advertised on the
+next desktop launch; installation stays
 explicit and verifies Ready status. Publisher code signing is not configured.
 
 Repository visibility, branch/tag rules and vulnerability reporting remain

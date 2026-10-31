@@ -111,15 +111,66 @@ public sealed class StorageFailureTests : IDisposable
     [Fact]
     public void RcloneRunnerKeepsOnlyErrorCategoriesAndMarksTimeouts()
     {
-        var signIn = Assert.Throws<RcloneFailedException>(() => new RcloneRunner("pwsh").Run(
-            ["-NoProfile", "-NonInteractive", "-Command", "[Console]::Error.WriteLine('Failed: invalid_grant token secret-value'); exit 1"], TimeSpan.FromSeconds(30)));
-        Assert.Equal(1, signIn.ExitCode);
-        Assert.Equal(RcloneHints.SignIn, signIn.Hints);
-        Assert.DoesNotContain("secret-value", signIn.Message, StringComparison.Ordinal);
-        var timeout = Assert.Throws<RcloneFailedException>(() => new RcloneRunner("pwsh").Run(
-            ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"], TimeSpan.FromSeconds(1)));
-        Assert.True(timeout.TimedOut);
-        Assert.True(RcloneFailure.IsTransient(timeout));
+        string scriptPath = Path.Combine(Path.GetTempPath(),
+            "medal-sync-rclone-errors-" + Guid.NewGuid().ToString("N") + ".ps1");
+        File.WriteAllText(scriptPath, """
+            param([string]$scenario)
+            if ($scenario -eq "signin") {
+                [Console]::Error.WriteLine("Failed: invalid_grant token secret-value")
+                exit 1
+            }
+            if ($scenario -eq "timeout") {
+                Start-Sleep -Seconds 30
+            }
+            """);
+        try
+        {
+            var signIn = Assert.Throws<RcloneFailedException>(() => new RcloneRunner("pwsh").Run(
+                ["-NoProfile", "-NonInteractive", "-File", scriptPath, "signin"], TimeSpan.FromSeconds(30)));
+            Assert.Equal(1, signIn.ExitCode);
+            Assert.Equal(RcloneHints.SignIn, signIn.Hints);
+            Assert.DoesNotContain("secret-value", signIn.Message, StringComparison.Ordinal);
+            var timeout = Assert.Throws<RcloneFailedException>(() => new RcloneRunner("pwsh").Run(
+                ["-NoProfile", "-NonInteractive", "-File", scriptPath, "timeout"], TimeSpan.FromSeconds(1)));
+            Assert.True(timeout.TimedOut);
+            Assert.True(RcloneFailure.IsTransient(timeout));
+        }
+        finally
+        {
+            if (File.Exists(scriptPath)) File.Delete(scriptPath);
+        }
+    }
+
+    [Fact]
+    public void RcloneRunnerDisablesPasswordPromptsAndClosesStandardInput()
+    {
+        string scriptPath = Path.Combine(Path.GetTempPath(), $"medal-sync-rclone-runner-{Guid.NewGuid():N}.ps1");
+        File.WriteAllText(scriptPath, """
+            $inputText = [Console]::In.ReadToEnd()
+            if ($inputText.Length -ne 0) { exit 20 }
+            $expected = @("lsjson", "--ask-password", "True", "--ask-password=true",
+                "--ask-password=false", "--", "--ask-password=true")
+            if ($args.Count -ne $expected.Count) { exit 21 }
+            for ($i = 0; $i -lt $expected.Count; $i++) {
+                if ($args[$i] -cne $expected[$i]) { exit 22 }
+            }
+            [Console]::Out.WriteLine($args -join "`n")
+            """);
+        try
+        {
+            string output = new RcloneRunner("pwsh").Run(
+                ["-NoProfile", "-NonInteractive", "-File", scriptPath, "lsjson", "--ask-password", "True",
+                    "--ask-password=true", "--", "--ask-password=true"],
+                TimeSpan.FromSeconds(10), captureOutput: true);
+
+            Assert.Equal(["lsjson", "--ask-password", "True", "--ask-password=true",
+                "--ask-password=false", "--", "--ask-password=true"],
+                output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(argument => argument.TrimEnd('\r')));
+        }
+        finally
+        {
+            if (File.Exists(scriptPath)) File.Delete(scriptPath);
+        }
     }
 
     // Replication runs against real (synthetic) folders, so these use the Windows paths of the fixture.

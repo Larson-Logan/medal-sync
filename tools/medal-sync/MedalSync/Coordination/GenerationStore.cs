@@ -58,6 +58,29 @@ internal sealed record GenerationManifest(
 
 internal sealed record GenerationContent(GenerationManifest Manifest, LibrarySnapshot Snapshot, AssetManifest Assets);
 
+/// <param name="Committed">True when it was part of the committed history; false for an abandoned or unfinished attempt.</param>
+internal sealed record PrunedGeneration(long Generation, bool Committed, DateTimeOffset PrunedAt);
+
+/// <summary>
+/// What retention removed, kept beside the generations as <c>retention.json</c>. <see cref="HighWater"/> is the highest
+/// generation number ever used, so a number is never reused after pruning. <see cref="Ancestry"/> is the whole committed
+/// chain (newest first) when retention last ran, including pruned numbers, so the history can be followed across gaps.
+/// </summary>
+internal sealed record GenerationRetention(int Format, long HighWater, IReadOnlyList<long> Ancestry, IReadOnlyList<PrunedGeneration> Pruned)
+{
+    public const int CurrentFormat = 1;
+
+    public PrunedGeneration? Find(long generation) => Pruned.FirstOrDefault(p => p.Generation == generation);
+
+    /// <summary>The next older committed generation, from the recorded chain. Known is false when the chain does not include it.</summary>
+    public (bool Known, long? Parent) ParentOf(long generation)
+    {
+        for (int i = 0; i < Ancestry.Count; i++)
+            if (Ancestry[i] == generation) return (true, i + 1 < Ancestry.Count ? Ancestry[i + 1] : null);
+        return (false, null);
+    }
+}
+
 /// <summary>
 /// Immutable, numbered library generations. Each is written into a staging
 /// folder, verified, then renamed into place in one step, so a numbered folder
@@ -88,6 +111,65 @@ internal sealed partial class GenerationStore(string directory, string libraryId
                 .Order()
                 .ToArray()
             : [];
+
+    private string RetentionPath => Path.Combine(Directory, "retention.json");
+
+    /// <summary>Null when retention has never run here.</summary>
+    public GenerationRetention? ReadRetention()
+    {
+        if (!File.Exists(RetentionPath)) return null;
+        var record = Json.ReadFile<GenerationRetention>(RetentionPath, "Generation retention record");
+        if (record.Format != GenerationRetention.CurrentFormat || record.Ancestry is null || record.Pruned is null || record.HighWater < 0)
+            throw new InvalidDataException("The generation retention record is from another version or incomplete.");
+        return record;
+    }
+
+    public void WriteRetention(GenerationRetention record)
+    {
+        System.IO.Directory.CreateDirectory(Directory);
+        byte[] bytes = Json.Serialize(record);
+        AtomicFile.Replace(RetentionPath, bytes);
+        if (!Json.Serialize(ReadRetention()!).AsSpan().SequenceEqual(bytes))
+            throw new IOException("The generation retention record did not read back as written.");
+    }
+
+    /// <summary>The number for a new generation published on top of <paramref name="committed"/>: above every folder and the retention high-water mark.</summary>
+    public long Next(long committed)
+    {
+        long highest = Math.Max(committed, Numbered().DefaultIfEmpty(-1).Max());
+        return Math.Max(highest, ReadRetention()?.HighWater ?? -1) + 1;
+    }
+
+    /// <summary>True when the folder is gone because retention removed it, as opposed to damage.</summary>
+    public PrunedGeneration? Pruned(long generation) => Exists(generation) ? null : ReadRetention()?.Find(generation);
+
+    /// <summary>
+    /// <paramref name="start"/> and each older committed generation, following parent numbers and, across a generation
+    /// retention removed, the recorded chain. A removed generation has a null manifest. Throws
+    /// <see cref="InvalidDataException"/> for a missing or damaged generation, or history retention did not record.
+    /// </summary>
+    public IEnumerable<(long Generation, GenerationManifest? Manifest)> Chain(long start)
+    {
+        var retention = ReadRetention();
+        long? current = start;
+        long previous = long.MaxValue;
+        while (current is { } number)
+        {
+            if (number >= previous) throw new InvalidDataException($"Generation {previous} names a later parent, {number}.");
+            previous = number;
+            if (!Exists(number) && retention?.Find(number) is not null)
+            {
+                yield return (number, null);
+                var (known, parent) = retention.ParentOf(number);
+                if (!known) throw new InvalidDataException($"History before generation {number} was removed by retention and is not recorded.");
+                current = parent;
+                continue;
+            }
+            var manifest = ReadManifest(number);
+            yield return (number, manifest);
+            current = manifest.ParentGeneration;
+        }
+    }
 
     public GenerationManifest Publish(long generation, long? parent, string session, DeviceIdentity device, LibrarySnapshot snapshot,
         AssetManifest assets, MedalVersions medal, DateTimeOffset now)

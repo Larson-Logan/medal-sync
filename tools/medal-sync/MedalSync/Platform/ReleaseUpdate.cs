@@ -16,7 +16,9 @@ internal static partial class ReleaseUpdate
     internal const string LatestUrl = "https://api.github.com/repos/Larson-Logan/medal-sync/releases/latest";
     internal static readonly TimeSpan LaunchTimeout = TimeSpan.FromSeconds(2);
 
-    [GeneratedRegex(@"\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z")]
+    // vMAJOR.MINOR.PATCH.NN, where NN is the two-digit hotfix counter. Releases
+    // before 1.3.0.00 had no counter.
+    [GeneratedRegex(@"\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0[0-9]|[1-9][0-9]+))?\z")]
     private static partial Regex StableTag();
 
     internal static string? AvailableVersion(string json, string installed)

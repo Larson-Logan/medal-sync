@@ -48,7 +48,11 @@ internal sealed class ReplicationVerification(MedalSyncConfig config, LocalState
         AtomicFile.Replace(ReceiptPath, Json.Serialize(receipt with { Integrity = Hashing.Sha256Hex(Json.Serialize(receipt)) }));
     }
 
-    public void Invalidate() => File.Delete(ReceiptPath);
+    public void Invalidate()
+    {
+        // File.Delete throws when the folder is missing, which it is before the first receipt.
+        if (File.Exists(ReceiptPath)) File.Delete(ReceiptPath);
+    }
 
     private IReadOnlyList<VerifiedMedia> Identify() => files.Select(relative =>
     {
