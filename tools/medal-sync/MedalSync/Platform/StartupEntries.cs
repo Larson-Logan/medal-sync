@@ -192,12 +192,16 @@ internal static class StartupEntries
             shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", throwOnError: true)!);
             shortcut = ((dynamic)shell!).CreateShortcut(path);
             dynamic link = shortcut;
-            if (!StartsMedalDirectly((string)link.TargetPath)) return false;
+            string target = link.TargetPath;
+            if (!StartsMedalDirectly(target)) return false;
             string icon = link.IconLocation;
+            // Without an icon path (WScript reports ",0"), Windows uses the
+            // target's icon. Keep Medal's icon before changing the target.
+            if (string.IsNullOrEmpty(icon) || icon.StartsWith(',')) icon = target + ",0";
             link.TargetPath = launcher;
             link.Arguments = "";
             link.WorkingDirectory = Path.GetDirectoryName(launcher)!;
-            if (!string.IsNullOrEmpty(icon)) link.IconLocation = icon;
+            link.IconLocation = icon;
             link.Save();
             return true;
         }
