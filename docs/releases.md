@@ -86,8 +86,10 @@ checking for unmerged commits and local edits.
 
 ## GitHub pipeline
 
-Pull requests and pushes to `dev` and `main` run [validation](../.github/workflows/validate.yml)
-on standard GitHub-hosted runners, which cost no Actions minutes for this public
+Pull requests and pushes to `dev` run [validation](../.github/workflows/validate.yml).
+Pushes to `main` run it through the release workflow, so the same commit is
+validated once and publishing waits for every suite. All jobs use
+standard GitHub-hosted runners, which cost no Actions minutes for this public
 repository; never move these jobs to larger runners, which are always billed.
 A Linux job audits source and history, checks the inventory and links and lints
 the workflows. Three Windows jobs then run in parallel: .NET unit tests; the
@@ -103,8 +105,9 @@ request into `dev` runs only the suites its changed files need, so a
 documentation change runs none and a unit-test change runs only the unit tests;
 the run summary names the files behind each choice. A file no rule names needs
 every suite. Pushes and pull requests into `main` always run everything. NuGet
-packages and the pinned build tools are cached between runs, and cached
-downloads are re-checked against their SHA-256 pins. The native integration
+packages and the pinned build tools are cached in ordinary validation, and
+cached downloads are re-checked against their SHA-256 pins. Release validation
+uses no caches. The native integration
 test uses a temporary per-user program folder and refuses to run on an ordinary
 desktop or over an existing installation.
 
@@ -157,12 +160,19 @@ newer number, or when a release, draft or published, already targets that
 commit, so a rerun never publishes twice.
 
 Otherwise it checks the version format and main ancestry, refuses a `v*` tag
-that already points at a different commit, runs tests, builds both packages
-with the chosen number, verifies native installation, uploads setup EXE,
-portable ZIP, checksums and generated notes to a draft, then publishes it. The
-run summary links the release. It uses no caches. Only the planning job, which
-must see drafts, and the app token have contents-write permission. Existing releases cause failure rather than
-replacement.
+that already points at a different commit and calls the full validation
+workflow with the chosen number and caches disabled. That workflow builds both
+packages once, tests native installation and retains the tested setup EXE,
+portable ZIP and checksums as the `release-assets` artifact for seven days.
+Installer failure logs are retained for the same period.
+
+Only after every suite passes does a separate job download those exact files,
+verify their names and SHA-256 sidecars, attest them, upload them with generated
+notes to a draft and publish it. The run summary links the release. Only the
+planning job, which must see drafts, and the app token have contents-write
+permission. Existing releases cause failure rather than replacement. A retry
+of failed jobs reuses a successful build's artifact; if it has expired, rerun
+all jobs to rebuild and validate it.
 
 Publishing creates the version tag on the exact commit that was built. The
 release tag ruleset lets only administrators and the private
