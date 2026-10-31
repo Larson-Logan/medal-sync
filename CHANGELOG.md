@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed: editing configuration in the setup wizard preserves required cloud
+  copies. Targets can be explicitly required or optional, and Review calls out
+  requirement changes and added or removed targets.
+- Fixed: the setup wizard opens valid fractional session limits and displays
+  hundredths of an hour. Saved numbers outside a control's display range show
+  guidance and are preserved unless edited.
 - Update checks now offer to run the verified installer, close the status app
   and exit the updater so Windows setup can replace the installed version.
   Deferred or failed installation keeps the download available for retrying.

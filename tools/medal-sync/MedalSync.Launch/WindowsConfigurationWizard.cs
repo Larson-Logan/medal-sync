@@ -15,11 +15,13 @@ internal sealed class WindowsConfigurationWizard : Form
     private readonly Action<MedalSyncConfig> _validateExisting;
     private readonly Func<IDisposable> _acquireGuard;
     private readonly Dictionary<string, TextBox> _fields = [];
+    private readonly HashSet<NumericUpDown> _editedNumbers = [];
+    private readonly List<string> _displayWarnings = [];
     private readonly ComboBox _mode = new() { DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Storage mode" };
     private readonly ComboBox _identity = new() { DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "New or existing library" };
     private readonly NumericUpDown _cacheLimit = new() { Minimum = 1, Maximum = 100000, Value = 20, AccessibleName = "Cache limit in GiB" };
     private readonly NumericUpDown _reserve = new() { Minimum = 1, Maximum = 100000, Value = 20, AccessibleName = "Minimum free space in GiB" };
-    private readonly NumericUpDown _hours = new() { Minimum = 1, Maximum = 24, Value = 4, AccessibleName = "Maximum session hours" };
+    private readonly NumericUpDown _hours = new() { DecimalPlaces = 2, Increment = 0.25m, Minimum = 0.01m, Maximum = 24, Value = 4, AccessibleName = "Maximum session hours" };
     private readonly Panel _edit;
     private readonly TextBox _review = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, AccessibleName = "Configuration review and next steps", Visible = false };
     private readonly Button _next = new() { Text = "&Review", AutoSize = true };
@@ -92,12 +94,15 @@ internal sealed class WindowsConfigurationWizard : Form
         Field(fields, "rclone", "&Rclone executable", _existing?.RclonePath ?? ConfigCommands.DefaultRclonePath());
         Field(fields, "copy", "Persistent local copy (optional)", _existing?.Replication?.LocalCopyRoot ?? "");
         Field(fields, "cloudConfig", "Provider config file (optional)", _existing?.Replication?.RcloneConfigPath ?? "");
-        Field(fields, "targets", "Cloud targets: name=remote (one per line)", string.Join(Environment.NewLine, _existing?.Replication?.Targets.Select(t => t.Name + "=" + t.Remote) ?? []), true);
+        Field(fields, "targets", "Cloud targets (one per line)", string.Join(Environment.NewLine, _existing?.Replication?.Targets.Select(t => (t.Required ? "required " : "optional ") + t.Name + "=" + t.Remote) ?? []), true);
+        Add(fields, "Cloud copy requirements", new Label { AutoSize = true, Text = "Use name=remote:folder. Prefix with 'required ' to block handoff until verified, or 'optional ' to allow retry later. Existing names keep their requirement when no prefix is given." });
         Field(fields, "syncFolder", "Sync folder ID (optional)", _existing?.SyncExclusions.FirstOrDefault()?.FolderId ?? "");
         Field(fields, "syncPattern", "Sync exclusion pattern", _existing?.SyncExclusions.FirstOrDefault()?.Pattern ?? "/Videos/Clips");
-        _cacheLimit.Value = _existing?.Mount.CacheMaxGiB ?? 20;
-        _reserve.Value = _existing?.Mount.MinFreeGiB ?? 20;
-        _hours.Value = (decimal)(_existing?.MaxSessionHours ?? 4);
+        LoadNumber(_cacheLimit, _existing?.Mount.CacheMaxGiB ?? 20);
+        LoadNumber(_reserve, _existing?.Mount.MinFreeGiB ?? 20);
+        double hours = _existing?.MaxSessionHours ?? 4;
+        LoadNumber(_hours, (decimal)hours, hours != (double)(decimal)hours);
+        _message.Text = string.Join(Environment.NewLine, _displayWarnings);
         Add(fields, "Cache limit (GiB)", _cacheLimit);
         Add(fields, "Minimum free space (GiB)", _reserve);
         Add(fields, "Maximum session hours", _hours);
@@ -137,6 +142,15 @@ internal sealed class WindowsConfigurationWizard : Form
         Add(table, label, text);
     }
 
+    private void LoadNumber(NumericUpDown control, decimal saved, bool precisionLost = false)
+    {
+        decimal displayed = Math.Clamp(decimal.Round(saved, control.DecimalPlaces), control.Minimum, control.Maximum);
+        control.Value = displayed;
+        if (displayed != saved || precisionLost)
+            _displayWarnings.Add($"Saved {control.AccessibleName} cannot be displayed exactly. The original value is kept unless you edit this field; Review shows the value that will be saved.");
+        control.ValueChanged += (_, _) => _editedNumbers.Add(control);
+    }
+
     internal MedalSyncConfig Candidate()
     {
         string Value(string key) => _fields[key].Text.Trim();
@@ -149,17 +163,31 @@ internal sealed class WindowsConfigurationWizard : Form
         var targets = new List<ReplicaTarget>();
         foreach (string line in Value("targets").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            string[] pair = line.Split('=', 2, StringSplitOptions.TrimEntries);
+            string entry = line;
+            bool? required = null;
+            foreach (string prefix in new[] { "required ", "optional " })
+            {
+                if (!entry.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                required = prefix == "required ";
+                entry = entry[prefix.Length..].TrimStart();
+                break;
+            }
+            string[] pair = entry.Split('=', 2, StringSplitOptions.TrimEntries);
             if (pair.Length != 2) throw new InvalidDataException("Each cloud target must be name=remote:folder, one per line.");
-            targets.Add(new(pair[0], pair[1]));
+            required ??= _existing?.Replication?.Targets.FirstOrDefault(t => t.Name.Equals(pair[0], StringComparison.OrdinalIgnoreCase))?.Required ?? false;
+            targets.Add(new(pair[0], pair[1]) { Required = required.Value });
         }
         var replication = _existing?.Replication ?? new ReplicationConfig(null, null, []);
         replication = replication with { LocalCopyRoot = Optional("copy"), RcloneConfigPath = Optional("cloudConfig"), Targets = targets };
         var exclusions = _existing?.SyncExclusions.Skip(1).ToList() ?? [];
         if (Optional("syncFolder") is { } folder) exclusions.Insert(0, new(folder, Value("syncPattern")));
         return new(1, library, Value("account"), Value("coordination"), Value("remote"), Value("capture"), Value("cache"), Value("rclone"),
-            (_existing?.Mount ?? new MountConfig(5, 20, 20, 300, 30, 1000, 2, 53682)) with { CacheMaxGiB = (int)_cacheLimit.Value, MinFreeGiB = (int)_reserve.Value },
-            (double)_hours.Value, exclusions)
+            (_existing?.Mount ?? new MountConfig(5, 20, 20, 300, 30, 1000, 2, 53682)) with
+            {
+                CacheMaxGiB = _existing is not null && !_editedNumbers.Contains(_cacheLimit) ? _existing.Mount.CacheMaxGiB : (int)_cacheLimit.Value,
+                MinFreeGiB = _existing is not null && !_editedNumbers.Contains(_reserve) ? _existing.Mount.MinFreeGiB : (int)_reserve.Value,
+            },
+            _existing is not null && !_editedNumbers.Contains(_hours) ? _existing.MaxSessionHours : (double)_hours.Value, exclusions)
         {
             StorageMode = _mode.SelectedIndex == 1 ? StorageMode.Local : StorageMode.Server,
             Replication = replication.LocalCopyRoot is null && replication.RcloneConfigPath is null && targets.Count == 0 ? null : replication,
