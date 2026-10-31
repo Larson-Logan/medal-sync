@@ -88,6 +88,7 @@
     "tests/scripts/storage/medal-sync/startup-script.test.mjs": ["desktop"],
     "tests/scripts/storage/medal-sync/update-release.test.ps1": ["desktop"],
     "tests/test_branch_cleanup.py": [],
+    "tests/test_doc_links.py": [],
     "tests/test_release_pipeline.py": [],
     "tests/test_source_hygiene.py": [],
     "tests/test_source_manifest.py": [],

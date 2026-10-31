@@ -65,6 +65,9 @@
   runner disables prompts and closes stdin so encrypted configs fail promptly
   through the existing configuration guidance.
 
+- Documentation validation now checks local Markdown section anchors, including
+  same-page links, duplicate headings and explicit HTML anchors.
+
 ## 1.2.0 — 2026-10-29
 
 - Retry pending optional cloud copies while Ready with

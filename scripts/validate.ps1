@@ -45,6 +45,7 @@ try {
         Invoke-Checked python @('scripts/update-source-manifest.py', '--check')
         Invoke-Checked python @('tests/test_source_hygiene.py')
         Invoke-Checked python @('tests/test_source_manifest.py')
+        Invoke-Checked python @('tests/test_doc_links.py')
         Invoke-Checked python @('tests/test_branch_cleanup.py')
         Invoke-Checked python @('tests/test_release_pipeline.py')
         $docs = @(& python scripts/check-repository.py --list-docs)
