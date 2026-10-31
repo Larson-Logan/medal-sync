@@ -184,8 +184,12 @@ public sealed class LauncherAndRelocationTests : IDisposable
         Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(state, native, false, null));
     }
 
-    [Fact]
-    public void StartupEntries_RepairARecreatedWindowsShortcutAndPreserveItsIcon()
+    [Theory]
+    [InlineData(null, @"C:\Medal\current\Medal.exe,0")]
+    [InlineData(",0", @"C:\Medal\current\Medal.exe,0")]
+    [InlineData(@"C:\Medal\current\Medal.exe,0", @"C:\Medal\current\Medal.exe,0")]
+    [InlineData(@"C:\Medal\app.ico,0", @"C:\Medal\app.ico,0")]
+    public void StartupEntries_RepairARecreatedWindowsShortcutAndPreserveItsIcon(string? icon, string expectedIcon)
     {
         if (!OperatingSystem.IsWindows()) return;
         string path = _fixture.PathFor("Medal.lnk");
@@ -199,7 +203,7 @@ public sealed class LauncherAndRelocationTests : IDisposable
             dynamic link = shortcut;
             link.TargetPath = @"C:\Medal\current\Medal.exe";
             link.Arguments = "--old";
-            link.IconLocation = @"C:\Medal\current\Medal.exe,0";
+            if (icon is not null) link.IconLocation = icon;
             link.Save();
 
             Assert.True(StartupEntries.RepairShortcut(path, launcher));
@@ -207,7 +211,7 @@ public sealed class LauncherAndRelocationTests : IDisposable
             dynamic after = restored;
             Assert.Equal(launcher, (string)after.TargetPath);
             Assert.Equal("", (string)after.Arguments);
-            Assert.Equal(@"C:\Medal\current\Medal.exe,0", (string)after.IconLocation);
+            Assert.Equal(expectedIcon, (string)after.IconLocation);
             Assert.False(StartupEntries.RepairShortcut(path, launcher));
 
             after.TargetPath = @"C:\Other\Unrelated.exe";

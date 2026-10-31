@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed: Medal shortcuts keep Medal's default icon when the launcher repairs
+  them, including pinned taskbar shortcuts without an explicit icon path.
 - Every merge to `main` now publishes a release automatically, tagged
   `vMAJOR.MINOR.PATCH.NN`. `NN` is a hotfix counter: `.00` when the merge
   changes the version in `Directory.Build.props`, then `.01`, `.02` and so on.
