@@ -120,6 +120,16 @@ three-part bridge such as `v1.3.0`, because update checks in 1.2.0 and earlier
 ignore four-part tags. It counts as `.00`; installs that update to it can then
 find every later release.
 
+Older installs only check the release marked Latest, and the first hotfix
+(such as `v1.3.0.01`) replaces the bridge as Latest. From then on, a 1.2.0 or
+earlier install that never took the bridge sees no update: the desktop check
+stays silent and the portable updater reports that it expected a stable
+release. Its user must download the newest setup from the
+[Releases page](https://github.com/Larson-Logan/medal-sync/releases) once;
+later updates are found normally. To give older installs time to take the
+bridge, leave a few days before promoting the first hotfix unless the fix is
+urgent.
+
 The [release workflow](../.github/workflows/release.yml) starts on its own for
 every push to `main`, or from **Run workflow** on the Actions tab for `main`;
 it never builds another branch. Runs never overlap, so two merges never take
