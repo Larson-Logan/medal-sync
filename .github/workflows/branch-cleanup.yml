@@ -1,7 +1,8 @@
 name: Clean up closed PR branches
-# Runs only trusted default-branch code; never checks out or executes PR code.
+# Only same-repository PRs need cleanup; fork PR tokens remain read-only.
+# Always check out trusted default-branch code, including on unmerged closures.
 on:
-  pull_request_target:
+  pull_request:
     types: [closed]
   workflow_dispatch:
     inputs:
