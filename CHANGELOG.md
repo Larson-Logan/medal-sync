@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed: simultaneous status and cloud-operation checks no longer mistake each
+  other for a running session and cancel an otherwise safe cloud operation.
 - Fixed: editing configuration in the setup wizard preserves required cloud
   copies. Targets can be explicitly required or optional, and Review calls out
   requirement changes and added or removed targets.

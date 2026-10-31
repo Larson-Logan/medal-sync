@@ -357,9 +357,13 @@ internal static class SessionCommands
     }
 
     /// <summary>True while another medal-sync on this PC (for example a supervising launcher) holds the instance lock.</summary>
-    internal static bool AnotherInstanceRunning()
+    internal static bool AnotherInstanceRunning() => AnotherInstanceRunning(InstanceMutex);
+
+    internal static bool AnotherInstanceRunning(string mutexName)
     {
-        using var mutex = new Mutex(initiallyOwned: false, InstanceMutex);
+        // Probes must not observe each other's temporary ownership of the legacy lock.
+        using var probe = InstanceProbeLock(mutexName);
+        using var mutex = new Mutex(initiallyOwned: false, mutexName);
         try
         {
             if (!mutex.WaitOne(TimeSpan.Zero)) return true;
@@ -620,6 +624,7 @@ internal static class SessionCommands
 
     internal static IDisposable SingleInstance(string mutexName = InstanceMutex)
     {
+        using var probe = InstanceProbeLock(mutexName);
         var mutex = new Mutex(initiallyOwned: false, mutexName);
         try
         {
@@ -632,6 +637,15 @@ internal static class SessionCommands
         }
         mutex.Dispose();
         throw new UnsafeOperationException("medal-sync is already running on this PC.");
+    }
+
+    private static IDisposable InstanceProbeLock(string mutexName)
+    {
+        var mutex = new Mutex(initiallyOwned: false, mutexName + ".Probe");
+        try { mutex.WaitOne(); }
+        catch (AbandonedMutexException) { /* The interrupted probe's lock is now ours. */ }
+        catch { mutex.Dispose(); throw; }
+        return new InstanceLock(mutex);
     }
 
     /// <summary>Holds the per-user mutex so only one medal-sync instance acts at a time.</summary>
