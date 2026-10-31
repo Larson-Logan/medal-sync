@@ -1,0 +1,1 @@
+Temporary fixture for verifying closed-PR branch deletion. Never merge.
