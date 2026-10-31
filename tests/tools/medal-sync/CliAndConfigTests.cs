@@ -32,6 +32,69 @@ public sealed class CliAndConfigTests : IDisposable
     }
 
     [Fact]
+    public void Cli_HelpListsEveryDispatchCommandInTheCorrectSection()
+    {
+        string help = Run("--help").Output;
+        string[] sections = help.Split("Changes state (need the configuration from the runbook):", StringSplitOptions.None);
+        Assert.Equal(2, sections.Length);
+
+        string[] readOnlyCommands =
+        [
+            "version",
+            "setup check",
+            "config validate",
+            "inspect",
+            "compatibility",
+            "diagnostics",
+            "snapshot export",
+            "snapshot verify",
+            "dry-run-restore",
+            "audit",
+            "capacity",
+            "mount-plan",
+            "storage check",
+            "status",
+            "history list",
+            "history diff",
+            "replica history",
+        ];
+        string[] stateChangingCommands =
+        [
+            "enroll --out",
+            "enroll recover --out",
+            "config create",
+            "init",
+            "storage init-primary",
+            "replicate retry",
+            "replica verify",
+            "replica prune",
+            "replica purge-trash",
+            "retention",
+            "launch",
+            "finish",
+            "recover-start",
+            "refresh-media",
+            "repair",
+            "relocate",
+            "promote",
+            "abandon --session",
+            "spike start|status|stop",
+        ];
+
+        static void AssertCommandsStartLines(string section, IEnumerable<string> commands)
+        {
+            string[] lines = section.Split('\n');
+            foreach (string command in commands)
+            {
+                Assert.Contains(lines, line => line.StartsWith($"  {command} ", StringComparison.Ordinal));
+            }
+        }
+
+        AssertCommandsStartLines(sections[0], readOnlyCommands);
+        AssertCommandsStartLines(sections[1], stateChangingCommands);
+    }
+
+    [Fact]
     public void Snapshot_ExportVerifyAndDryRunAgainstAFixture()
     {
         string db = Library();

@@ -25,7 +25,7 @@ in any terminal opened after setup instead.
 - **One at a time.** Commands that change state refuse while the supervisor or
   another state-changing command is running.
 - **Blocked during setup.** While Windows setup or uninstall is open, every
-  command except `version` and `setup check` refuses.
+  command except `version`, `setup check` and `diagnostics` refuses.
 - **Windows only**, except `version`, `config create`, `config validate`,
   `snapshot`, `dry-run-restore`, `audit`, `repair` and `capacity`, which also
   run elsewhere for testing.
