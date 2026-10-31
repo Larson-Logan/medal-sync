@@ -43,6 +43,7 @@ public sealed class ConfigurationWorkflowTests : IDisposable
         var applied = Run([.. Options(), "--new-library", "--apply"]);
         Assert.Equal(0, applied.Code);
         var first = MedalSyncConfig.Load(path);
+        Assert.Equal(53684, first.Mount.ControlPort);
         Assert.Equal("12345", first.AccountId);
         Assert.NotEqual(new string('0', 32), first.LibraryId);
         Assert.Equal(0, Run("config", "validate", "--config", path).Code);
@@ -76,6 +77,33 @@ public sealed class ConfigurationWorkflowTests : IDisposable
         var config = MedalSyncConfig.Load(_fixture.PathFor("config.json"));
         Assert.Equal(53683, config.Mount.ControlPort);
         Assert.Empty(config.SyncExclusions);
+    }
+
+    [Theory]
+    [InlineData(53682, true)]
+    [InlineData(53684, false)]
+    [InlineData(53683, false)]
+    [InlineData(60000, false)]
+    public void ValidationWarnsAboutTheBrowserSignInPortWithoutChangingExistingSettings(int port, bool warning)
+    {
+        string path = _fixture.PathFor("config.json");
+        Assert.Equal(0, Run([.. Options(), "--new-library", "--apply"]).Code);
+        var config = MedalSyncConfig.Load(path);
+        byte[] original = Json.Serialize(config with { Mount = config.Mount with { ControlPort = port } });
+        File.WriteAllBytes(path, original);
+
+        var result = Run("config", "validate", "--config", path);
+
+        Assert.Equal(0, result.Code);
+        Assert.Equal(warning, result.Output.Contains("Warning:", StringComparison.Ordinal));
+        if (warning)
+        {
+            Assert.Contains("53682 blocks rclone browser sign-in", result.Output);
+            Assert.Contains("wait for Ready and the clip drive to stop", result.Output);
+            Assert.Contains("change mount.controlPort to 53684", result.Output);
+            Assert.Contains("Never change the port during an unfinished session", result.Output);
+        }
+        Assert.Equal(original, File.ReadAllBytes(path));
     }
 
     [Fact]

@@ -16,6 +16,10 @@ internal static class ConfigCommands
         output.WriteLine($"Capture: {config.Capture.Display}; primary storage: {config.PrimaryCapture}{(config.PrimaryIsRclone ? " (rclone remote)" : "")}; cache: {config.CacheRoot}.");
         var targets = config.Replication?.Targets ?? [];
         output.WriteLine($"Recording storage: {config.MountRemote}; cloud replicas: {targets.Count} ({targets.Count(t => t.Required)} required, others retry when offline).");
+        if (config.Mount.ControlPort == 53682)
+            output.WriteLine($"Warning: mount.controlPort 53682 blocks rclone browser sign-in while the clip drive is running. "
+                + $"Quit Medal, wait for Ready and the clip drive to stop, then change mount.controlPort to {MountConfig.DefaultControlPort} in config.json and validate again. "
+                + "Never change the port during an unfinished session, including after a reboot.");
         output.WriteLine("Syntax and path checks only; storage access, sync exclusions and device readiness are separate checks.");
         return 0;
     }
@@ -51,7 +55,7 @@ internal static class ConfigCommands
         if (!Directory.Exists(Path.GetDirectoryName(target))) throw new UnsafeOperationException("The output parent directory must already exist.");
         var config = new MedalSyncConfig(1, library ?? Guid.NewGuid().ToString("N"), account, coordination, remote, capture, cache,
             rclone ?? DefaultRclonePath(),
-            new MountConfig(5, 20, 20, 300, 30, 1000, 2, spike ? 53683 : 53682), 4,
+            new MountConfig(5, 20, 20, 300, 30, 1000, 2, spike ? 53683 : MountConfig.DefaultControlPort), 4,
             spike || folder is null ? [] : [new SyncExclusion(folder, pattern)])
         {
             StorageMode = mode == "local" ? StorageMode.Local : StorageMode.Server,

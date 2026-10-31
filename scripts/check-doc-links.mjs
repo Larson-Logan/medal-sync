@@ -24,14 +24,19 @@ walk(resolve(root, 'wiki'));
 function withoutFencedCode(source) {
   let fence = null;
   return source.split(/\r?\n/).map(line => {
+    const quoted = line.match(/^(?: {0,3}>[ \t]?)+/);
+    const depth = quoted ? (quoted[0].match(/>/g) ?? []).length : 0;
+    const content = quoted ? line.slice(quoted[0].length) : line;
+    // Leaving the quote container also ends a fence inside that container.
+    if (fence && depth < fence.depth) fence = null;
     if (fence) {
-      const close = line.match(/^ {0,3}(`+|~+)[ \t]*$/);
-      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      const close = content.match(/^ {0,3}(`+|~+)[ \t]*$/);
+      if (depth === fence.depth && close && close[1][0] === fence.marker[0] && close[1].length >= fence.marker.length) fence = null;
       return '';
     }
-    const open = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    const open = content.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
     if (open && (open[1][0] !== '`' || !open[2].includes('`'))) {
-      fence = open[1];
+      fence = { marker: open[1], depth };
       return '';
     }
     return line;
@@ -50,7 +55,9 @@ function entities(text) {
 const anchorCache = new Map();
 function anchors(path) {
   if (anchorCache.has(path)) return anchorCache.get(path);
-  const source = withoutFencedCode(readFileSync(path, 'utf8')).replace(/<!--[\s\S]*?-->/g, '');
+  // A marker prevents removal from forming new markup across token boundaries.
+  // It is discarded with other non-slug characters after heading interpretation.
+  const source = withoutFencedCode(readFileSync(path, 'utf8')).replace(/<!--[\s\S]*?-->/g, '\0');
   const result = new Set(), generated = new Set();
   // Custom anchors do not participate in automatic heading numbering.
   // Ignore inline code so an example `<a id="example">` is not an anchor.
@@ -73,12 +80,16 @@ function anchors(path) {
     // Code contents are literal: `_name_` is not emphasis and `<tag>` is not HTML.
     const code = [];
     heading = heading.replace(/(`+)([^`]*?)\1/g, (_, fence, value) => `\0${code.push(value) - 1}\0`);
+    const escaped = [];
+    heading = heading.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~])/g,
+      (_, value) => `\u0001${escaped.push(value) - 1}\u0001`);
     // Use rendered link labels and inline formatting contents, not destinations.
     heading = heading.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
       .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
-      .replace(/<[^>]+>/g, '').replace(/`+/g, '')
+      .replace(/<[^>]+>/g, '\0').replace(/`+/g, '')
       .replace(/(?<!\w)_{1,2}(.+?)_{1,2}(?!\w)/g, '$1');
     heading = entities(heading).replace(/\0(\d+)\0/g, (_, index) => code[Number(index)]);
+    heading = heading.replace(/\u0001(\d+)\u0001/g, (_, index) => escaped[Number(index)]);
     const base = heading.trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}_ -]/gu, '').replace(/ /g, '-');
     let slug = base, suffix = 0;
     while (generated.has(slug)) slug = `${base}-${++suffix}`;

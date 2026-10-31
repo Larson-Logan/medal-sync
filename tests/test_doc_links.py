@@ -76,6 +76,34 @@ Setext heading
         result = self.check_links('```\n[ignored](missing.md#missing)\n```\n# Visible\n[ok](#visible)')
         self.assertEqual(0, result.returncode, result.stderr)
 
+    def test_quoted_code_fences_do_not_create_or_renumber_headings(self):
+        for marker in ['```', '~~~~']:
+            for prefix in ['> ', '> > ']:
+                with self.subTest(marker=marker, prefix=prefix):
+                    hidden = '\n'.join(prefix + line for line in [marker, '# Hidden', marker])
+                    result = self.check_links(hidden + '\n[broken](#hidden)\n')
+                    self.assertEqual(1, result.returncode)
+                    self.assertIn('unresolved section anchor #hidden', result.stderr)
+                    result = self.check_links(hidden + '\n# Hidden\n# Hidden\n[first](#hidden) [second](#hidden-1)\n')
+                    self.assertEqual(0, result.returncode, result.stderr)
+        result = self.check_links('> ```\n> # Hidden\n\n# Visible\n[ok](#visible)')
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_escaped_underscores_remain_literal_heading_text(self):
+        result = self.check_links(r'''# \_name\_
+# _emphasis_
+# `\_code\_`
+[literal](#_name_) [emphasis](#emphasis) [code](#_code_)
+''')
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_html_removal_preserves_inline_heading_word_boundaries(self):
+        result = self.check_links('''# hello <em>world</em>
+# some<!-- hidden -->thing
+[tag](#hello-world) [comment](#something)
+''')
+        self.assertEqual(0, result.returncode, result.stderr)
+
     def test_reference_wiki_and_encoded_paths_keep_their_fragment(self):
         result = self.check_links('''[reference][ref]
 [ref]: <folder/target%20file.md#some-section>
