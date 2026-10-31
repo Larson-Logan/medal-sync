@@ -5,11 +5,11 @@ using System.Runtime.Versioning;
 
 namespace MedalSync.Platform;
 
-/// <summary>Explicit, configuration-independent update download. Installation stays in the guarded setup EXE.</summary>
+/// <summary>Explicit, verified update download and handoff to the guarded setup EXE.</summary>
 [SupportedOSPlatform("windows")]
 internal static class WindowsReleaseUpdate
 {
-    internal static int Run(WindowsLauncherUi ui)
+    internal static int Run(WindowsLauncherUi ui, Action prepareInstall)
     {
         const string releases = "https://github.com/Larson-Logan/medal-sync/releases";
         using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
@@ -34,9 +34,13 @@ internal static class WindowsReleaseUpdate
             using var downloadHandler = new HttpClientHandler { UseCookies = false };
             using var downloadClient = new HttpClient(downloadHandler) { Timeout = Timeout.InfiniteTimeSpan };
             string setup = Download(asset, directory, downloadClient);
-            ui.Show($"Medal Sync {asset.Version} setup was downloaded and verified.\n\nQuit Medal normally and wait for Ready, then run:\n{setup}\n\nThe download folder will open when you close this message.");
-            Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true });
-            return 0;
+            return OfferInstall(asset.Version, setup, ui.Confirm, ui.Show, prepareInstall,
+                path =>
+                {
+                    // Do not wait: this updater must exit and release its program files before setup checks readiness.
+                    using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                    if (process is null) throw new IOException("Windows setup did not start.");
+                }, path => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true })?.Dispose());
         }
         catch (OperationCanceledException)
         {
@@ -46,6 +50,28 @@ internal static class WindowsReleaseUpdate
         catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or UnauthorizedAccessException or COMException or Win32Exception)
         {
             ui.Show($"The update could not be completed: {ex.Message}\n\nCheck for updates again to retry, or download Windows setup from:\n{releases}");
+            return 1;
+        }
+    }
+
+    internal static int OfferInstall(string version, string setup, Func<string, bool> confirm, Action<string> show,
+        Action prepareInstall, Action<string> startSetup, Action<string> openFolder)
+    {
+        if (!confirm($"Medal Sync {version} setup was downloaded and verified.\n\nInstall the update now? Medal Sync's status app will exit and Windows setup will open.\n\nQuit Medal normally and wait for Ready first. Your settings and recordings will be kept.\n\nChoose No to keep the installer for later."))
+        {
+            openFolder(Path.GetDirectoryName(setup)!);
+            return 0;
+        }
+        try
+        {
+            prepareInstall();
+            startSetup(setup);
+            return 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception or MedalSyncException)
+        {
+            show($"Windows setup could not start: {ex.Message}\n\nThe verified installer is saved here:\n{setup}\n\nThe download folder will open. Resolve the issue, then run this installer to retry without downloading again.");
+            openFolder(Path.GetDirectoryName(setup)!);
             return 1;
         }
     }

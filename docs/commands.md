@@ -25,7 +25,7 @@ in any terminal opened after setup instead.
 - **One at a time.** Commands that change state refuse while the supervisor or
   another state-changing command is running.
 - **Blocked during setup.** While Windows setup or uninstall is open, every
-  command except `version` and `setup check` refuses.
+  command except `version`, `setup check` and `diagnostics` refuses.
 - **Windows only**, except `version`, `config create`, `config validate`,
   `snapshot`, `dry-run-restore`, `audit`, `repair` and `capacity`, which also
   run elsewhere for testing.
@@ -66,7 +66,7 @@ shows it too.
 | `medal-sync-launch.exe --configure` | Opens the configuration wizard. |
 | `medal-sync-launch.exe --status` | Opens the status panel. |
 | `medal-sync-launch.exe --tray` | Starts the status icon without opening the panel. |
-| `medal-sync-launch.exe --check-updates` | Checks for a newer release and offers a verified download. See [updates](updates.md#upgrade-and-repair). |
+| `medal-sync-launch.exe --check-updates` | Checks for a newer release, downloads and verifies setup, then offers to exit the status app and run the installer. See [updates](updates.md#upgrade-and-repair). |
 
 ## Check this PC (read-only)
 

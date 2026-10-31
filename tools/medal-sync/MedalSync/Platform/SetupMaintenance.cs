@@ -29,7 +29,7 @@ internal static class SetupMaintenance
     internal static void RequireReady(string root, bool applicationRunning, bool supervisorRunning,
         Func<MedalSyncConfig, OwnershipRecord>? readJournal = null)
     {
-        if (applicationRunning || supervisorRunning) throw new UnsafeOperationException("Quit Medal normally and wait for Ready before installing or uninstalling Medal Sync.");
+        if (applicationRunning || supervisorRunning) throw new UnsafeOperationException("Quit Medal normally and wait for Ready, then choose Exit Medal Sync in the status panel or tray menu before installing or uninstalling. Older versions call this Exit status view (supervision continues).");
         if (Directory.Exists(Path.Combine(root, "sessions")) && Directory.EnumerateFiles(Path.Combine(root, "sessions"), "*.json").Any())
             throw new UnsafeOperationException("An unfinished local session is retained. Cancel setup, recover the session and wait for Ready, then run setup again.");
         bool config = File.Exists(Path.Combine(root, "config.json"));
@@ -46,9 +46,15 @@ internal static class SetupMaintenance
     }
 
     [SupportedOSPlatform("windows")]
-    internal static bool ApplicationRunning()
+    internal static bool MedalRunning() => AnyProcessRunning(["Medal", "MedalEncoder", "MedalRecorder"]);
+
+    [SupportedOSPlatform("windows")]
+    internal static bool ApplicationRunning() => AnyProcessRunning(["Medal", "MedalEncoder", "MedalRecorder", "medal-sync", "medal-sync-launch"]);
+
+    [SupportedOSPlatform("windows")]
+    private static bool AnyProcessRunning(string[] names)
     {
-        foreach (string name in new[] { "Medal", "MedalEncoder", "MedalRecorder", "medal-sync", "medal-sync-launch" })
+        foreach (string name in names)
         {
             foreach (var process in Process.GetProcessesByName(name))
             {

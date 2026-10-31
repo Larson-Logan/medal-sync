@@ -74,6 +74,7 @@
     "tests/desktop/ConfigurationWizardTests.cs": ["desktop"],
     "tests/desktop/MedalSync.Desktop.Tests.csproj": ["desktop"],
     "tests/desktop/Program.cs": ["desktop"],
+    "tests/desktop/UpdateTests.cs": ["desktop"],
     "tests/desktop/packages.lock.json": ["desktop"],
     "tests/fixtures/smb.conf": ["desktop"],
     "tests/integration/MedalSync.Integration.csproj": ["desktop", "storage"],

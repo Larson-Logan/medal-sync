@@ -26,6 +26,7 @@ internal static class CommandRunner
         medal-sync: SSD-cached Medal storage and one-PC-at-a-time library handoff.
 
         Read-only:
+          version                                Print the Medal Sync version and supported Medal schema
           setup check [--state-root DIR] [--out FILE]  Verify readiness for Windows setup; no library changes
           config validate --config FILE          Validate a candidate config without reading Medal or the share
           inspect [--json]                       Phase 0 inventory of this PC (Gate A evidence)
@@ -43,10 +44,10 @@ internal static class CommandRunner
           history diff --from N --to M [--json] [--out FILE]  Count changes between generations;
                                                  --out writes per-clip titles and paths to a new private file
           replica history [--target NAME] [--json]  Past cloud-copy checks; counts only
-          enroll --out DIRECTORY [--apply]       Preview/review a lossless union with this PC, then enroll it
-          enroll recover --out DIRECTORY [--apply]  Recover an exact native-backup rollback after enrollment
 
         Changes state (need the configuration from the runbook):
+          enroll --out DIRECTORY [--apply]       Preview/review a lossless union with this PC, then enroll it
+          enroll recover --out DIRECTORY [--apply]  Recover an exact native-backup rollback after enrollment
           config create --account-id ID --cache-root DIR --remote PATH --out FILE
                         (--new-library | --library-id ID) [--spike] [--apply]
                         [--capture-folder M:\Clips] [--rclone-path FILE] [--sync-folder ID] [--sync-pattern PATTERN]
