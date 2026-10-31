@@ -182,7 +182,7 @@ internal sealed class WindowsConfigurationWizard : Form
         var exclusions = _existing?.SyncExclusions.Skip(1).ToList() ?? [];
         if (Optional("syncFolder") is { } folder) exclusions.Insert(0, new(folder, Value("syncPattern")));
         return new(1, library, Value("account"), Value("coordination"), Value("remote"), Value("capture"), Value("cache"), Value("rclone"),
-            (_existing?.Mount ?? new MountConfig(5, 20, 20, 300, 30, 1000, 2, 53682)) with
+            (_existing?.Mount ?? new MountConfig(5, 20, 20, 300, 30, 1000, 2, MountConfig.DefaultControlPort)) with
             {
                 CacheMaxGiB = _existing is not null && !_editedNumbers.Contains(_cacheLimit) ? _existing.Mount.CacheMaxGiB : (int)_cacheLimit.Value,
                 MinFreeGiB = _existing is not null && !_editedNumbers.Contains(_reserve) ? _existing.Mount.MinFreeGiB : (int)_reserve.Value,

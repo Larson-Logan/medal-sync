@@ -65,9 +65,22 @@ The defaults suit most PCs.
 | `cachePollSeconds` | `30` | Whole seconds, above 0 | How often rclone checks the cache for expired files (`--vfs-cache-poll-interval`). |
 | `dirCacheHours` | `1000` | At least 1 | How long folder listings are cached (`--dir-cache-time`). |
 | `transfers` | `2` | 1 to 8 | Uploads run in parallel (`--transfers`). |
-| `controlPort` | `53682` | 1024 to 65535 | Local port for rclone's control API, on 127.0.0.1 only. `config create --spike` uses `53683`. |
+| `controlPort` | `53684` | 1024 to 65535 | Local port for rclone's control API, on 127.0.0.1 only. `config create --spike` uses `53683`. Avoid `53682` (browser sign-in) and `5572` (rclone's default control API). |
 | `bandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Upload limit in MiB/s while Medal runs. See [limit upload speed while recording](storage.md#limit-upload-speed-while-recording). |
 | `finishBandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Upload limit in MiB/s after Medal exits, while uploads finish. |
+
+Older setups may use `53682`. rclone's [browser sign-in server](https://github.com/rclone/rclone/blob/v1.75.2/lib/oauthutil/oauthutil.go)
+needs that port for `rclone config` and `rclone config reconnect`, so a clip drive
+using it prevents sign-in even when a handoff is waiting for renewed credentials.
+`config validate` warns about this setting without changing it.
+
+To change it, quit Medal normally, wait for **Ready** and the clip drive to stop,
+back up `config.json`, then set `mount.controlPort` to `53684` and validate again.
+Keep the original port during any unfinished session, including after a reboot:
+the running or recovered drive must still be reached on that port. If sign-in is
+already blocking a handoff, use rclone's [remote authorization flow](https://rclone.org/remote_setup/)
+from another PC to finish sign-in first, then let the handoff reach Ready before
+changing the port. Saving other fields in the wizard preserves an existing port.
 
 ## `replication`: local copy and cloud copies
 

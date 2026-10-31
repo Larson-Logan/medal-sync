@@ -67,6 +67,10 @@
   runner disables prompts and closes stdin so encrypted configs fail promptly
   through the existing configuration guidance.
 
+- Fixed: new configurations use control port 53684 so the clip drive leaves
+  rclone's browser sign-in port free for renewed cloud credentials. Configuration
+  validation warns existing setups using 53682 to change it once Ready.
+
 ## 1.2.0 — 2026-10-29
 
 - Retry pending optional cloud copies while Ready with
