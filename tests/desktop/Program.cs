@@ -19,6 +19,7 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         ConfigurationWizardTests.Run(Check);
+        UpdateTests.Run(Check);
         var gate = new object();
         DesktopStatus current = new(SessionPhase.Starting, "Synthetic startup", DateTimeOffset.UtcNow);
         bool disconnected = false;
@@ -34,8 +35,9 @@ internal static class Program
                 return current;
             }
         }
+        bool operationRunning = true;
         using var view = new WindowsTrayStatus(true, Read, @"Local\MedalSync.DesktopTest." + Guid.NewGuid().ToString("N"),
-            () => { finishes++; return Task.FromResult(finishResult); });
+            () => { finishes++; return Task.FromResult(finishResult); }, () => operationRunning);
         var panel = Field<Form>(view, "_panel");
         var status = Field<TextBox>(view, "_status");
         var retry = Field<Button>(view, "_retry");
@@ -78,6 +80,12 @@ internal static class Program
         Check(!panel.Visible && !panel.IsDisposed, "Closing hides the panel without ending the view");
         Until(view, () => reads > before);
         Check(icon.Visible, "Status and reconnect continue while the panel is closed");
+        var exit = icon.ContextMenuStrip!.Items.Cast<ToolStripItem>().Single(item => item.Text == "E&xit Medal Sync");
+        Check(panel.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<FlowLayoutPanel>().Single()
+            .Controls.OfType<Button>().Any(button => button.Text == "E&xit Medal Sync"), "Exit is available directly in the status panel");
+        exit.PerformClick();
+        Until(view, () => status.Text.Contains("Uploads will continue safely.", StringComparison.Ordinal));
+        Check(!Field<bool>(view, "_ending") && panel.Visible && icon.Visible, "Exit explains active supervision and keeps it running");
         _ = SendMessageW(panel.Handle, 0x11, IntPtr.Zero, IntPtr.Zero);
         Check(Field<bool>(view, "_ending"), "Shutdown suppresses further interactive actions even for a hidden panel");
         // A view is disposable without invoking any session, rclone or library operation.
