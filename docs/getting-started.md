@@ -253,11 +253,13 @@ message also appears in the panel instead of a dialog that would take focus.
 
 The panel and tray menu support keyboard access and native accessibility APIs.
 Background notices are coalesced in the panel without popups or taking focus
-from games. Closing the panel hides it; **Exit status view** closes only the
-view. Supervision, Medal and rclone continue independently. Reopen status at any
-time. After Ready, exit the status view before running setup or uninstall, since
-those operations require all Medal Sync programs to be closed. Setup guidance
-and update checks are also available from the panel. Shutdown closes the view
+from games. Closing the panel hides it. To exit Medal Sync, quit Medal normally,
+wait for Ready, then choose **Exit Medal Sync** in the panel or tray menu.
+Exit keeps the view open with guidance while supervision or a library operation
+is active. Reopen status at any time. Setup and uninstall require all Medal Sync
+programs to be closed. Setup guidance and update checks are also available from
+the panel; accepting a verified update closes the status app and opens setup.
+Shutdown closes the view
 without interactive prompts while the supervisor keeps its existing finish budget.
 
 ### Status for scripts

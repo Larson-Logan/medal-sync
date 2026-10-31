@@ -19,6 +19,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private readonly Button _retry;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly EventWaitHandle _open;
+    private readonly EventWaitHandle _exit;
+    private readonly Func<bool> _operationRunning;
     private Task<DesktopStatus>? _read;
     private DateTime _nextRead;
     private DesktopStatus _last = DesktopStatus.Unknown();
@@ -27,6 +29,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private readonly Func<DesktopStatus> _readStatus;
     private readonly Func<Task<FinishCommandResult>> _runFinish;
     private string? _finishFailure;
+    private string? _exitFailure;
 
     public static int Run(bool show)
     {
@@ -54,12 +57,39 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         finally { singleton.ReleaseMutex(); }
     }
 
+    // Wait for the view to dispose and release its singleton, rather than only hiding its window.
+    // A supervisor is never terminated. Setup repeats its independent readiness check before copying files.
+    internal static void CloseForUpdate(string mutexName = MutexName, string eventName = OpenEventName,
+        TimeSpan? timeout = null)
+    {
+        if (!Mutex.TryOpenExisting(mutexName, out var singleton)) return;
+        using (singleton)
+        {
+            try
+            {
+                using var signal = EventWaitHandle.OpenExisting(eventName + ".Exit");
+                signal.Set();
+            }
+            catch (WaitHandleCannotBeOpenedException)
+            {
+                throw new IOException("Close Medal Sync using Exit status view in its tray menu, then retry the installer.");
+            }
+            bool stopped;
+            try { stopped = singleton.WaitOne(timeout ?? TimeSpan.FromSeconds(10)); }
+            catch (AbandonedMutexException) { stopped = true; }
+            if (!stopped) throw new IOException("Medal Sync could not exit. Quit Medal normally, wait for Ready, then choose Exit Medal Sync and retry the installer.");
+            singleton.ReleaseMutex();
+        }
+    }
+
     internal WindowsTrayStatus(bool show, Func<DesktopStatus>? readStatus = null, string eventName = OpenEventName,
-        Func<Task<FinishCommandResult>>? runFinish = null)
+        Func<Task<FinishCommandResult>>? runFinish = null, Func<bool>? operationRunning = null)
     {
         _readStatus = readStatus ?? SessionCommands.ReadDesktopStatus;
         _runFinish = runFinish ?? RunFinish;
         _open = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
+        _exit = new EventWaitHandle(false, EventResetMode.AutoReset, eventName + ".Exit");
+        _operationRunning = operationRunning ?? SessionCommands.AnotherInstanceRunning;
         _icons = new AppIcons();
         _panel = new StatusForm(() => _ending = true)
         {
@@ -91,9 +121,12 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         var close = new Button { Text = "&Close panel", AutoSize = true, DialogResult = DialogResult.Cancel };
         close.Click += (_, _) => _panel.Hide();
         buttons.Controls.Add(close);
+        var exit = new Button { Text = "E&xit Medal Sync", AutoSize = true };
+        exit.Click += (_, _) => TryExit();
+        buttons.Controls.Add(exit);
         _panel.CancelButton = close;
         layout.Controls.Add(buttons, 0, 1);
-        layout.Controls.Add(new Label { Text = "Closing this panel keeps supervision and uploads running.", AutoSize = true, Padding = new Padding(0, 8, 0, 0) }, 0, 2);
+        layout.Controls.Add(new Label { Text = "Close panel keeps Medal Sync running. To update, quit Medal, wait for Ready, then exit Medal Sync.", AutoSize = true, MaximumSize = new Size(450, 0), Padding = new Padding(0, 8, 0, 0) }, 0, 2);
         _panel.Controls.Add(layout);
         _ = _panel.Handle; // A hidden top-level window must also receive Windows shutdown broadcasts.
         _panel.FormClosing += (_, e) =>
@@ -105,7 +138,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         menu.Items.Add("Setup &guide", null, (_, _) => OpenGuide());
         menu.Items.Add("&Configure", null, (_, _) => StartLauncher("--configure"));
         menu.Items.Add("Check for &updates", null, (_, _) => StartLauncher("--check-updates"));
-        menu.Items.Add("Exit status &view (supervision continues)", null, (_, _) => ExitThread());
+        menu.Items.Add("E&xit Medal Sync", null, (_, _) => TryExit());
         _icon = new NotifyIcon { Icon = _icons.For(SessionPhase.Unknown), Text = "Medal Sync: Unknown", Visible = true, ContextMenuStrip = menu };
         _icon.DoubleClick += (_, _) => ShowPanel();
         _timer = new System.Windows.Forms.Timer { Interval = 1000 };
@@ -118,6 +151,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private void Poll()
     {
         if (_ending) { ExitThread(); return; }
+        if (_exit.WaitOne(0)) { TryExit(); if (_ending) return; }
         if (_open.WaitOne(0)) ShowPanel();
         if (_read is { IsCompleted: true })
         {
@@ -146,8 +180,22 @@ internal sealed class WindowsTrayStatus : ApplicationContext
             + $"Storage copy: {status.Replica ?? "none currently reported"}\r\n"
             + $"Last confirmed: {status.ConfirmedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "never"}"
             + (lastResult is null ? "" : $"\r\n\r\nLast finish result: {lastResult}")
+            + (_exitFailure is null ? "" : $"\r\n\r\nExit: {_exitFailure}")
             + (status.Notice is null ? "" : $"\r\n\r\nLatest notice: {status.Notice}");
         if (_status.Text != text) _status.Text = text;
+    }
+
+    private void TryExit()
+    {
+        if (_ending) return;
+        if (_finishing || _operationRunning())
+        {
+            ShowPanel();
+            _exitFailure = "Medal Sync is still supervising Medal or finishing a library operation. Quit Medal normally from its tray icon and wait for Ready, then choose Exit Medal Sync again. Uploads will continue safely.";
+            _status.Text = _exitFailure;
+            return;
+        }
+        ExitThread();
     }
 
     private void ShowPanel()
@@ -219,7 +267,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _timer.Dispose(); _icon.ContextMenuStrip?.Dispose(); _icon.Dispose(); _panel.Dispose(); _icons.Dispose(); _open.Dispose(); }
+        if (disposing) { _timer.Dispose(); _icon.ContextMenuStrip?.Dispose(); _icon.Dispose(); _panel.Dispose(); _icons.Dispose(); _open.Dispose(); _exit.Dispose(); }
         base.Dispose(disposing);
     }
 

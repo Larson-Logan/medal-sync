@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Update checks now offer to run the verified installer, close the status app
+  and exit the updater so Windows setup can replace the installed version.
+  Deferred or failed installation keeps the download available for retrying.
+  The status panel and tray menu now have **Exit Medal Sync**, with guidance
+  when Medal or a library operation is still active.
 - Fixed: Medal shortcuts keep Medal's default icon when the launcher repairs
   them, including pinned taskbar shortcuts without an explicit icon path.
 - Every merge to `main` now publishes a release automatically, tagged

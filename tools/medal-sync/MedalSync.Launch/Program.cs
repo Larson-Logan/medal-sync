@@ -14,7 +14,12 @@ internal static class Program
         try
         {
             if (args is ["--status"] or ["--tray"]) return WindowsTrayStatus.Run(args[0] == "--status");
-            if (args is ["--check-updates"]) return WindowsReleaseUpdate.Run(ui);
+            if (args is ["--check-updates"]) return WindowsReleaseUpdate.Run(ui, () =>
+            {
+                SetupMaintenance.RequireReady(LocalState.ForCurrentUser().Root,
+                    SetupMaintenance.MedalRunning(), SessionCommands.AnotherInstanceRunning());
+                WindowsTrayStatus.CloseForUpdate();
+            });
             if (args is ["--configure"]) return WindowsConfigurationWizard.Run(LocalState.ForCurrentUser());
             return Launcher.Run(args, ui, state => WindowsConfigurationWizard.Run(state));
         }

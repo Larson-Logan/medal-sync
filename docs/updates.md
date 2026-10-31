@@ -28,7 +28,9 @@ PowerShell nor a separate .NET installation. Follow
 [getting started](getting-started.md) for storage configuration and enrollment.
 
 Setup checks the initiating user's library readiness before copying programs.
-Quit Medal normally and wait for Ready first. Running companion processes,
+Quit Medal normally, wait for Ready, then choose **Exit Medal Sync** in the
+status panel or tray menu first. Older versions call this **Exit status view
+(supervision continues)** in the tray menu. Running companion processes,
 retained session credentials, incomplete configuration, unavailable coordination
 storage and non-CLEAN ownership refuse installation. Setup never force-closes
 Medal or automatically reboots. While setup or uninstall is open, new companion
@@ -79,8 +81,18 @@ available, you can download it with a native progress window and Cancel button.
 The updater checks the expected repository URL, download size and GitHub SHA-256
 before saving a runnable EXE. Failed or canceled downloads remove their partial
 file. Downloads stay under `%LOCALAPPDATA%\MedalSync\Downloads` in separate folders;
-earlier downloads are never overwritten. After verification, the folder opens.
-Quit Medal normally, wait for Ready, and run that setup EXE to install the update.
+earlier downloads are never overwritten. After verification, choose **Yes** to
+install now. Quit Medal normally and wait for Ready first. The updater checks
+readiness, closes the status app, opens Windows setup, and exits so setup can
+replace the running version. Complete the setup wizard to install the update.
+If supervision or uploads are still active, installation is blocked with guidance
+and the verified installer stays available for retrying.
+
+Choose **No** to install later; the download folder opens. To run a downloaded
+setup manually, quit Medal normally, wait for Ready, and choose **Exit Medal Sync**
+in the status panel or tray menu before opening the EXE. Closing the panel only
+hides it. If Windows setup is canceled or cannot start, the updater opens the
+saved installer folder so you can retry without downloading again.
 
 ## Uninstall
 
