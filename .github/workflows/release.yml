@@ -135,62 +135,47 @@ jobs:
             fi
           fi
 
-  release:
-    name: Build, verify and publish release
+  validate:
+    name: Validate release
     needs: plan
     if: needs.plan.outputs.release == 'true'
+    uses: ./.github/workflows/validate.yml
+    with:
+      release: true
+      revision: ${{ needs.plan.outputs.revision }}
+
+  release:
+    name: Publish tested release
+    needs: [plan, validate]
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     # The release itself is published with the app token, so github.token only reads.
     permissions:
       contents: read
       id-token: write
       attestations: write
-    env:
-      # Read by MSBuild (Directory.Build.props) and the packaging scripts.
-      MedalReleaseRevision: ${{ needs.plan.outputs.revision }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download tested packages from this run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.13'
-      - name: Audit public source and reachable Git history
-        shell: pwsh
-        run: python scripts/check-repository.py --history
-      - name: Verify version, main ancestry and any existing tag
+          name: release-assets
+          path: .medal-sync-dist
+      - name: Verify planned asset names and checksums
         shell: pwsh
         env:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
-          Import-Module ./scripts/storage/medal-sync/MedalSync.Update.psm1
-          $version = Get-MedalBuildVersion (Get-Location).Path
-          if ($version -cne $env:VERSION) { throw 'Checked-out version differs from the planned version.' }
-          git merge-base --is-ancestor HEAD origin/main
-          if ($LASTEXITCODE -ne 0) { throw 'Release commit must be on main.' }
-          $tagged = git rev-parse --verify --quiet "refs/tags/v$version^{commit}"
-          if ($tagged -and $tagged -ne (git rev-parse HEAD)) {
-            throw "Tag v$version already exists on another commit. Rerun the workflow to take the next hotfix number."
+          $names = @("medal-sync-$env:VERSION-setup-win-x64.exe", "medal-sync-$env:VERSION-win-x64.zip")
+          $expected = @($names) + @($names | ForEach-Object { "$_.sha256" })
+          $actual = @(Get-ChildItem -LiteralPath .medal-sync-dist -Force | ForEach-Object Name)
+          if (Compare-Object $expected $actual -CaseSensitive) { throw 'Release assets differ from the planned version or file list.' }
+          foreach ($name in $names) {
+            $path = Join-Path .medal-sync-dist $name
+            $sidecar = (Get-Content -LiteralPath "$path.sha256" -Raw).Trim()
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($sidecar -cne "$hash  $name") { throw "Release checksum verification failed: $name" }
           }
-          $global:LASTEXITCODE = 0
-      - name: Validate
-        shell: pwsh
-        run: ./scripts/validate.ps1
-      - name: Package and verify
-        shell: pwsh
-        run: ./scripts/package-windows-installer.ps1
-      - name: Verify native install and uninstall
-        shell: pwsh
-        run: ./scripts/test-windows-installer.ps1
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

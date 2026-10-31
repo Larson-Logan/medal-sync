@@ -46,6 +46,7 @@ try {
         Invoke-Checked python @('tests/test_source_hygiene.py')
         Invoke-Checked python @('tests/test_source_manifest.py')
         Invoke-Checked python @('tests/test_branch_cleanup.py')
+        Invoke-Checked python @('tests/test_release_pipeline.py')
         $docs = @(& python scripts/check-repository.py --list-docs)
         if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate source documentation.' }
         Invoke-Checked node (@('scripts/check-doc-links.mjs') + $docs)
