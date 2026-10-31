@@ -7,6 +7,9 @@
 - Fixed: new configurations use control port 53684 so the clip drive leaves
   rclone's browser sign-in port free for renewed cloud credentials. Configuration
   validation warns existing setups using 53682 to change it once Ready.
+- Fixed: transient SSD cache cleanup trouble keeps finish supervision running.
+  Failed upload retries now appear in status and the tray with storage guidance;
+  a queue entry still failing after 15 minutes needs action and retries with backoff.
 - Fixed: simultaneous status and cloud-operation checks no longer mistake each
   other for a running session and cancel an otherwise safe cloud operation.
 - Fixed: editing configuration in the setup wizard preserves required cloud

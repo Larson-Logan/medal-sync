@@ -83,6 +83,8 @@ internal sealed class SessionCoordinator(
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
     private const string ActiveMessage = "Medal is active. Quit Medal normally from its tray icon when you want to switch PCs.";
+    private string? _uploadSession;
+    private readonly Dictionary<ulong, (DateTimeOffset Since, long Tries)> _uploadRetries = [];
 
     private DeviceIdentity Me => options.Device;
 
@@ -567,6 +569,11 @@ internal sealed class SessionCoordinator(
     private FinishOutcome? WaitForUploads(string session)
     {
         shutdown?.RequireTime();
+        if (_uploadSession != session || !mount.IsRunning)
+        {
+            _uploadSession = session;
+            _uploadRetries.Clear(); // Queue IDs belong to one mount process only.
+        }
         if (!mount.IsRunning)
         {
             // After a restart the session's cache may still hold unsent files;
@@ -581,6 +588,7 @@ internal sealed class SessionCoordinator(
             shutdown?.RequireTime();
             if (Reopened(session) is { } reopened) return reopened;
             var verdict = mount.Drain();
+            bool needsAction = UploadRetriesNeedAction(verdict);
             Report(verdict.State switch
             {
                 DrainState.Unknown => SessionPhase.Unknown,
@@ -588,7 +596,7 @@ internal sealed class SessionCoordinator(
                 _ => SessionPhase.Uploading,
             }, verdict.State == DrainState.Unknown
                 ? "Upload status is unknown. Keep this PC on; ownership and cache are retained."
-                : "Finishing uploads to primary storage. Keep this PC on and wait for verification." + limitNotice, session,
+                : "Finishing uploads to primary storage. Keep this PC on and wait for verification. " + string.Join(" ", verdict.Reasons) + limitNotice, session,
                 verdict.State == DrainState.Unknown ? null : verdict.QueuedFiles,
                 verdict.State == DrainState.Unknown ? null : verdict.QueuedBytes, "Primary storage");
             shutdown?.RequireTime();
@@ -599,12 +607,36 @@ internal sealed class SessionCoordinator(
                 case DrainState.Failed:
                     return new FinishOutcome(FinishStatus.Blocked, "Uploads are failing: " + string.Join(" ", verdict.Reasons), 0);
             }
+            if (needsAction)
+                return new FinishOutcome(FinishStatus.Pending,
+                    "Action needed: upload retries have not recovered for at least 15 minutes. " + string.Join(" ", verdict.Reasons)
+                    + " Ownership and cached clips stay on this PC; finish will retry automatically.", 0, PendingCause.NeedsAction);
             if (clock.Now >= deadline)
             {
-                return new FinishOutcome(FinishStatus.Pending, "Still uploading: " + string.Join(" ", verdict.Reasons), 0);
+                return new FinishOutcome(FinishStatus.Pending, (verdict.CacheSpaceTrouble ? "Waiting for SSD cache cleanup: " : "Still uploading: ")
+                    + string.Join(" ", verdict.Reasons), 0);
             }
             Pause(options.PollInterval);
         }
+    }
+
+    private bool UploadRetriesNeedAction(DrainVerdict verdict)
+    {
+        if (verdict.State == DrainState.Unknown) return false;
+        var present = verdict.Uploads.Select(u => u.Id).ToHashSet();
+        foreach (ulong id in _uploadRetries.Keys.Where(id => !present.Contains(id)).ToArray()) _uploadRetries.Remove(id);
+        bool needsAction = false;
+        foreach (var upload in verdict.Uploads)
+        {
+            if (_uploadRetries.TryGetValue(upload.Id, out var previous) && upload.Tries < previous.Tries)
+                _uploadRetries.Remove(upload.Id);
+            if (upload.Tries == 0) { _uploadRetries.Remove(upload.Id); continue; }
+            if (upload.Uploading) continue; // A running attempt is not evidence that it failed.
+            if (!_uploadRetries.TryGetValue(upload.Id, out var retry)) retry = (clock.Now, upload.Tries);
+            _uploadRetries[upload.Id] = (retry.Since, upload.Tries);
+            if (upload.Tries > 1 && clock.Now - retry.Since >= TimeSpan.FromMinutes(15)) needsAction = true;
+        }
+        return needsAction;
     }
 
     private void Pause(TimeSpan duration)

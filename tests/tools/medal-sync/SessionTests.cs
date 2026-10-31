@@ -1103,6 +1103,82 @@ public sealed class SessionTests : IDisposable
         Assert.Equal(FinishStatus.Published, pc.Coordinator.Finish(session).Status);
     }
 
+    private static DrainVerdict RetryingUpload(long tries = 3, ulong id = 1) => VfsStatus.Evaluate(
+        """{"fs":"synthetic:media","diskCache":{"uploadsInProgress":0,"uploadsQueued":1,"erroredFiles":0,"outOfSpace":false}}""",
+        $$"""{"queue":[{"id":{{id}},"size":10,"tries":{{tries}},"uploading":false}]}""", "synthetic:media");
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SupervisionRetriesTransientCacheCleanupAutomatically(bool outOfSpace)
+    {
+        List<SessionProgress> reports = [];
+        var pc = Computer(FirstPc, "first", progress: reports.Add);
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        string cache = outOfSpace ? "\"erroredFiles\":0,\"outOfSpace\":true" : "\"erroredFiles\":2,\"outOfSpace\":false";
+        var verdict = VfsStatus.Evaluate("{\"fs\":\"synthetic:media\",\"diskCache\":{\"uploadsInProgress\":0,\"uploadsQueued\":0," + cache + "}}",
+            "{\"queue\":[]}", "synthetic:media");
+        pc.Mount.Verdicts.Enqueue(verdict);
+
+        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Supervise(session, _ => { }, TestContext.Current.CancellationToken).Status);
+        Assert.Contains(reports, r => r.NextAction.Contains("SSD cache", StringComparison.Ordinal));
+        Assert.DoesNotContain(reports, r => r.NextAction.Contains("failed to upload", StringComparison.Ordinal));
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void RepeatedUploadFailuresBecomeActionNeededAndRecoverWithBackoff()
+    {
+        List<SessionProgress> reports = [];
+        List<string> notices = [];
+        var pc = Computer(FirstPc, "first", progress: reports.Add);
+        string session = pc.Coordinator.Launch().Session!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        pc.Mount.Steady = RetryingUpload();
+        var first = pc.Coordinator.Finish(session);
+        Assert.Equal(PendingCause.None, first.Cause);
+        Assert.Contains("being retried", first.Message);
+        _clock.Sleep(TimeSpan.FromMinutes(15));
+        var action = pc.Coordinator.Finish(session);
+        Assert.Equal(FinishStatus.Pending, action.Status);
+        Assert.Equal(PendingCause.NeedsAction, action.Cause);
+        Assert.Contains("Action needed", action.Message);
+        Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.Contains(reports, r => r.Phase == SessionPhase.RecoveryNeeded && r.NextAction.Contains("being retried", StringComparison.Ordinal));
+
+        var resumed = _clock.Now;
+        var attempts = new List<DateTimeOffset>();
+        pc.Mount.OnDrain = () =>
+        {
+            attempts.Add(_clock.Now);
+            if (_clock.Now - resumed >= TimeSpan.FromMinutes(2)) pc.Mount.Steady = new(DrainState.Drained, [], 0, 0);
+        };
+        Assert.Equal(FinishStatus.Published, pc.Coordinator.Supervise(session, notices.Add, TestContext.Current.CancellationToken).Status);
+        Assert.Single(notices, n => n.StartsWith("Action needed", StringComparison.Ordinal));
+        Assert.True(attempts[1] - attempts[0] >= TimeSpan.FromSeconds(30));
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void UploadRetryAgeDoesNotFollowNewOrResetQueueEntries(bool newId)
+    {
+        var pc = Computer(FirstPc, "first");
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        pc.Mount.Steady = RetryingUpload();
+        pc.Coordinator.Finish(session);
+        _clock.Sleep(TimeSpan.FromMinutes(15));
+        pc.Mount.Steady = newId ? RetryingUpload(id: 2) : RetryingUpload(tries: 0);
+        Assert.Equal(PendingCause.None, pc.Coordinator.Finish(session).Cause);
+        pc.Mount.Steady = new(DrainState.Drained, [], 0, 0);
+        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Finish(session).Status);
+    }
+
     [Fact]
     public void Finish_DoesNothingWhileMedalRuns()
     {
