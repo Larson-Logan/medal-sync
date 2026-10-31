@@ -404,6 +404,11 @@ or anything that is not clip media. Version history under
 only whole, dated attempts. The review file names private paths: keep it on
 this PC.
 
+Cleanup refuses duplicate or case-conflicting paths, unsafe names, links and
+unreadable listing entries before saving a review or changing the destination.
+For duplicate names, inspect the copy with `rclone dedupe` before retrying;
+Medal Sync does not choose which duplicate to keep.
+
 Apply holds the journal writer lock, so no PC can start or finish meanwhile. It
 refuses if the committed generation changed or any file at the destination
 differs from the review, then moves exactly the reviewed files into
@@ -413,8 +418,11 @@ folder count as moved. `purge-trash` lists trash batches and, with `--apply`,
 permanently deletes batches whose files were moved at least `--older-than` days
 ago (default 7). It holds the same writer lock while it chooses and deletes
 batches, so a prune resumed on another PC cannot add files to a batch that is
-being purged. Age counts from the move, not the review, so applying an old
-review still gets the full wait. Apply writes an empty `.medal-sync-moved-<time>`
+being purged. Each invocation lists only `.medal-sync-trash/`, once. With
+`--apply`, it deletes exactly the batches marked `deleting` from that listing;
+batches marked `kept` remain even if they cross the age limit during reporting.
+A missing trash folder is empty. Age counts from the move, not the review, so
+applying an old review still gets the full wait. Apply writes an empty `.medal-sync-moved-<time>`
 marker into the batch for this; batches without one are kept. Required targets
 are refused.
 
