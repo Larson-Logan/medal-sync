@@ -138,13 +138,13 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
     {
         requireIdle();
         var target = Target(targetName);
-        var files = remote.List(ReplicationPlan.Destination(target, config.LibraryId));
-        return files.Where(f => f.Path.StartsWith(TrashRoot + "/", StringComparison.Ordinal) && f.Path.Split('/').Length > 2)
-            .GroupBy(f => f.Path.Split('/')[1], StringComparer.Ordinal)
+        var files = remote.List(ReplicationPlan.Destination(target, config.LibraryId).TrimEnd('/') + "/" + TrashRoot);
+        return files.Where(f => f.Path.Split('/').Length > 1)
+            .GroupBy(f => f.Path.Split('/')[0], StringComparer.Ordinal)
             .Select(g =>
             {
-                var markers = g.Where(f => f.Path.Split('/') is { Length: 3 } parts && parts[2].StartsWith(MovedMarker, StringComparison.Ordinal)).ToArray();
-                var moved = markers.Select(f => MarkerTime(f.Path.Split('/')[2])).Where(t => t is not null).Max();
+                var markers = g.Where(f => f.Path.Split('/') is { Length: 2 } parts && parts[1].StartsWith(MovedMarker, StringComparison.Ordinal)).ToArray();
+                var moved = markers.Select(f => MarkerTime(f.Path.Split('/')[1])).Where(t => t is not null).Max();
                 var media = g.Except(markers).ToArray();
                 return new ReplicaTrashBatch(g.Key, moved, media.Length, media.Sum(f => f.Size));
             })
@@ -152,13 +152,17 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
     }
 
     /// <summary>Deletes trash batches whose files were moved at least <paramref name="olderThanDays"/> ago. Batches without a move marker are kept.</summary>
-    public IReadOnlyList<ReplicaTrashBatch> Purge(string targetName, int olderThanDays, bool apply)
+    public IReadOnlyList<ReplicaTrashBatch> Purge(string targetName, int olderThanDays, bool apply,
+        Action<IReadOnlyList<ReplicaTrashBatch>, IReadOnlyList<ReplicaTrashBatch>>? report = null)
     {
         if (olderThanDays is < 0 or > 3650) throw new ArgumentOutOfRangeException(nameof(olderThanDays));
         RequireReady();
         var target = Target(targetName);
         var now = Now;
-        var due = Trash(targetName).Where(b => b.CreatedAt is { } at && now - at >= TimeSpan.FromDays(olderThanDays)).ToArray();
+        var all = Trash(targetName);
+        var due = all.Where(b => b.CreatedAt is { } at && now - at >= TimeSpan.FromDays(olderThanDays)).ToArray();
+        // Report and deletion use this one snapshot. A batch that becomes old enough later stays kept.
+        report?.Invoke(all, due);
         if (!apply) return due;
         foreach (var batch in due)
         {

@@ -9,6 +9,12 @@
   when Medal or a library operation is still active.
 - Fixed: Medal shortcuts keep Medal's default icon when the launcher repairs
   them, including pinned taskbar shortcuts without an explicit icon path.
+- Fixed: cloud-copy cleanup refuses duplicate or case-conflicting paths,
+  unsafe names, links and malformed listing entries with an actionable message
+  before writing a review or changing the copy.
+- Fixed: `replica purge-trash` lists only the trash subtree once and deletes
+  exactly the batches it reports as deleting, using the same set for its final
+  count. A missing trash folder is empty; batches reported as kept stay kept.
 
 ## 1.3.0 — 2026-10-30
 

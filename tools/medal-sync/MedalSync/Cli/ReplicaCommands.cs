@@ -119,29 +119,32 @@ internal static class ReplicaCommands
         var prune = new ReplicaPrune(config, state, store, operation.Guard, new RcloneReplicaRemote(config, state, operation.Guard));
         try
         {
-            var all = prune.Trash(target);
-            var due = prune.Purge(target, days, apply: false);
-            foreach (var batch in all)
-                output.WriteLine(string.Create(CultureInfo.InvariantCulture,
-                    $"  {batch.Name}: {batch.Files} file(s), {Storage.StorageVolume.Gb(batch.Bytes)}{(due.Contains(batch) ? (apply ? "  deleting" : "  due") : "  kept")}"));
-            if (all.Count == 0) { output.WriteLine("The trash is empty."); return 0; }
-            if (!apply)
-            {
-                output.WriteLine($"{due.Count} batch(es) are older than {days} day(s). Preview only: add --apply to delete them permanently.");
-                return 0;
-            }
             // Hold the writer lock, as prune --apply does, so a prune resumed on another PC
             // cannot add files to a batch between choosing it and deleting it.
-            using var writer = store.AcquireWriterLock(TimeSpan.FromSeconds(10));
-            var deleted = prune.Purge(target, days, apply: true);
-            output.WriteLine($"Deleted {deleted.Count} trash batch(es) permanently.");
-            return 0;
+            using var writer = apply ? store.AcquireWriterLock(TimeSpan.FromSeconds(10)) : null;
+            return PurgeTrash(prune, output, target, days, apply);
         }
         catch (OperationCanceledException ex)
         {
             output.WriteLine("Trash purge canceled: " + ex.Message);
             return 3;
         }
+    }
+
+    internal static int PurgeTrash(ReplicaPrune prune, TextWriter output, string target, int days, bool apply)
+    {
+        bool empty = false;
+        var deleted = prune.Purge(target, days, apply, (all, due) =>
+        {
+            foreach (var batch in all)
+                output.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                    $"  {batch.Name}: {batch.Files} file(s), {Storage.StorageVolume.Gb(batch.Bytes)}{(due.Contains(batch) ? (apply ? "  deleting" : "  due") : "  kept")}"));
+            empty = all.Count == 0;
+            if (empty) output.WriteLine("The trash is empty.");
+            else if (!apply) output.WriteLine($"{due.Count} batch(es) are older than {days} day(s). Preview only: add --apply to delete them permanently.");
+        });
+        if (apply && !empty) output.WriteLine($"Deleted {deleted.Count} trash batch(es) permanently.");
+        return 0;
     }
 
     private static (LocalState State, MedalSyncConfig Config, CoordinationStore Store) Open()
