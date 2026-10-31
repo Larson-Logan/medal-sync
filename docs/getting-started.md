@@ -286,11 +286,15 @@ the reason on standard error.
 Times are UTC in ISO 8601. The document has no device IDs, credentials or file
 paths; owner and requesting PCs appear by display name only.
 
+### Medal links
+
 The desktop launcher passes `medal://` links through the same ownership and
 storage checks. A first launch opens the link as part of starting Medal; an
 already supervised session receives it immediately. An unmanaged Medal process
 must pass recovery checks before receiving the link. Advanced CLI launches can
 use `launch --medal-link 'medal://...'` too.
+
+## Medal updates and compatibility
 
 Medal Sync checks compatibility before starting a new session, once a minute
 while Medal runs, and before publishing a handoff. Readable app and recorder

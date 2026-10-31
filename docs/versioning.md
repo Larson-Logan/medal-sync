@@ -20,9 +20,9 @@ for example `v1.3.0.02`. Both programs, setup, the portable ZIP and
   Local builds use `.00`.
 
 Releases up to 1.2.0 had no counter, and their update checks only recognize
-three-part tags. So the first release after 1.2.0 is a one-time three-part
-bridge, for example `v1.3.0`, built with the updater that understands both
-formats; it counts as `.00`, and its hotfixes continue at `.01`. See the
+three-part tags. So the first release after 1.2.0, `v1.3.0`, was a one-time
+three-part bridge built with the updater that understands both formats; it
+counts as `.00`, and its hotfixes continue at `.01`. See the
 [release process](releases.md) for how a merge becomes a release.
 
 | Part | Raised when |
@@ -110,5 +110,5 @@ Each generation records the schema it was read from. `history diff` refuses to
 compare generations from different schemas. Enrollment allows PCs to run
 different Medal app and recorder versions only when their supported schemas match exactly; see
 [requirements and limits](getting-started.md#requirements-and-limits) and
-[compatibility checks](getting-started.md#status-for-scripts) for the
+[Medal updates and compatibility](getting-started.md#medal-updates-and-compatibility) for the
 automatic update policy and its native-backup limitations.

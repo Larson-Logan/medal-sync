@@ -6,8 +6,13 @@ programs. Every merge to `main` publishes a release tagged
 changes `VersionPrefix`, otherwise one more than the last release of that
 version.
 [Versions and schemas](versioning.md) explains which part to raise and how file
-formats and Medal schemas are versioned. Changelog entries remain Unreleased
-until publication.
+formats and Medal schemas are versioned.
+
+Record user-visible changes under `## Unreleased` in `CHANGELOG.md` as they
+merge to `dev`. Before promoting, rename that heading on `dev` to the release
+the promotion will publish, such as `## 1.4.0 — DATE` for a new version or
+`## 1.3.0.01 — DATE` for a hotfix, and start a new empty `## Unreleased`
+above it. The release workflow does not edit the changelog.
 
 ## Build locally
 
@@ -115,13 +120,13 @@ the fix to `dev` and promote it without touching `VersionPrefix`; it is
 released as the next number, such as `.01`. Changing `VersionPrefix` to a
 version that already has a release is refused.
 
-The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) is a
-three-part bridge such as `v1.3.0`, because update checks in 1.2.0 and earlier
+The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) was
+the three-part bridge `v1.3.0`, because update checks in 1.2.0 and earlier
 ignore four-part tags. It counts as `.00`; installs that update to it can then
 find every later release.
 
-Older installs only check the release marked Latest, and the first hotfix
-(such as `v1.3.0.01`) replaces the bridge as Latest. From then on, a 1.2.0 or
+Older installs only check the release marked Latest, and the first hotfix,
+`v1.3.0.01`, replaces the bridge as Latest. From then on, a 1.2.0 or
 earlier install that never took the bridge sees no update: the desktop check
 stays silent and the portable updater reports that it expected a stable
 release. Its user must download the newest setup from the
@@ -166,7 +171,7 @@ for the setup EXE and portable ZIP. Anyone can check that a download was built
 by this workflow from the released commit:
 
 ```powershell
-gh attestation verify medal-sync-1.1.0-setup-win-x64.exe --repo Larson-Logan/medal-sync
+gh attestation verify medal-sync-1.3.0.01-setup-win-x64.exe --repo Larson-Logan/medal-sync
 ```
 
 Generated notes use [.github/release.yml](../.github/release.yml) to group PRs
