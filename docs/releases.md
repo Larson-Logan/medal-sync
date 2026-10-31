@@ -71,6 +71,19 @@ finds on `dev` first. The branch and tag rules are kept in
 [.github/rulesets](../.github/rulesets); see
 [security maintenance](security-maintenance.md#branches-tags-and-actions).
 
+Merged topic branches are deleted automatically by the repository setting,
+which `scripts/setup-github-rulesets.ps1` maintains. The
+[branch cleanup workflow](../.github/workflows/branch-cleanup.yml) also handles
+closed, unmerged pull requests. It preserves `main`, `dev`, the default branch,
+protected branches, forks, branches used as the head or base of an open PR, and
+branches with commits added since closure. It runs only trusted default-branch
+code. A maintainer can rerun it manually with a closed PR number, or preview
+cleanup with `python scripts/cleanup-pr-branch.py --repository OWNER/REPO --pr NUMBER`;
+add `--apply` to delete the branch. Local clones should set
+`git config fetch.prune true` to discard deleted remote-tracking references on
+fetch; local topic branches and worktrees require separate cleanup after
+checking for unmerged commits and local edits.
+
 ## GitHub pipeline
 
 Pull requests and pushes to `dev` and `main` run [validation](../.github/workflows/validate.yml)
