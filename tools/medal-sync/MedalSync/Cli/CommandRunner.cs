@@ -29,7 +29,7 @@ internal static class CommandRunner
           version                                Print the Medal Sync version and supported Medal schema
           setup check [--state-root DIR] [--out FILE]  Verify readiness for Windows setup; no library changes
           config validate --config FILE          Validate a candidate config without reading Medal or the share
-          inspect [--json]                       Phase 0 inventory of this PC (Gate A evidence)
+          inspect [--json]                       Inventory of this PC and anything that blocks setup
           compatibility [--json]                 Check installed Medal builds and schema without configuration
           diagnostics [--out FILE]               Preview a privacy-safe summary for support; --out saves it to a new file
           snapshot export --out FILE [--db DB]   Write the library tables to a new private file
@@ -45,7 +45,7 @@ internal static class CommandRunner
                                                  --out writes per-clip titles and paths to a new private file
           replica history [--target NAME] [--json]  Past cloud-copy checks; counts only
 
-        Changes state (need the configuration from the runbook):
+        Changes state (most only preview until you add --apply):
           enroll --out DIRECTORY [--apply]       Preview/review a lossless union with this PC, then enroll it
           enroll recover --out DIRECTORY [--apply]  Recover an exact native-backup rollback after enrollment
           config create --account-id ID --cache-root DIR --remote PATH --out FILE
@@ -78,7 +78,7 @@ internal static class CommandRunner
           promote --spike-config FILE --config FILE --server-ignore FILE [--apply]
                                                  Verify/rename stopped spike storage to production
           abandon --session ID --reason TEXT [--apply]   Give up a lost PC's session explicitly
-          spike start|status|stop --config FILE  Gate B mount experiment on a disposable '*spike*' remote
+          spike start|status|stop --config FILE  Test mounting on a disposable '*spike*' remote
 
         See docs/getting-started.md and docs/storage.md before changing a live library.
         """;

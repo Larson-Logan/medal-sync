@@ -35,7 +35,7 @@ public sealed class CliAndConfigTests : IDisposable
     public void Cli_HelpListsEveryDispatchCommandInTheCorrectSection()
     {
         string help = Run("--help").Output;
-        string[] sections = help.Split("Changes state (need the configuration from the runbook):", StringSplitOptions.None);
+        string[] sections = help.Split("Changes state (most only preview until you add --apply):", StringSplitOptions.None);
         Assert.Equal(2, sections.Length);
 
         string[] readOnlyCommands =

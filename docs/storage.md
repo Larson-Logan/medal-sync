@@ -113,7 +113,7 @@ $cli = "$env:ProgramFiles/Medal Sync/bin/medal-sync.exe"
   --cache-root E:\MedalCache --local-copy-root E:\MedalLibrary `
   --remote '\\YOUR-SERVER\Data\Media\Videos' `
   --coordination-root '\\YOUR-SERVER\Data\AppData\MedalSync' `
-  --rclone-path C:\Tools\rclone.exe --out "$HOME/medal-sync-candidate.json"
+  --out "$HOME/medal-sync-candidate.json"
 ```
 
 This previews configuration; add `--apply` to create the candidate. Reuse
@@ -188,7 +188,8 @@ Authorize a named remote using rclone's interactive configuration. Use an
 explicit credential file outside Git, the media folders and the cache:
 
 ```powershell
-& C:\Tools\rclone.exe config --config "$HOME/.medal-sync/rclone.conf"
+# The rclone bundled with an all-users installation; see below for per-user setup.
+& "$env:ProgramFiles/Medal Sync/bin/rclone.exe" config --config "$HOME/.medal-sync/rclone.conf"
 ```
 
 Choose the provider and name the remote `onedrive`, `dropbox`, or `gdrive`.
@@ -372,8 +373,8 @@ files and never takes ownership, so another PC can still start. A launch on this
 PC, Ctrl+C, Windows shutdown, a configuration change or another PC starting
 stops the check.
 
-Each attempt is recorded per target in `state/replication/audit-history.json`
-with counts only: matched, missing, different and not reached. The last 20
+Each attempt is recorded per target in `replication/audit-history.json` under
+the state root, with counts only: matched, missing, different and not reached. The last 20
 attempts are kept. A result is **passed**, **failed** (missing or different
 files) or **incomplete** (offline, sign-in, configuration, canceled, library
 changed or error). An incomplete attempt never replaces the last complete
