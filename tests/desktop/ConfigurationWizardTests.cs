@@ -22,6 +22,7 @@ internal static class ConfigurationWizardTests
                 fields["cache"].Text = @"E:\SyntheticCache";
                 var candidate = wizard.Candidate();
                 check(candidate.StorageMode == StorageMode.Local && candidate.LibraryId.Length == 32, "Native wizard builds a validated new local identity");
+                check(candidate.Mount.ControlPort == 53684, "New wizard setups leave rclone's browser sign-in port free");
                 check(fields.Values.All(f => f.AccessibleName?.Length > 0 && f.TabStop), "Wizard text fields support native accessibility and keyboard traversal");
                 Field<Button>(wizard, "_next").PerformClick();
                 Until(() => !Field<bool>(wizard, "_busy"));
@@ -41,14 +42,19 @@ internal static class ConfigurationWizardTests
                 File.WriteAllBytes(state.ConfigPath, Json.Serialize(candidate));
             }
             byte[] original = File.ReadAllBytes(state.ConfigPath);
+            var saved = MedalSyncConfig.Load(state.ConfigPath);
+            File.WriteAllBytes(state.ConfigPath, Json.Serialize(saved with { Mount = saved.Mount with { ControlPort = 53682 } }));
+            byte[] legacyOriginal = File.ReadAllBytes(state.ConfigPath);
             using (var wizard = new WindowsConfigurationWizard(state, (_, _) => { }, () => new Guard()))
             {
                 wizard.Show();
+                check(wizard.Candidate().Mount.ControlPort == 53682, "Editing an existing setup preserves its control port until explicitly changed while Ready");
                 var fields = Field<Dictionary<string, TextBox>>(wizard, "_fields");
                 check(fields["library"].ReadOnly && fields["account"].ReadOnly && !Field<ComboBox>(wizard, "_identity").Enabled, "Existing account and library identities cannot be replaced in the wizard");
                 wizard.Close();
-                check(File.ReadAllBytes(state.ConfigPath).SequenceEqual(original), "Cancel preserves the existing configuration byte-for-byte");
+                check(File.ReadAllBytes(state.ConfigPath).SequenceEqual(legacyOriginal), "Cancel preserves the existing configuration byte-for-byte");
             }
+            File.WriteAllBytes(state.ConfigPath, original);
 
             var existing = MedalSyncConfig.Load(state.ConfigPath) with
             {
