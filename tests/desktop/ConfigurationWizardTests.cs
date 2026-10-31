@@ -49,6 +49,71 @@ internal static class ConfigurationWizardTests
                 wizard.Close();
                 check(File.ReadAllBytes(state.ConfigPath).SequenceEqual(original), "Cancel preserves the existing configuration byte-for-byte");
             }
+
+            var existing = MedalSyncConfig.Load(state.ConfigPath) with
+            {
+                Replication = new(null, @"C:\Synthetic\rclone.conf",
+                    [new("nas2", "sftp-home:Medal") { Required = true }, new("cloud", "cloud:Medal")]),
+            };
+            File.WriteAllBytes(state.ConfigPath, Json.Serialize(existing));
+            using (var wizard = new WindowsConfigurationWizard(state, (_, _) => { }, () => new Guard()))
+            {
+                var candidate = wizard.Candidate();
+                check(candidate.Replication!.Targets[0].Required && !candidate.Replication.Targets[1].Required,
+                    "Editing an existing setup preserves required and optional cloud copies");
+                var fields = Field<Dictionary<string, TextBox>>(wizard, "_fields");
+                fields["targets"].Text = "NAS2=sftp-home:Medal new=folder\r\nrequired renamed=cloud:Medal";
+                candidate = wizard.Candidate();
+                check(candidate.Replication!.Targets.All(t => t.Required), "An unchanged name keeps its requirement without a prefix; a renamed target can be explicitly required");
+                check(candidate.Replication.Targets[0].Remote == "sftp-home:Medal new=folder", "Remote folder spaces and equals signs survive parsing");
+                var review = ConfigurationReview.Prepare(state, candidate, false, (_, _) => { });
+                check(review.Text.Contains("NAS2 = sftp-home:Medal new=folder (required)", StringComparison.Ordinal)
+                    && review.Text.Contains("'cloud' removed (was optional)", StringComparison.Ordinal)
+                    && review.Text.Contains("'renamed' added (required)", StringComparison.Ordinal), "Review calls out renamed and removed targets and their requirements");
+                fields["targets"].Text = "optional nas2=sftp-home:Medal\r\nrequired cloud=cloud:Medal\r\nnew=another:Medal";
+                candidate = wizard.Candidate();
+                check(!candidate.Replication!.Targets[0].Required && candidate.Replication.Targets[1].Required
+                    && !candidate.Replication.Targets[2].Required, "Explicit prefixes change requirements and new targets default to optional");
+                review = ConfigurationReview.Prepare(state, candidate, false, (_, _) => { });
+                check(review.Text.Contains("'nas2' requirement changed: required -> optional", StringComparison.Ordinal)
+                    && review.Text.Contains("'cloud' requirement changed: optional -> required", StringComparison.Ordinal), "Review calls out requirement changes in both directions");
+                review.Save(true, (_, _) => { });
+                check(MedalSyncConfig.Load(state.ConfigPath).Replication!.Targets.SequenceEqual(candidate.Replication.Targets), "Saving preserves reviewed target requirements");
+                fields["targets"].Text = "";
+                check(wizard.Candidate().Replication!.Targets.Count == 0, "All cloud targets can be explicitly removed");
+            }
+            foreach (double hours in new[] { 0.5, 2.5 })
+            {
+                File.WriteAllBytes(state.ConfigPath, Json.Serialize(existing with { MaxSessionHours = hours }));
+                using var wizard = new WindowsConfigurationWizard(state, (_, _) => { }, () => new Guard());
+                wizard.Show();
+                check(decimal.Parse(Field<NumericUpDown>(wizard, "_hours").Text) == (decimal)hours, "Fractional hours are displayed");
+                var review = ConfigurationReview.Prepare(state, wizard.Candidate(), false, (_, _) => { });
+                review.Save(true, (_, _) => { });
+                check(MedalSyncConfig.Load(state.ConfigPath).MaxSessionHours == hours, "Saving without edits preserves fractional hours");
+                wizard.Close();
+            }
+            foreach (double hours in new[] { 0.001, 2.555, double.Epsilon })
+            {
+                var unusual = existing with { MaxSessionHours = hours, Mount = existing.Mount with { CacheMaxGiB = 100001, MinFreeGiB = int.MaxValue } };
+                File.WriteAllBytes(state.ConfigPath, Json.Serialize(unusual));
+                using var wizard = new WindowsConfigurationWizard(state, (_, _) => { }, () => new Guard());
+                wizard.Show();
+                check(Field<Label>(wizard, "_message").Text.Contains("original value is kept", StringComparison.Ordinal), "Values outside the display range show a preservation message");
+                var candidate = wizard.Candidate();
+                check(candidate.MaxSessionHours == hours && candidate.Mount == unusual.Mount, "Unedited values outside the display range are preserved");
+                var review = ConfigurationReview.Prepare(state, candidate, false, (_, _) => { });
+                review.Save(true, (_, _) => { });
+                check(MedalSyncConfig.Load(state.ConfigPath).MaxSessionHours == hours
+                    && MedalSyncConfig.Load(state.ConfigPath).Mount == unusual.Mount, "Saved out-of-range display values round-trip without loss");
+                Field<NumericUpDown>(wizard, "_hours").Value = 1.25m;
+                Field<NumericUpDown>(wizard, "_cacheLimit").Value = 30;
+                Field<NumericUpDown>(wizard, "_reserve").Value = 40;
+                candidate = wizard.Candidate();
+                check(candidate.MaxSessionHours == 1.25 && candidate.Mount.CacheMaxGiB == 30 && candidate.Mount.MinFreeGiB == 40,
+                    "Explicit numeric edits replace preserved values");
+                wizard.Close();
+            }
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
