@@ -101,6 +101,7 @@ public sealed class StorageTests
         Assert.Contains("--vfs-write-back 5s", line, StringComparison.Ordinal);
         Assert.Contains("--vfs-cache-max-size 20Gi", line, StringComparison.Ordinal);
         Assert.Contains("--vfs-cache-min-free-space 20Gi", line, StringComparison.Ordinal);
+        Assert.Contains("--vfs-read-ahead 256Mi", line, StringComparison.Ordinal);
         Assert.Contains("--dir-cache-time 3600000s", line, StringComparison.Ordinal);
         Assert.Contains("--rc-addr 127.0.0.1:53682", line, StringComparison.Ordinal);
         Assert.DoesNotContain("--rc-user", line, StringComparison.Ordinal);
@@ -110,11 +111,12 @@ public sealed class StorageTests
     }
 
     [Fact]
-    public void Mount_PassesTheUploadLimitOnlyWhenSet()
+    public void Mount_PassesTheUploadLimitOnlyWhenSetAndNeverLimitsPlayback()
     {
         Assert.DoesNotContain("--bwlimit", MountPlan.Arguments(Settings()));
         var limited = MountPlan.Arguments(Settings() with { BandwidthLimitMiB = 5 }).ToList();
-        Assert.Equal("5Mi", limited[limited.IndexOf("--bwlimit") + 1]);
+        // rclone reads a bare rate as both directions; downloads (clip playback) stay unlimited.
+        Assert.Equal("5Mi:off", limited[limited.IndexOf("--bwlimit") + 1]);
         Assert.Equal("off", MountPlan.Rate(null));
     }
 

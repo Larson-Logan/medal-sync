@@ -18,6 +18,11 @@
 - Fixed: the setup wizard opens valid fractional session limits and displays
   hundredths of an hour. Saved numbers outside a control's display range show
   guidance and are preserved unless edited.
+- Fixed: clips played from the server over a VPN or another network no longer
+  stall a few seconds in with video lagging behind audio. The clip drive now
+  fetches up to 256 MiB ahead of the player into the SSD cache instead of
+  16 MiB, and `mount.bandwidthLimitMiB` and `mount.finishBandwidthLimitMiB`
+  limit uploads only (`--bwlimit 5Mi:off`); before, they also capped playback.
 - Update checks now offer to run the verified installer, close the status app
   and exit the updater so Windows setup can replace the installed version.
   Deferred or failed installation keeps the download available for retrying.
