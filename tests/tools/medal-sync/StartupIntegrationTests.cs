@@ -130,12 +130,16 @@ public sealed class StartupIntegrationTests : IDisposable
     }
 
     [Fact]
-    public void RestoreRetargetsShortcutsMedalAddedLaterButRemovesOnlyRecordedLibraryShortcuts()
+    public void RestoreRetargetsOnlyMedalShortcutsAndKeepsMedalSyncOwnShortcuts()
     {
         if (!OperatingSystem.IsWindows()) return;
         using (var startup = Startup()) startup.Apply();
         string added = Path.Combine(_desktop, "Medal.lnk");
-        MakeShortcut(added, _launcher); // A Medal update recreated it and the launcher repointed it.
+        MakeShortcut(added, _launcher, Medal + ",0"); // A Medal update recreated it; the launcher repointed it, keeping Medal's icon.
+        string companion = Path.Combine(_desktop, "Medal Sync.lnk"); // Setup's own desktop shortcut.
+        MakeShortcut(companion, _launcher);
+        string companionWithMedalIcon = Path.Combine(_programs, "Medal Sync Status.lnk");
+        MakeShortcut(companionWithMedalIcon, _launcher, Medal + ",0");
         string recorded = Path.Combine(_programs, "Medal Library.lnk");
         string kept = Path.Combine(_desktop, "Medal Library.lnk");
         MakeShortcut(recorded, _launcher);
@@ -146,6 +150,8 @@ public sealed class StartupIntegrationTests : IDisposable
         using (var startup = Startup(5)) startup.Restore();
 
         Assert.Equal(Medal, StartupEntries.ShortcutTarget(added), ignoreCase: true);
+        Assert.Equal(_launcher, StartupEntries.ShortcutTarget(companion), ignoreCase: true);
+        Assert.Equal(_launcher, StartupEntries.ShortcutTarget(companionWithMedalIcon), ignoreCase: true);
         Assert.False(File.Exists(recorded));
         Assert.Equal(_launcher, StartupEntries.ShortcutTarget(kept), ignoreCase: true);
         Assert.False(File.Exists(Path.Combine(_state, StartupIntegration.LibraryShortcutsFile)));

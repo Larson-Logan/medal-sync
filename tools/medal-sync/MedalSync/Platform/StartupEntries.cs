@@ -240,6 +240,10 @@ internal static class StartupEntries
     [SupportedOSPlatform("windows")]
     internal static string ShortcutTarget(string path) => WithShortcut(path, link => (string)link.TargetPath);
 
+    /// <summary>The shortcut's icon location (path,index), read with WScript.</summary>
+    [SupportedOSPlatform("windows")]
+    internal static string ShortcutIcon(string path) => WithShortcut(path, link => (string)link.IconLocation);
+
     /// <summary>Points a shortcut at <paramref name="target"/> with no arguments, keeping its icon.</summary>
     [SupportedOSPlatform("windows")]
     internal static void RetargetShortcut(string path, string target) => WithShortcut(path, link =>

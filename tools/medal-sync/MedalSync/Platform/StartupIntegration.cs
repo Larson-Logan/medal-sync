@@ -144,8 +144,7 @@ internal sealed class StartupIntegration(string stateRoot, string launcher, Regi
         // Shortcuts a Medal update created after turning it on, then repointed by the launcher.
         foreach (string shortcut in Shortcuts())
         {
-            if (Path.GetFileName(shortcut).Equals(LibraryShortcutName, StringComparison.OrdinalIgnoreCase)) continue;
-            if (StartupEntries.StartsLauncher(Target(shortcut)))
+            if (WasMedalShortcut(shortcut))
             {
                 StartupEntries.RetargetShortcut(shortcut, saved.MedalExecutable);
                 done.Add($"pointed the shortcut '{shortcut}' back at Medal");
@@ -213,6 +212,24 @@ internal sealed class StartupIntegration(string stateRoot, string launcher, Regi
     }
 
     private IEnumerable<string> Shortcuts() => StartupEntries.Shortcuts(shortcutFolders);
+
+    /// <summary>
+    /// A Medal shortcut the launcher repointed: it starts the launcher but kept Medal's
+    /// icon. Medal Sync's own shortcuts ("Medal Sync", "Medal Library") are never
+    /// sent to Medal, so restoring cannot make them bypass the storage checks.
+    /// </summary>
+    internal static bool WasMedalShortcut(string shortcut)
+    {
+        string name = Path.GetFileName(shortcut);
+        if (name.StartsWith("Medal Sync", StringComparison.OrdinalIgnoreCase)
+            || name.Equals(LibraryShortcutName, StringComparison.OrdinalIgnoreCase)) return false;
+        try
+        {
+            return StartupEntries.StartsLauncher(StartupEntries.ShortcutTarget(shortcut))
+                && StartupEntries.StartsMedalDirectly(StartupEntries.ShortcutIcon(shortcut));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException) { return false; }
+    }
 
     private static string Target(string shortcut)
     {
