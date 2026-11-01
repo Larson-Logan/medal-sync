@@ -61,7 +61,7 @@ git diff --check
 ```
 
 Include every Markdown file you changed in the link check. It verifies local
-file targets; remote URLs and heading anchors still need review. Check edited
+file targets and Markdown section anchors; remote URLs still need review. Check edited
 GitHub YAML against the relevant GitHub documentation as well.
 
 Runtime, dependency and tooling changes need the standalone Windows suite.
