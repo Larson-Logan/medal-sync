@@ -258,7 +258,9 @@ internal static class WindowsReleaseUpdate
             long received = 0;
             var download = Task.Run(() => ReleaseUpdate.DownloadSetupAsync(client, asset, directory,
                 (value, _) => Interlocked.Exchange(ref received, value), cancellation.Token));
-            while (!download.Wait(200))
+            // WhenAny never faults, so the original cancellation or download exception reaches the caller unwrapped.
+            var finished = Task.WhenAny(download);
+            while (!finished.Wait(200))
             {
                 try
                 {

@@ -70,20 +70,34 @@ internal static class Program
             "https://github.com/Larson-Logan/medal-sync/releases/download/v0.5.0/medal-sync-0.5.0-setup-win-x64.exe",
             Convert.ToHexString(SHA256.HashData(bytes)), bytes.Length);
         using var client = new HttpClient(new UpdateHandler(bytes));
-        // The launcher's Main is STA; the Shell progress dialog must only be used from that thread.
-        string? path = null;
+        string path = (string)OnSta(() => WindowsReleaseUpdate.Download(asset, fixture.PathFor("download"), client))!;
+        Check(File.ReadAllBytes(path).SequenceEqual(bytes), "native Shell update progress completes on an STA thread with a verified synthetic download");
+        // Run handles expected download failures by type, so they must not arrive wrapped in AggregateException.
+        var tampered = asset with { Sha256 = new string('0', 64) };
+        object? failure = OnSta(() =>
+        {
+            try { WindowsReleaseUpdate.Download(tampered, fixture.PathFor("tampered"), client); return null; }
+            catch (Exception ex) { return ex; }
+        });
+        Check(failure is InvalidDataException, $"a failed update download reports its original exception type on an STA thread (got {failure?.GetType().Name ?? "none"})");
+        return 0;
+    }
+
+    // The launcher's Main is STA; the Shell progress dialog must only be used from that thread.
+    private static object? OnSta(Func<object?> action)
+    {
+        object? result = null;
         Exception? failure = null;
         var sta = new Thread(() =>
         {
-            try { path = WindowsReleaseUpdate.Download(asset, fixture.PathFor("download"), client); }
+            try { result = action(); }
             catch (Exception ex) { failure = ex; }
         });
         sta.SetApartmentState(ApartmentState.STA);
         sta.Start();
         sta.Join();
         if (failure is not null) throw failure;
-        Check(File.ReadAllBytes(path!).SequenceEqual(bytes), "native Shell update progress completes on an STA thread with a verified synthetic download");
-        return 0;
+        return result;
     }
 
     private sealed class UpdateHandler(byte[] bytes) : HttpMessageHandler
