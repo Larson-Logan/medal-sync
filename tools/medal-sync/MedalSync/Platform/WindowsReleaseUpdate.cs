@@ -252,18 +252,22 @@ internal static class WindowsReleaseUpdate
             dialog.StartProgressDialog(IntPtr.Zero, null, 0x2, IntPtr.Zero); // PROGDLG_AUTOTIME
             dialog.SetLine(1, "Downloading " + asset.Name, false, IntPtr.Zero);
             dialog.SetLine(2, "The setup must pass SHA-256 verification before it is installed.", false, IntPtr.Zero);
-            // Poll cancellation independently of network reads, including stalled connections.
-            var poll = new Timer(_ =>
+            // The dialog belongs to this (STA) thread and has no cross-apartment marshaling, so only this thread
+            // touches it. The download runs on the thread pool and only records progress; this loop polls
+            // cancellation independently of network reads, including stalled connections.
+            long received = 0;
+            var download = Task.Run(() => ReleaseUpdate.DownloadSetupAsync(client, asset, directory,
+                (value, _) => Interlocked.Exchange(ref received, value), cancellation.Token));
+            while (!download.Wait(200))
             {
-                try { if (dialog.HasUserCancelled()) cancellation.Cancel(); }
+                try
+                {
+                    if (dialog.HasUserCancelled()) cancellation.Cancel();
+                    else dialog.SetProgress64((ulong)Interlocked.Read(ref received), (ulong)asset.Size);
+                }
                 catch (COMException) { cancellation.Cancel(); }
-            }, null, 200, 200);
-            try
-            {
-                return ReleaseUpdate.DownloadSetupAsync(client, asset, directory,
-                    (received, total) => dialog.SetProgress64((ulong)received, (ulong)total), cancellation.Token).GetAwaiter().GetResult();
             }
-            finally { poll.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+            return download.GetAwaiter().GetResult();
         }
         finally
         {

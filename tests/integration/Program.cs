@@ -70,8 +70,19 @@ internal static class Program
             "https://github.com/Larson-Logan/medal-sync/releases/download/v0.5.0/medal-sync-0.5.0-setup-win-x64.exe",
             Convert.ToHexString(SHA256.HashData(bytes)), bytes.Length);
         using var client = new HttpClient(new UpdateHandler(bytes));
-        string path = WindowsReleaseUpdate.Download(asset, fixture.PathFor("download"), client);
-        Check(File.ReadAllBytes(path).SequenceEqual(bytes), "native Shell update progress completes with a verified synthetic download");
+        // The launcher's Main is STA; the Shell progress dialog must only be used from that thread.
+        string? path = null;
+        Exception? failure = null;
+        var sta = new Thread(() =>
+        {
+            try { path = WindowsReleaseUpdate.Download(asset, fixture.PathFor("download"), client); }
+            catch (Exception ex) { failure = ex; }
+        });
+        sta.SetApartmentState(ApartmentState.STA);
+        sta.Start();
+        sta.Join();
+        if (failure is not null) throw failure;
+        Check(File.ReadAllBytes(path!).SequenceEqual(bytes), "native Shell update progress completes on an STA thread with a verified synthetic download");
         return 0;
     }
 
