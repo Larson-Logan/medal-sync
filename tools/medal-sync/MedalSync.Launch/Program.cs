@@ -13,6 +13,11 @@ internal static class Program
         var ui = new WindowsLauncherUi();
         try
         {
+            // Point startup at this copy as soon as it runs (for example the status view setup reopens),
+            // not only after the next supervised session, so an older copy is not started at sign-in.
+            SessionCommands.GuardStartup(
+                () => StartupEntries.EnforceExisting(LocalState.ForCurrentUser().Root, AppContext.BaseDirectory),
+                message => new RotatingLog(LocalState.ForCurrentUser().LogDirectory, "medal-sync-launch").Write(message));
             if (args is ["--status"] or ["--tray"]) return WindowsTrayStatus.Run(args[0] == "--status");
             if (args is ["--check-updates"]) return WindowsReleaseUpdate.Run(ui, () =>
             {

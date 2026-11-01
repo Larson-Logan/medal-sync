@@ -42,34 +42,67 @@ internal static class StartupEntries
 
     public static string ProtocolCommand(string launcher) => $"\"{launcher}\" \"%1\"";
 
-    /// <summary>A native supervisor also maintains a previously opted-in portable integration.</summary>
+    /// <summary>
+    /// Keeps a previously opted-in integration on the right launcher. Runs from the
+    /// supervisor and whenever the launcher starts, so an install or update takes
+    /// over startup at once instead of after the next supervised session.
+    /// </summary>
     [SupportedOSPlatform("windows")]
     public static IReadOnlyList<string> EnforceExisting(string stateRoot, string executableDirectory)
     {
         // Native setup alone never opts a user into rewriting Medal's hooks.
         if (!File.Exists(Path.Combine(stateRoot, OriginalsFile))) return [];
         using var run = Registry.CurrentUser.OpenSubKey(RunKey);
-        string? launcher = GuardLauncher(stateRoot, executableDirectory,
+        string? launcher = GuardLauncher(executableDirectory,
             LocalState.IsManagedInstall(executableDirectory), run?.GetValue(RunValue) as string);
         return launcher is null ? [] : Enforce(stateRoot, launcher);
     }
 
-    internal static string? GuardLauncher(string stateRoot, string executableDirectory, bool managed, string? registeredCommand)
+    /// <summary>
+    /// The launcher startup should use. A setup-managed installation always owns
+    /// startup, so a superseded portable copy (such as an old <c>.medal-sync\bin</c>)
+    /// is never started again after an upgrade. A portable copy keeps the user's
+    /// existing target, including a native one.
+    /// </summary>
+    internal static string? GuardLauncher(string executableDirectory, bool managed, string? registeredCommand)
     {
-        // Keep the user's existing target, including an explicitly migrated native
-        // target. Parse only our exact Run syntax; never execute registry text.
-        if (registeredCommand is { } command && command.StartsWith('"'))
+        string own = Path.Combine(executableDirectory, LauncherFile);
+        if (managed) return File.Exists(own) ? own : null;
+        if (RunTarget(registeredCommand) is { } target && File.Exists(target)) return target;
+        return File.Exists(own) ? own : null;
+    }
+
+    /// <summary>The launcher in our exact Run syntax, or null. Registry text is parsed, never executed.</summary>
+    internal static string? RunTarget(string? command)
+    {
+        if (command is null || !command.StartsWith('"')) return null;
+        int end = command.IndexOf('"', 1);
+        if (end <= 1 || command[(end + 1)..] != " " + SignInFlag) return null;
+        string target = command[1..end];
+        return Path.IsPathFullyQualified(target) && Path.GetFileName(target).Equals(LauncherFile, StringComparison.OrdinalIgnoreCase)
+            ? target : null;
+    }
+
+    /// <summary>A command or shortcut target that starts a launcher other than <paramref name="launcher"/>.</summary>
+    internal static bool StartsOtherLauncher(string? command, string launcher)
+    {
+        if (!StartsLauncher(command)) return false;
+        string text = command!.Trim();
+        int end = text.StartsWith('"') ? text.IndexOf('"', 1) : -1;
+        string executable = end > 1 ? text[1..end] : text;
+        return !SamePath(executable, launcher);
+    }
+
+    private static bool SamePath(string a, string b)
+    {
+        try
         {
-            int end = command.IndexOf('"', 1);
-            if (end > 1 && command[(end + 1)..] == " " + SignInFlag)
-            {
-                string target = command[1..end];
-                if (Path.IsPathFullyQualified(target) && Path.GetFileName(target).Equals(LauncherFile, StringComparison.OrdinalIgnoreCase)
-                    && File.Exists(target)) return target;
-            }
+            return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
         }
-        string fallback = Path.Combine(managed ? Path.Combine(stateRoot, "bin") : executableDirectory, LauncherFile);
-        return File.Exists(fallback) ? fallback : null;
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     private static bool Contains(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle)
@@ -143,7 +176,7 @@ internal static class StartupEntries
     /// After the owner has rewired startup (the originals file exists), keeps the
     /// Run value and the <c>medal://</c> handler pointing at the launcher: removes
     /// Run values that start Medal directly and repoints the handler and
-    /// shortcuts. Returns what it did.
+    /// shortcuts, including ones left on a superseded launcher. Returns what it did.
     /// </summary>
     [SupportedOSPlatform("windows")]
     public static IReadOnlyList<string> Enforce(string stateRoot, string launcher)
@@ -160,15 +193,19 @@ internal static class StartupEntries
                     done.Add($"removed the Run value '{name}', which started Medal without its clip drive");
                 }
             }
-            if (!StartsLauncher(run.GetValue(RunValue) as string))
+            string? current = run.GetValue(RunValue) as string;
+            if (RunTarget(current) is not { } registered || !SamePath(registered, launcher))
             {
                 run.SetValue(RunValue, RunCommand(launcher));
-                done.Add($"restored the Run value '{RunValue}'");
+                done.Add(StartsLauncher(current)
+                    ? $"pointed the Run value '{RunValue}' at '{launcher}'"
+                    : $"restored the Run value '{RunValue}'");
             }
         }
         using (var protocol = Registry.CurrentUser.OpenSubKey(ProtocolKey, writable: true))
         {
-            if (protocol is not null && StartsMedalDirectly(protocol.GetValue(null) as string))
+            string? handler = protocol?.GetValue(null) as string;
+            if (protocol is not null && (StartsMedalDirectly(handler) || StartsOtherLauncher(handler, launcher)))
             {
                 protocol.SetValue(null, ProtocolCommand(launcher));
                 done.Add("pointed the medal:// handler back at the launcher");
@@ -181,7 +218,10 @@ internal static class StartupEntries
         return done;
     }
 
-    /// <summary>Repairs only a shortcut targeting Medal.exe, retaining its icon.</summary>
+    /// <summary>
+    /// Repairs a shortcut targeting Medal.exe, retaining its icon, or one left on
+    /// another launcher, retaining its arguments.
+    /// </summary>
     [SupportedOSPlatform("windows")]
     internal static bool RepairShortcut(string path, string launcher)
     {
@@ -193,13 +233,21 @@ internal static class StartupEntries
             shortcut = ((dynamic)shell!).CreateShortcut(path);
             dynamic link = shortcut;
             string target = link.TargetPath;
-            if (!StartsMedalDirectly(target)) return false;
             string icon = link.IconLocation;
-            // Without an icon path (WScript reports ",0"), Windows uses the
-            // target's icon. Keep Medal's icon before changing the target.
-            if (string.IsNullOrEmpty(icon) || icon.StartsWith(',')) icon = target + ",0";
+            if (StartsMedalDirectly(target))
+            {
+                // Without an icon path (WScript reports ",0"), Windows uses the
+                // target's icon. Keep Medal's icon before changing the target.
+                if (string.IsNullOrEmpty(icon) || icon.StartsWith(',')) icon = target + ",0";
+                link.Arguments = "";
+            }
+            else if (StartsOtherLauncher(target, launcher))
+            {
+                // The old launcher may be removed; do not keep its file as the icon.
+                if (icon.StartsWith(target + ",", StringComparison.OrdinalIgnoreCase)) icon = launcher + icon[target.Length..];
+            }
+            else return false;
             link.TargetPath = launcher;
-            link.Arguments = "";
             link.WorkingDirectory = Path.GetDirectoryName(launcher)!;
             link.IconLocation = icon;
             link.Save();
