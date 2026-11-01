@@ -71,28 +71,44 @@ is refused so that program and data locations remain separate.
 Each desktop launch checks the public GitHub endpoint for a newer stable release
 with a two-second network budget. Offline operation, private repositories, rate
 limits and missing or malformed releases continue normal launch. When an update
-is available, download and run its setup EXE after returning the library to Ready.
-There is no automatic background installation.
+is available, the launch notice points you to **Check for updates**. Nothing
+installs until you ask for it.
 
-Use **Check for Medal Sync updates** in the Start menu for an explicit check,
-including before configuration or enrollment. It reports unavailable checks
-separately from an up-to-date version. When a newer stable Windows setup is
-available, you can download it with a native progress window and Cancel button.
-The updater checks the expected repository URL, download size and GitHub SHA-256
-before saving a runnable EXE. Failed or canceled downloads remove their partial
-file. Downloads stay under `%LOCALAPPDATA%\MedalSync\Downloads` in separate folders;
-earlier downloads are never overwritten. After verification, choose **Yes** to
-install now. Quit Medal normally and wait for Ready first. The updater checks
-readiness, closes the status app, opens Windows setup, and exits so setup can
-replace the running version. Complete the setup wizard to install the update.
-If supervision or uploads are still active, installation is blocked with guidance
-and the verified installer stays available for retrying.
+Choose **Check for updates** in the status panel or tray menu, or **Check for
+Medal Sync updates** in the Start menu. It also works before configuration or
+enrollment, and reports unavailable checks separately from an up-to-date
+version. When a newer stable Windows setup is available, choose **Yes** to
+update now:
 
-Choose **No** to install later; the download folder opens. To run a downloaded
-setup manually, quit Medal normally, wait for Ready, and choose **Exit Medal Sync**
-in the status panel or tray menu before opening the EXE. Closing the panel only
-hides it. If Windows setup is canceled or cannot start, the updater opens the
-saved installer folder so you can retry without downloading again.
+1. The updater downloads the setup with a native progress window and Cancel
+   button. It checks the expected repository URL, download size and GitHub
+   SHA-256 before saving a runnable EXE. Failed or canceled downloads remove
+   their partial file. Downloads stay under `%LOCALAPPDATA%\MedalSync\Downloads`
+   in separate folders; earlier downloads are never overwritten. A download that
+   still matches the release is reused instead of downloading again.
+2. If Medal is open, a **Medal Sync update** window waits for you to quit Medal
+   from its tray icon. Medal Sync never closes Medal or stops supervision for
+   you. After Medal quits, the window waits while supervision finishes uploads
+   and the library returns to Ready. Choose **Cancel** to install later; the
+   verified installer is kept.
+3. Once Ready, the updater closes the status app and runs Windows setup
+   unattended for the same program folder and install mode, with only its
+   progress window. All-users installations still ask for administrator
+   approval. Setup repeats its own readiness check and shows any refusal.
+4. When setup ends, it reopens the Medal Sync status panel, including after a
+   refused or failed installation. Open Medal again when you are ready.
+
+If the library still is not Ready after Medal and supervision stop, for example
+because a session needs recovery or another PC owns the library, the update
+stops with that guidance and opens the saved installer folder. Fix it, then
+choose **Check for updates** again. A program folder that is not a standard
+installation location opens the normal setup wizard instead of installing
+unattended. Download folders holding only setups for the installed version or
+older are removed on the next launch or update check.
+
+To run a downloaded setup manually, quit Medal normally, wait for Ready, and
+choose **Exit Medal Sync** in the status panel or tray menu before opening the
+EXE. Closing the panel only hides it.
 
 ## Uninstall
 

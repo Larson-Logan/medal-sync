@@ -126,7 +126,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         buttons.Controls.Add(exit);
         _panel.CancelButton = close;
         layout.Controls.Add(buttons, 0, 1);
-        layout.Controls.Add(new Label { Text = "Close panel keeps Medal Sync running. To update, quit Medal, wait for Ready, then exit Medal Sync.", AutoSize = true, MaximumSize = new Size(450, 0), Padding = new Padding(0, 8, 0, 0) }, 0, 2);
+        layout.Controls.Add(new Label { Text = "Close panel keeps Medal Sync running. Check for updates downloads an update and installs it for you after you quit Medal.", AutoSize = true, MaximumSize = new Size(450, 0), Padding = new Padding(0, 8, 0, 0) }, 0, 2);
         _panel.Controls.Add(layout);
         _ = _panel.Handle; // A hidden top-level window must also receive Windows shutdown broadcasts.
         _panel.FormClosing += (_, e) =>
