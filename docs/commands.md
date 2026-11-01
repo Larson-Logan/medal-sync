@@ -111,7 +111,7 @@ library, for example a copy.
 | `replica history [--target NAME] [--json]` | Shows past checks per cloud copy: counts only, the last complete and last passing result. Read-only. |
 | `replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]` | Reviews unreferenced media and, if asked, old version history at an optional cloud copy. Writes a private review file. |
 | `replica prune --in FILE --apply` | Moves exactly the reviewed files into the copy's `.medal-sync-trash` folder. Refuses if anything changed since the review. See [clean up a cloud copy](storage.md#clean-up-a-cloud-copy). |
-| `replica purge-trash --target NAME [--older-than D] [--apply]` | Lists trash batches and permanently deletes those whose files were moved at least `D` days ago (default 7). |
+| `replica purge-trash --target NAME [--older-than D] [--apply]` | Lists only the trash subtree once. With `--apply`, permanently deletes exactly the batches marked `deleting`, whose files were moved at least `D` days ago (default 7). |
 | `retention --out FILE [--keep N] [--keep-days D] [--grace-days G]` | Reviews old generations and this PC's old recovery folders to remove. Read-only. |
 | `retention --in FILE --apply` | Removes exactly the reviewed folders while every PC stays Ready. See [retention](storage.md#retention). |
 

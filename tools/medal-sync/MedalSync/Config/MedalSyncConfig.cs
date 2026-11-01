@@ -14,6 +14,9 @@ internal sealed record MountConfig(
     int Transfers,
     int ControlPort)
 {
+    // Keep the clip drive separate from rclone's browser sign-in (53682) and RC default (5572).
+    public const int DefaultControlPort = 53684;
+
     /// <summary>
     /// Optional early warning, in GiB free, while recording. It must be above <see cref="MinFreeGiB"/>, which is the
     /// level reported as critical. When absent, twice the reserve and at least 10 GiB above it.

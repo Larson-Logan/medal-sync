@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 1.3.1 — 2026-10-31
+
+- Documentation validation now checks local Markdown section anchors, including
+  same-page links, duplicate headings and explicit HTML anchors.
+- Fixed: new configurations use control port 53684 so the clip drive leaves
+  rclone's browser sign-in port free for renewed cloud credentials. Configuration
+  validation warns existing setups using 53682 to change it once Ready.
+- Fixed: transient SSD cache cleanup trouble keeps finish supervision running.
+  Failed upload retries now appear in status and the tray with storage guidance;
+  a queue entry still failing after 15 minutes needs action and retries with backoff.
+- Fixed: simultaneous status and cloud-operation checks no longer mistake each
+  other for a running session and cancel an otherwise safe cloud operation.
+- Fixed: editing configuration in the setup wizard preserves required cloud
+  copies. Targets can be explicitly required or optional, and Review calls out
+  requirement changes and added or removed targets.
+- Fixed: the setup wizard opens valid fractional session limits and displays
+  hundredths of an hour. Saved numbers outside a control's display range show
+  guidance and are preserved unless edited.
+- Fixed: clips played from the server over a VPN or another network no longer
+  stall a few seconds in with video lagging behind audio. The clip drive now
+  fetches up to 256 MiB ahead of the player into the SSD cache instead of
+  16 MiB, and `mount.bandwidthLimitMiB` and `mount.finishBandwidthLimitMiB`
+  limit uploads only (`--bwlimit 5Mi:off`); before, they also capped playback.
 - Update checks now offer to run the verified installer, close the status app
   and exit the updater so Windows setup can replace the installed version.
   Deferred or failed installation keeps the download available for retrying.
@@ -9,15 +32,24 @@
   when Medal or a library operation is still active.
 - Fixed: Medal shortcuts keep Medal's default icon when the launcher repairs
   them, including pinned taskbar shortcuts without an explicit icon path.
+- Fixed: cloud-copy cleanup refuses duplicate or case-conflicting paths,
+  unsafe names, links and malformed listing entries with an actionable message
+  before writing a review or changing the copy.
+- Fixed: `replica purge-trash` lists only the trash subtree once and deletes
+  exactly the batches it reports as deleting, using the same set for its final
+  count. A missing trash folder is empty; batches reported as kept stay kept.
+
+## 1.3.0 — 2026-10-30
+
 - Every merge to `main` now publishes a release automatically, tagged
   `vMAJOR.MINOR.PATCH.NN`. `NN` is a hotfix counter: `.00` when the merge
   changes the version in `Directory.Build.props`, then `.01`, `.02` and so on.
   Update checks, the portable updater and setup compare the counter
-  numerically and still recognize earlier three-part versions. The first such
-  release is tagged with three parts (for example `v1.3.0`) so 1.2.0 and
-  earlier can still find it. Update 1.2.0 and earlier to it before the first
-  hotfix is published; after that, those versions no longer see updates and
-  need the newest setup downloaded from the Releases page once. Releases are published through the private
+  numerically and still recognize earlier three-part versions. This release
+  is tagged with three parts, `v1.3.0`, so 1.2.0 and earlier can still find
+  it. Update 1.2.0 and earlier to it before the first hotfix is published;
+  after that, those versions no longer see updates and need the newest setup
+  downloaded from the Releases page once. Releases are published through the private
   `medal-sync-release` GitHub App, the only non-administrator allowed to
   create `v*` tags.
 - Setup can add `medal-sync` to PATH, so the CLI runs from any new terminal.

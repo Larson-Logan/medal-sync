@@ -257,6 +257,7 @@ internal static class Program
         string recent = Path.Combine(folder, "recent.mp4");
         File.WriteAllText(recent, "recent synthetic bytes");
         var prune = new ReplicaPrune(config, state, store, () => { }, remote);
+        Check(prune.Trash("cloud").Count == 0, "a missing trash subtree is empty with real rclone");
         var plan = prune.Plan("cloud");
         Check(plan.Files.Select(f => f.Path).SequenceEqual(["old [clip] #2.mp4"]), "real listing plans only the old unreferenced file");
         var result = prune.Apply(plan);
@@ -266,7 +267,11 @@ internal static class Program
         Check(prune.Trash("cloud").Single() is { } batch && batch.Name == plan.Id && batch.Files == 1 && batch.CreatedAt is not null,
             "real rclone writes a move marker so trash age counts from the move");
         Check(prune.Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true).Count == 0 && File.Exists(trashed), "new trash is kept by purge");
-        new ReplicaPrune(config, state, store, () => { }, remote, () => DateTimeOffset.UtcNow.AddDays(8)).Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true);
+        IReadOnlyList<ReplicaTrashBatch>? reported = null;
+        var deleted = new ReplicaPrune(config, state, store, () => { }, remote, () => DateTimeOffset.UtcNow.AddDays(8))
+            .Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true, report: (_, due) => reported = due.ToArray());
+        Check(reported is not null && reported.SequenceEqual(deleted) && deleted.Count == 1,
+            "real rclone purge deletes exactly the reported batch set");
         Check(!Directory.Exists(Path.Combine(folder, ".medal-sync-trash", plan.Id)) && File.Exists(destination) && File.Exists(recent),
             "real rclone purge deletes only old trash");
         Check(remote.List("onedrive:Absent/folder").Count == 0, "a destination folder that does not exist lists as empty");

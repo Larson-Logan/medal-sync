@@ -15,6 +15,7 @@ updates:
       - /tools/medal-sync/MedalSync
       - /tools/medal-sync/MedalSync.Launch
       - /tests/tools/medal-sync
+      - /tests/desktop
       - /tests/integration
     target-branch: dev
     schedule:

@@ -17,8 +17,12 @@ internal enum DrainState
     Unknown,
 }
 
+internal sealed record UploadQueueItem(ulong Id, long Tries, bool Uploading);
+
 internal sealed record DrainVerdict(DrainState State, IReadOnlyList<string> Reasons, int QueuedFiles, long QueuedBytes)
 {
+    public IReadOnlyList<UploadQueueItem> Uploads { get; init; } = [];
+    public bool CacheSpaceTrouble { get; init; }
     public static DrainVerdict Unknown(string reason) => new(DrainState.Unknown, [reason], 0, 0);
 }
 
@@ -73,23 +77,35 @@ internal static class VfsStatus
         }
         int files = 0;
         long bytes = 0;
+        var uploads = new List<UploadQueueItem>();
+        var ids = new HashSet<ulong>();
         foreach (var item in items.EnumerateArray())
         {
-            if (item.ValueKind != JsonValueKind.Object || !Integer(item, "size", out long size))
+            if (item.ValueKind != JsonValueKind.Object || !Integer(item, "size", out long size)
+                || size > long.MaxValue - bytes
+                || !Integer(item, "tries", out long tries)
+                || !item.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.Number || !id.TryGetUInt64(out ulong uploadId)
+                || !ids.Add(uploadId)
+                || !item.TryGetProperty("uploading", out var uploading) || uploading.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
             {
-                return DrainVerdict.Unknown("vfs/queue contains an entry without a size.");
+                return DrainVerdict.Unknown("vfs/queue contains an invalid size, ID or upload retry status.");
             }
             files++;
             bytes += size;
+            uploads.Add(new(uploadId, tries, uploading.GetBoolean()));
         }
         var reasons = new List<string>();
-        if (errored > 0) reasons.Add($"{errored} file(s) failed to upload.");
-        if (outOfSpace.GetBoolean()) reasons.Add("The SSD cache ran out of space.");
-        if (reasons.Count > 0) return new DrainVerdict(DrainState.Failed, reasons, files, bytes);
-        if (inProgress > 0 || queued > 0 || files > 0)
+        // These counters describe cleanup of clean cached files, not failed uploads.
+        bool cacheTrouble = errored > 0 || outOfSpace.GetBoolean();
+        if (errored > 0) reasons.Add($"SSD cache cleanup is retrying {errored} clean cached file(s); check free space on the cache disk.");
+        if (outOfSpace.GetBoolean()) reasons.Add("The SSD cache is freeing space; keep this PC on and check free space on the cache disk.");
+        int retries = uploads.Count(u => !u.Uploading && u.Tries > 0);
+        if (retries > 0) reasons.Add($"{retries} clip(s) failed to upload or were canceled and are being retried; check that primary storage accepts writes and has free space.");
+        if (inProgress > 0 || queued > 0 || files > 0 || cacheTrouble)
         {
-            return new DrainVerdict(DrainState.Pending,
-                [$"{Math.Max(files, inProgress + queued)} upload(s) remaining ({bytes / (1024.0 * 1024.0):0.0} MiB queued)."], files, bytes);
+            if (inProgress > 0 || queued > 0 || files > 0)
+                reasons.Add($"{Math.Max(files, inProgress + queued)} upload(s) remaining ({bytes / (1024.0 * 1024.0):0.0} MiB queued).");
+            return new DrainVerdict(DrainState.Pending, reasons, files, bytes) { Uploads = uploads, CacheSpaceTrouble = cacheTrouble };
         }
         return new DrainVerdict(DrainState.Drained, [], 0, 0);
     }

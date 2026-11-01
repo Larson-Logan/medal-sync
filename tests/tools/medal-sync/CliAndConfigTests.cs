@@ -35,7 +35,7 @@ public sealed class CliAndConfigTests : IDisposable
     public void Cli_HelpListsEveryDispatchCommandInTheCorrectSection()
     {
         string help = Run("--help").Output;
-        string[] sections = help.Split("Changes state (need the configuration from the runbook):", StringSplitOptions.None);
+        string[] sections = help.Split("Changes state (most only preview until you add --apply):", StringSplitOptions.None);
         Assert.Equal(2, sections.Length);
 
         string[] readOnlyCommands =
@@ -169,16 +169,79 @@ public sealed class CliAndConfigTests : IDisposable
         using (SessionCommands.SingleInstance(mutexName))
         {
             Exception? refusal = null;
+            bool running = false;
             var contender = new Thread(() =>
             {
                 if (!OperatingSystem.IsWindows()) return;
-                try { using var competing = SessionCommands.SingleInstance(mutexName); }
+                try
+                {
+                    running = SessionCommands.AnotherInstanceRunning(mutexName);
+                    using var competing = SessionCommands.SingleInstance(mutexName);
+                }
                 catch (Exception ex) { refusal = ex; }
             });
             contender.Start();
             Assert.True(contender.Join(TimeSpan.FromSeconds(5)));
+            Assert.True(running);
             Assert.Contains("already running", Assert.IsType<UnsafeOperationException>(refusal).Message, StringComparison.Ordinal);
         }
+        Assert.False(SessionCommands.AnotherInstanceRunning(mutexName));
+        using var recovered = SessionCommands.SingleInstance(mutexName);
+    }
+
+    [Fact]
+    public void ConcurrentInstanceProbesNeverReportEachOtherAsRunning()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string mutexName = @"Local\MedalSync-Test-" + Guid.NewGuid().ToString("N");
+        using var start = new ManualResetEventSlim();
+        var cancellation = TestContext.Current.CancellationToken;
+        int falsePositives = 0;
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        var probes = Enumerable.Range(0, 4).Select(_ => new Thread(() =>
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            try
+            {
+                start.Wait(cancellation);
+                for (int i = 0; i < 2_000; i++)
+                    if (SessionCommands.AnotherInstanceRunning(mutexName)) Interlocked.Increment(ref falsePositives);
+            }
+            catch (Exception ex) { failures.Enqueue(ex); }
+        })).ToArray();
+        foreach (var probe in probes) probe.Start();
+        start.Set();
+        foreach (var probe in probes) Assert.True(probe.Join(TimeSpan.FromSeconds(30)));
+        Assert.Empty(failures);
+        Assert.Equal(0, falsePositives);
+    }
+
+    [Fact]
+    public void InstanceProbeRecognizesLegacyHoldersAndRecoversAbandonedLocks()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string mutexName = @"Local\MedalSync-Test-" + Guid.NewGuid().ToString("N");
+        // Keep handles alive so the objects survive the holder thread's exit.
+        using var legacy = new Mutex(false, mutexName);
+        using var probe = new Mutex(false, mutexName + ".Probe");
+        using var held = new ManualResetEventSlim();
+        using var abandon = new ManualResetEventSlim();
+        var cancellation = TestContext.Current.CancellationToken;
+        var holder = new Thread(() =>
+        {
+            legacy.WaitOne();
+            held.Set();
+            abandon.Wait(cancellation);
+            probe.WaitOne(); // Simulate a crash during a probe as well as a real instance.
+        });
+        holder.Start();
+        try
+        {
+            Assert.True(held.Wait(TimeSpan.FromSeconds(5), cancellation));
+            Assert.True(SessionCommands.AnotherInstanceRunning(mutexName));
+        }
+        finally { abandon.Set(); Assert.True(holder.Join(TimeSpan.FromSeconds(5))); }
+        Assert.False(SessionCommands.AnotherInstanceRunning(mutexName));
         using var recovered = SessionCommands.SingleInstance(mutexName);
     }
 

@@ -95,6 +95,29 @@ public sealed class ConfigurationReviewTests : IDisposable
         Assert.Throws<UnsafeOperationException>(() => ConfigurationReview.Prepare(State, Candidate, true, ValidEnvironment));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ControlPortCannotChangeWithAnUnfinishedSession(bool activeAtReview)
+    {
+        Directory.CreateDirectory(State.Root);
+        byte[] original = Json.Serialize(Candidate);
+        File.WriteAllBytes(State.ConfigPath, original);
+        var updated = Candidate with { Mount = Candidate.Mount with { ControlPort = MountConfig.DefaultControlPort } };
+        var review = activeAtReview ? null : ConfigurationReview.Prepare(State, updated, false, ValidEnvironment);
+        string sessions = Path.Combine(State.Root, "sessions");
+        Directory.CreateDirectory(sessions);
+        File.WriteAllText(Path.Combine(sessions, "retained.json"), "unfinished uploads on the original port");
+
+        if (activeAtReview)
+            Assert.Throws<UnsafeOperationException>(() => ConfigurationReview.Prepare(State, updated, false, ValidEnvironment));
+        else
+            Assert.Throws<UnsafeOperationException>(() => review!.Save(true, ValidEnvironment));
+
+        Assert.Equal(original, File.ReadAllBytes(State.ConfigPath));
+        Assert.False(Directory.Exists(State.BackupDirectory));
+    }
+
     [Fact]
     public void InvalidPathsAndCompatibilityOrStorageFailuresWriteNothing()
     {

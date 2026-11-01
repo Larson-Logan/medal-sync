@@ -32,10 +32,27 @@ public sealed class StorageTests
     [Theory]
     [InlineData("\"erroredFiles\":0", "\"erroredFiles\":2")]
     [InlineData("\"outOfSpace\":false", "\"outOfSpace\":true")]
-    public void Drain_FailsOnErrorsOrAFullCache(string from, string to)
+    public void Drain_WaitsForCacheCleanupWithoutDiagnosingFailedUploads(string from, string to)
     {
         var verdict = VfsStatus.Evaluate(Stats(Idle.Replace(from, to, StringComparison.Ordinal)), "{\"queue\":[]}", Remote);
-        Assert.Equal(DrainState.Failed, verdict.State);
+        Assert.Equal(DrainState.Pending, verdict.State);
+        Assert.True(verdict.CacheSpaceTrouble);
+        Assert.Contains(verdict.Reasons, r => r.Contains("SSD cache", StringComparison.Ordinal));
+        Assert.DoesNotContain(verdict.Reasons, r => r.Contains("failed to upload", StringComparison.Ordinal));
+        Assert.Equal(DrainState.Drained, VfsStatus.Evaluate(Stats(Idle), "{\"queue\":[]}", Remote).State);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void Drain_ReportsPreviousFailuresOnlyForWaitingQueueEntries(bool uploading, bool retrying)
+    {
+        string queue = $$"""{"queue":[{"id":1,"size":42,"tries":3,"uploading":{{(uploading ? "true" : "false")}}}]}""";
+        var verdict = VfsStatus.Evaluate(Stats(Idle), queue, Remote);
+        Assert.Equal(DrainState.Pending, verdict.State);
+        Assert.Equal(retrying, verdict.Reasons.Any(r => r.Contains("being retried", StringComparison.Ordinal)));
+        Assert.Equal(new UploadQueueItem(1, 3, uploading), Assert.Single(verdict.Uploads));
+        if (retrying) Assert.Contains(verdict.Reasons, r => r.Contains("primary storage accepts writes", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -45,6 +62,9 @@ public sealed class StorageTests
     [InlineData("STATS", null)]
     [InlineData("STATS", "{}")]
     [InlineData("STATS", "{\"queue\":[{\"name\":\"x\"}]}")]
+    [InlineData("STATS", "{\"queue\":[{\"id\":1,\"size\":1,\"uploading\":false}]}")]
+    [InlineData("STATS", "{\"queue\":[{\"id\":1,\"size\":1,\"tries\":-1,\"uploading\":false}]}")]
+    [InlineData("STATS", "{\"queue\":[{\"id\":1,\"size\":1,\"tries\":3,\"uploading\":\"false\"}]}")]
     [InlineData("NOCOUNTER", "{\"queue\":[]}")]
     [InlineData("WRONGFS", "{\"queue\":[]}")]
     public void Drain_TreatsAnythingMissingOrUnexpectedAsUnknown(string? stats, string? queue)
@@ -81,6 +101,7 @@ public sealed class StorageTests
         Assert.Contains("--vfs-write-back 5s", line, StringComparison.Ordinal);
         Assert.Contains("--vfs-cache-max-size 20Gi", line, StringComparison.Ordinal);
         Assert.Contains("--vfs-cache-min-free-space 20Gi", line, StringComparison.Ordinal);
+        Assert.Contains("--vfs-read-ahead 256Mi", line, StringComparison.Ordinal);
         Assert.Contains("--dir-cache-time 3600000s", line, StringComparison.Ordinal);
         Assert.Contains("--rc-addr 127.0.0.1:53682", line, StringComparison.Ordinal);
         Assert.DoesNotContain("--rc-user", line, StringComparison.Ordinal);
@@ -90,11 +111,12 @@ public sealed class StorageTests
     }
 
     [Fact]
-    public void Mount_PassesTheUploadLimitOnlyWhenSet()
+    public void Mount_PassesTheUploadLimitOnlyWhenSetAndNeverLimitsPlayback()
     {
         Assert.DoesNotContain("--bwlimit", MountPlan.Arguments(Settings()));
         var limited = MountPlan.Arguments(Settings() with { BandwidthLimitMiB = 5 }).ToList();
-        Assert.Equal("5Mi", limited[limited.IndexOf("--bwlimit") + 1]);
+        // rclone reads a bare rate as both directions; downloads (clip playback) stay unlimited.
+        Assert.Equal("5Mi:off", limited[limited.IndexOf("--bwlimit") + 1]);
         Assert.Equal("off", MountPlan.Rate(null));
     }
 

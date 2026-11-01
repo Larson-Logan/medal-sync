@@ -94,13 +94,25 @@ Each is 1 to 10000 MiB/s, or `null` (the default) for unlimited. The limit
 moves to the finishing value when Medal exits, and back if Medal reopens before
 the switch completes. If the drive does not accept a change, a notice says so
 and the session continues at the previous speed; the limit never blocks
-recording or finishing. `mount-plan` shows the recording limit as `--bwlimit`.
+recording or finishing. `mount-plan` shows the recording limit as `--bwlimit`,
+for example `5Mi:off`: the limit applies to uploads only, so playing clips
+from the server is never slowed by it.
 
 A limit only changes speed. Uploads take longer, so more clips wait on the SSD
 cache, but launch already reserves room for a whole session as if nothing
 uploads, and the low disk space notices above still apply. Drain, verification
 and ownership work the same way. Cloud copies use `replication.bandwidthLimitMiB`
 instead.
+
+### Play clips away from the server
+
+Playing a clip that is not in the SSD cache reads it from the server. The clip
+drive fetches up to 256 MiB ahead of the player into the cache, so most clips
+download completely soon after playback starts and a slow or distant link
+(a VPN, tunnel or another network) does not run out after a few seconds.
+Played clips stay in the cache for `mount.cacheMaxAgeSeconds` after they are
+closed. If the connection to the server is slower than the clip's bitrate,
+let the clip load for a moment before playing, or play it again once cached.
 
 ## Keep a local copy and upload to the server
 
@@ -113,7 +125,7 @@ $cli = "$env:ProgramFiles/Medal Sync/bin/medal-sync.exe"
   --cache-root E:\MedalCache --local-copy-root E:\MedalLibrary `
   --remote '\\YOUR-SERVER\Data\Media\Videos' `
   --coordination-root '\\YOUR-SERVER\Data\AppData\MedalSync' `
-  --rclone-path C:\Tools\rclone.exe --out "$HOME/medal-sync-candidate.json"
+  --out "$HOME/medal-sync-candidate.json"
 ```
 
 This previews configuration; add `--apply` to create the candidate. Reuse
@@ -188,7 +200,8 @@ Authorize a named remote using rclone's interactive configuration. Use an
 explicit credential file outside Git, the media folders and the cache:
 
 ```powershell
-& C:\Tools\rclone.exe config --config "$HOME/.medal-sync/rclone.conf"
+# The rclone bundled with an all-users installation; see below for per-user setup.
+& "$env:ProgramFiles/Medal Sync/bin/rclone.exe" config --config "$HOME/.medal-sync/rclone.conf"
 ```
 
 Choose the provider and name the remote `onedrive`, `dropbox`, or `gdrive`.
@@ -304,6 +317,13 @@ file names; only the kind of problem is kept. The last verification receipt is
 `replication/last-verified.json` under the configured state root; it lists
 verified and deferred targets.
 
+The clip drive also reports uploads that failed or were canceled and are waiting
+for rclone to retry. Check that primary storage accepts writes and has free
+space. When the same queue entry keeps failing for 15 minutes after Medal exits,
+finish shows *Action needed* and retries with backoff. SSD cache cleanup trouble
+is reported separately and keeps supervision running while the cache cleaner
+retries. Ownership and cached clips remain on this PC throughout.
+
 ### Incremental verification
 
 Always-full byte verification remains the default. To reduce read-back for a
@@ -372,8 +392,8 @@ files and never takes ownership, so another PC can still start. A launch on this
 PC, Ctrl+C, Windows shutdown, a configuration change or another PC starting
 stops the check.
 
-Each attempt is recorded per target in `state/replication/audit-history.json`
-with counts only: matched, missing, different and not reached. The last 20
+Each attempt is recorded per target in `replication/audit-history.json` under
+the state root, with counts only: matched, missing, different and not reached. The last 20
 attempts are kept. A result is **passed**, **failed** (missing or different
 files) or **incomplete** (offline, sign-in, configuration, canceled, library
 changed or error). An incomplete attempt never replaces the last complete
@@ -403,6 +423,11 @@ or anything that is not clip media. Version history under
 only whole, dated attempts. The review file names private paths: keep it on
 this PC.
 
+Cleanup refuses duplicate or case-conflicting paths, unsafe names, links and
+unreadable listing entries before saving a review or changing the destination.
+For duplicate names, inspect the copy with `rclone dedupe` before retrying;
+Medal Sync does not choose which duplicate to keep.
+
 Apply holds the journal writer lock, so no PC can start or finish meanwhile. It
 refuses if the committed generation changed or any file at the destination
 differs from the review, then moves exactly the reviewed files into
@@ -412,8 +437,11 @@ folder count as moved. `purge-trash` lists trash batches and, with `--apply`,
 permanently deletes batches whose files were moved at least `--older-than` days
 ago (default 7). It holds the same writer lock while it chooses and deletes
 batches, so a prune resumed on another PC cannot add files to a batch that is
-being purged. Age counts from the move, not the review, so applying an old
-review still gets the full wait. Apply writes an empty `.medal-sync-moved-<time>`
+being purged. Each invocation lists only `.medal-sync-trash/`, once. With
+`--apply`, it deletes exactly the batches marked `deleting` from that listing;
+batches marked `kept` remain even if they cross the age limit during reporting.
+A missing trash folder is empty. Age counts from the move, not the review, so
+applying an old review still gets the full wait. Apply writes an empty `.medal-sync-moved-<time>`
 marker into the batch for this; batches without one are kept. Required targets
 are refused.
 

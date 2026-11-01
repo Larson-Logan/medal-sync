@@ -21,7 +21,7 @@ only occurs through Medal Sync.
 
 ## Share useful details safely
 
-On versions after 1.1.0, run `medal-sync diagnostics` to preview a summary of
+On version 1.2.0 or later, run `medal-sync diagnostics` to preview a summary of
 versions, storage mode, ownership state and refusal codes. It leaves out paths,
 names, remotes, clips, credentials and logs, and replaces library and PC IDs
 with tokens. Review the preview, then save it with

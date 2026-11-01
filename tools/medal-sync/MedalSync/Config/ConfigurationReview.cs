@@ -54,13 +54,35 @@ internal sealed class ConfigurationReview
         + $"Capture: {Config.CaptureFolder} (drive {Config.Capture.Root})\r\nCache: {Config.CacheRoot}\r\n"
         + $"Cache limit: {Config.Mount.CacheMaxGiB} GiB; minimum free space: {Config.Mount.MinFreeGiB} GiB; planned session: {Config.MaxSessionHours} hours\r\n"
         + $"Persistent local copy: {Config.Replication?.LocalCopyRoot ?? "none"}\r\n"
-        + $"Cloud targets: {string.Join(", ", Config.Replication?.Targets.Select(t => t.Name + " = " + t.Remote) ?? [])}\r\n\r\n"
+        + $"Cloud targets: {string.Join(", ", Config.Replication?.Targets.Select(t => t.Name + " = " + t.Remote + " (" + Requirement(t.Required) + ")") ?? [])}\r\n"
+        + TargetChanges()
+        + "\r\n"
         + $"Provider credential file: {Config.Replication?.RcloneConfigPath ?? "none"} (authorization remains separate)\r\n"
         + $"Sync exclusions: {string.Join(", ", Config.SyncExclusions.Select(e => e.FolderId + " = " + e.Pattern))}\r\n\r\n"
         + (ReplacesExisting ? "Saving creates a backup before atomic replacement.\r\n" : "Saving creates configuration only; device identity is created by the existing enrollment workflow.\r\n")
         + "Next: quit Medal normally; preserve a verified database/media backup; verify assets and sync exclusions. "
         + (_newLibrary ? "Preview init only for this genuinely new library, then explicitly apply." : "Preview enroll for this existing library, then explicitly apply.")
         + " Authorize cloud providers separately with rclone config. No journal, mount, Medal database or startup entry is changed here.";
+
+    private static string Requirement(bool required) => required ? "required" : "optional";
+
+    private string TargetChanges()
+    {
+        if (_previous is null) return "";
+        var previous = Json.Deserialize<MedalSyncConfig>(_previous, "Existing configuration").Replication?.Targets ?? [];
+        var current = Config.Replication?.Targets ?? [];
+        var changes = new List<string>();
+        foreach (var target in previous)
+        {
+            var updated = current.FirstOrDefault(t => t.Name.Equals(target.Name, StringComparison.OrdinalIgnoreCase));
+            if (updated is null) changes.Add($"Cloud target '{target.Name}' removed (was {Requirement(target.Required)}).");
+            else if (updated.Required != target.Required)
+                changes.Add($"Cloud target '{target.Name}' requirement changed: {Requirement(target.Required)} -> {Requirement(updated.Required)}.");
+        }
+        foreach (var target in current.Where(t => !previous.Any(p => p.Name.Equals(t.Name, StringComparison.OrdinalIgnoreCase))))
+            changes.Add($"Cloud target '{target.Name}' added ({Requirement(target.Required)}).");
+        return changes.Count == 0 ? "" : string.Join("\r\n", changes) + "\r\n";
+    }
 
     /// <summary>Explicit confirmation is mandatory. Call with the supervisor instance mutex held.</summary>
     public string? Save(bool confirmed, Action<MedalSyncConfig, bool> validateEnvironment, Action<MedalSyncConfig>? validateExisting = null)

@@ -6,8 +6,13 @@ programs. Every merge to `main` publishes a release tagged
 changes `VersionPrefix`, otherwise one more than the last release of that
 version.
 [Versions and schemas](versioning.md) explains which part to raise and how file
-formats and Medal schemas are versioned. Changelog entries remain Unreleased
-until publication.
+formats and Medal schemas are versioned.
+
+Record user-visible changes under `## Unreleased` in `CHANGELOG.md` as they
+merge to `dev`. Before promoting, rename that heading on `dev` to the release
+the promotion will publish, such as `## 1.4.0 — DATE` for a new version or
+`## 1.3.0.01 — DATE` for a hotfix, and start a new empty `## Unreleased`
+above it. The release workflow does not edit the changelog.
 
 ## Build locally
 
@@ -66,10 +71,25 @@ finds on `dev` first. The branch and tag rules are kept in
 [.github/rulesets](../.github/rulesets); see
 [security maintenance](security-maintenance.md#branches-tags-and-actions).
 
+Merged topic branches are deleted automatically by the repository setting,
+which `scripts/setup-github-rulesets.ps1` maintains. The
+[branch cleanup workflow](../.github/workflows/branch-cleanup.yml) also handles
+closed, unmerged pull requests. It preserves `main`, `dev`, the default branch,
+protected branches, forks, branches used as the head or base of an open PR, and
+branches with commits added since closure. It runs only trusted default-branch
+code. A maintainer can rerun it manually with a closed PR number, or preview
+cleanup with `python scripts/cleanup-pr-branch.py --repository OWNER/REPO --pr NUMBER`;
+add `--apply` to delete the branch. Local clones should set
+`git config fetch.prune true` to discard deleted remote-tracking references on
+fetch; local topic branches and worktrees require separate cleanup after
+checking for unmerged commits and local edits.
+
 ## GitHub pipeline
 
-Pull requests and pushes to `dev` and `main` run [validation](../.github/workflows/validate.yml)
-on standard GitHub-hosted runners, which cost no Actions minutes for this public
+Pull requests and pushes to `dev` run [validation](../.github/workflows/validate.yml).
+Pushes to `main` run it through the release workflow, so the same commit is
+validated once and publishing waits for every suite. All jobs use
+standard GitHub-hosted runners, which cost no Actions minutes for this public
 repository; never move these jobs to larger runners, which are always billed.
 A Linux job audits source and history, checks the inventory and links and lints
 the workflows. Three Windows jobs then run in parallel: .NET unit tests; the
@@ -85,8 +105,9 @@ request into `dev` runs only the suites its changed files need, so a
 documentation change runs none and a unit-test change runs only the unit tests;
 the run summary names the files behind each choice. A file no rule names needs
 every suite. Pushes and pull requests into `main` always run everything. NuGet
-packages and the pinned build tools are cached between runs, and cached
-downloads are re-checked against their SHA-256 pins. The native integration
+packages and the pinned build tools are cached in ordinary validation, and
+cached downloads are re-checked against their SHA-256 pins. Release validation
+uses no caches. The native integration
 test uses a temporary per-user program folder and refuses to run on an ordinary
 desktop or over an existing installation.
 
@@ -115,13 +136,13 @@ the fix to `dev` and promote it without touching `VersionPrefix`; it is
 released as the next number, such as `.01`. Changing `VersionPrefix` to a
 version that already has a release is refused.
 
-The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) is a
-three-part bridge such as `v1.3.0`, because update checks in 1.2.0 and earlier
+The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) was
+the three-part bridge `v1.3.0`, because update checks in 1.2.0 and earlier
 ignore four-part tags. It counts as `.00`; installs that update to it can then
 find every later release.
 
-Older installs only check the release marked Latest, and the first hotfix
-(such as `v1.3.0.01`) replaces the bridge as Latest. From then on, a 1.2.0 or
+Older installs only check the release marked Latest, and the first hotfix,
+`v1.3.0.01`, replaces the bridge as Latest. From then on, a 1.2.0 or
 earlier install that never took the bridge sees no update: the desktop check
 stays silent and the portable updater reports that it expected a stable
 release. Its user must download the newest setup from the
@@ -139,12 +160,19 @@ newer number, or when a release, draft or published, already targets that
 commit, so a rerun never publishes twice.
 
 Otherwise it checks the version format and main ancestry, refuses a `v*` tag
-that already points at a different commit, runs tests, builds both packages
-with the chosen number, verifies native installation, uploads setup EXE,
-portable ZIP, checksums and generated notes to a draft, then publishes it. The
-run summary links the release. It uses no caches. Only the planning job, which
-must see drafts, and the app token have contents-write permission. Existing releases cause failure rather than
-replacement.
+that already points at a different commit and calls the full validation
+workflow with the chosen number and caches disabled. That workflow builds both
+packages once, tests native installation and retains the tested setup EXE,
+portable ZIP and checksums as the `release-assets` artifact for seven days.
+Installer failure logs are retained for the same period.
+
+Only after every suite passes does a separate job download those exact files,
+verify their names and SHA-256 sidecars, attest them, upload them with generated
+notes to a draft and publish it. The run summary links the release. Only the
+planning job, which must see drafts, and the app token have contents-write
+permission. Existing releases cause failure rather than replacement. A retry
+of failed jobs reuses a successful build's artifact; if it has expired, rerun
+all jobs to rebuild and validate it.
 
 Publishing creates the version tag on the exact commit that was built. The
 release tag ruleset lets only administrators and the private
@@ -166,7 +194,7 @@ for the setup EXE and portable ZIP. Anyone can check that a download was built
 by this workflow from the released commit:
 
 ```powershell
-gh attestation verify medal-sync-1.1.0-setup-win-x64.exe --repo Larson-Logan/medal-sync
+gh attestation verify medal-sync-1.3.0.01-setup-win-x64.exe --repo Larson-Logan/medal-sync
 ```
 
 Generated notes use [.github/release.yml](../.github/release.yml) to group PRs

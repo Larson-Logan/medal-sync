@@ -144,7 +144,11 @@ Choose local storage or server (SMB) storage and explicitly choose a new library
 ID or enter the existing ID to join. Supply the account ID from `medal-sync
 inspect`, storage/coordination/cache folders, capture drive and folder, and
 optional persistent local copy and cloud targets (`name=remote:folder`, one per
-line). Local mode needs no persistent-copy field because its primary storage
+line). Prefix a target with `required ` to require verification before handoff,
+or `optional ` to allow retry later. Existing targets show their requirement;
+keeping a name without a prefix keeps its saved requirement. Review lists each
+requirement and calls out changed requirements and added or removed targets.
+Local mode needs no persistent-copy field because its primary storage
 already stays on this PC. Cloud credentials remain in the separate local rclone
 configuration file; authorize providers explicitly with `rclone config` first.
 
@@ -157,6 +161,10 @@ already have a coordination directory. Joining checks the existing journal and
 committed generation and requires Ready. **Review** shows the resolved state
 location, identity, destinations, capture drive, cache limit/reserve, planned
 session length, sync exclusions and remaining initialization/enrollment steps.
+Session hours accept hundredths, including `0.5` and `2.5`. If a saved number
+cannot be displayed exactly or exceeds a field's display range, the wizard
+shows a message and keeps the original value unless you edit that field.
+Review shows the actual values that will be saved.
 Press **Confirm and save** only after reviewing them; Enter in the review page
 does not save. **Back** discards that review; **Cancel** and Escape leave the
 existing setup untouched.
@@ -288,11 +296,15 @@ the reason on standard error.
 Times are UTC in ISO 8601. The document has no device IDs, credentials or file
 paths; owner and requesting PCs appear by display name only.
 
+### Medal links
+
 The desktop launcher passes `medal://` links through the same ownership and
 storage checks. A first launch opens the link as part of starting Medal; an
 already supervised session receives it immediately. An unmanaged Medal process
 must pass recovery checks before receiving the link. Advanced CLI launches can
 use `launch --medal-link 'medal://...'` too.
+
+## Medal updates and compatibility
 
 Medal Sync checks compatibility before starting a new session, once a minute
 while Medal runs, and before publishing a handoff. Readable app and recorder

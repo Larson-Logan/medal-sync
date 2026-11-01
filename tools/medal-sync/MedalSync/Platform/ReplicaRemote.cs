@@ -39,7 +39,8 @@ internal interface IReplicaRemote
 }
 
 /// <summary>Runs the operations with the pinned rclone and the configured credential file. Output is parsed, never stored.</summary>
-internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState state, Action requireIdle) : IReplicaRemote
+internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState state, Action requireIdle,
+    Func<IReadOnlyList<string>, string>? run = null) : IReplicaRemote
 {
     private string Credentials
     {
@@ -61,7 +62,8 @@ internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState sta
         string text;
         try
         {
-            text = Run(["lsjson", destination, "--config", Credentials, "--recursive", "--files-only", .. Network], capture: true);
+            // Include directories so ambiguous folder identities and directory links are refused too.
+            text = Run(["lsjson", destination, "--config", Credentials, "--recursive", "--no-mimetype", .. Network], capture: true);
         }
         catch (RcloneFailedException ex) when (ex.ExitCode == 3)
         {
@@ -72,21 +74,40 @@ internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState sta
 
     internal static IReadOnlyList<RemoteFile> Parse(string json)
     {
-        using var document = JsonDocument.Parse(json);
-        if (document.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException("rclone returned an unexpected listing.");
-        var files = new List<RemoteFile>();
-        foreach (var item in document.RootElement.EnumerateArray())
+        const string unreadable = "rclone returned an unreadable or incomplete replica listing. Inspect the remote with 'rclone lsjson', then retry cleanup.";
+        try
         {
-            if (item.TryGetProperty("IsDir", out var dir) && dir.ValueKind == JsonValueKind.True) continue;
-            string? path = item.GetProperty("Path").GetString();
-            long size = item.GetProperty("Size").GetInt64();
-            string? time = item.GetProperty("ModTime").GetString();
-            if (string.IsNullOrEmpty(path) || size < 0 || !DateTimeOffset.TryParse(time, CultureInfo.InvariantCulture, DateTimeStyles.None, out var modified))
-                throw new InvalidDataException("rclone returned an incomplete listing entry.");
-            files.Add(new(path, size, modified.ToUniversalTime()));
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException(unreadable);
+            var files = new List<RemoteFile>();
+            var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in document.RootElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) throw new InvalidDataException(unreadable);
+                foreach (string flag in new[] { "IsDir", "IsLink" })
+                    if (item.TryGetProperty(flag, out var value) && value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        throw new InvalidDataException(unreadable);
+                if (!item.TryGetProperty("Path", out var path) || path.ValueKind != JsonValueKind.String
+                    || path.GetString() is not { } relative || !SafeRelativePath(relative)
+                    || item.TryGetProperty("IsLink", out var link) && link.ValueKind == JsonValueKind.True)
+                    throw new InvalidDataException("rclone returned an unsafe path or link in the replica listing. Correct the remote's names or links, then retry cleanup.");
+                if (!identities.Add(relative))
+                    throw new InvalidDataException("rclone returned duplicate or case-conflicting replica paths. Review duplicate names with 'rclone dedupe', then retry cleanup.");
+                if (item.TryGetProperty("IsDir", out var dir) && dir.ValueKind == JsonValueKind.True) continue;
+                if (!item.TryGetProperty("Size", out var size) || size.ValueKind != JsonValueKind.Number || !size.TryGetInt64(out long bytes) || bytes < 0
+                    || !item.TryGetProperty("ModTime", out var time) || time.ValueKind != JsonValueKind.String
+                    || !DateTimeOffset.TryParse(time.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var modified))
+                    throw new InvalidDataException(unreadable);
+                files.Add(new(relative, bytes, modified.ToUniversalTime()));
+            }
+            return files.OrderBy(f => f.Path, StringComparer.Ordinal).ToArray();
         }
-        return files.OrderBy(f => f.Path, StringComparer.Ordinal).ToArray();
+        catch (JsonException) { throw new InvalidDataException(unreadable); }
     }
+
+    private static bool SafeRelativePath(string path) =>
+        !path.Contains('\\') && !path.StartsWith('/') && !path.Split('/').Any(s => s is "" or "." or "..")
+        && WindowsPath.TryParse(@"M:\Clips\" + path.Replace('/', '\\'), out _, out _);
 
     public RemoteCheckOutcome Check(string source, string destination, IReadOnlyList<string> files, Action? guard = null)
     {
@@ -180,6 +201,6 @@ internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState sta
             guard?.Invoke();
         }
         Poll();
-        return new RcloneRunner(config.ExpandedRclonePath).Run(arguments, Timeout, Poll, capture);
+        return run is null ? new RcloneRunner(config.ExpandedRclonePath).Run(arguments, Timeout, Poll, capture) : run(arguments);
     }
 }
