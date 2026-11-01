@@ -178,7 +178,10 @@ internal static class LibraryCommands
         if (!WindowsPath.TryParse(fromText, out WindowsPath? from, out string? problem)) throw new UsageException($"--from: {problem}");
         var state = Config.LocalState.ForCurrentUser();
         var config = Config.MedalSyncConfig.Load(configPath ?? state.ConfigPath);
-        if (config.PrimaryIsRclone) throw new UnsafeOperationException("Relocation requires an SMB primary; cloud primary copies are not supported by this command.");
+        if (config.PrimaryIsRclone && config.StorageMode != Config.StorageMode.Cloud) throw new UnsafeOperationException("Relocation requires an SMB primary or an uninitialized cloud library with a persistent copy.");
+        if (config.StorageMode == Config.StorageMode.Cloud && GoogleDriveJournal.For(config).Exists())
+            throw new UnsafeOperationException("Cloud relocation is only for the first PC before initialization. The Drive journal already exists; preserve local work and join the existing library.");
+        var destination = config.StorageMode == Config.StorageMode.Cloud ? config.MountedCapture : config.ServerCapture;
         using var instance = apply ? SessionCommands.SingleInstance() : null;
         var install = MedalEnvironment.Locate();
         if (install.AccountId != config.AccountId)
@@ -188,7 +191,7 @@ internal static class LibraryCommands
         var snapshot = LibraryDatabase.ReadSnapshot(install.DatabasePath, install.AccountId);
         var moves = ReferenceRelocation.Plan(snapshot, from, config.Capture);
         var files = moves.GroupBy(m => m.From.Key, StringComparer.Ordinal)
-            .Select(g => (Local: g.First().From.Display, Server: g.First().From.Rebase(from, config.ServerCapture).Display))
+            .Select(g => (Local: g.First().From.Display, Server: g.First().From.Rebase(from, destination).Display))
             .ToList();
         var copies = new List<(string Local, string Server)>();
         var problems = new List<string>();
@@ -201,7 +204,7 @@ internal static class LibraryCommands
             else problems.Add($"{file.Server}: already exists with different content");
         }
         output.WriteLine($"{moves.Count} library path(s) under {from.Display} point to {files.Count} file(s): "
-            + $"{copies.Count} to copy to {config.ServerCapture.Display}, {present} already there, {problems.Count} problem(s).");
+            + $"{copies.Count} to copy to {destination.Display}, {present} already there, {problems.Count} problem(s).");
         foreach (var line in problems.Take(10)) output.WriteLine("  " + line);
         if (problems.Count > 0) throw new UnsafeOperationException("Nothing was changed; resolve the problems above first.");
         if (moves.Count == 0) return 0;

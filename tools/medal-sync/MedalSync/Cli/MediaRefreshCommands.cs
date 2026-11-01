@@ -25,7 +25,7 @@ internal static class MediaRefreshCommands
         var install = MedalEnvironment.Locate();
         if (install.AccountId != config.AccountId) throw new IncompatibleLibraryException("Medal's current account differs from the configured account.");
         var device = state.ExistingDevice();
-        var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        var store = CoordinationStore.Open(config);
         var refresh = new PersistentMediaRefresh(config, state, device, store, () =>
         {
             if (Hashing.Sha256File(state.ConfigPath) != configFileDigest || state.ExistingDevice() != device)

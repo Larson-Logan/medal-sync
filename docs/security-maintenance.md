@@ -52,10 +52,20 @@ branches implicitly.
   Branches need not be up to date first: only `dev` merges into `main`, and
   validation tests the merge result.
 - **dev** selects `refs/heads/dev`. It refuses deletion, so merging a
-  promotion never removes it, and force pushes. It requires a pull request and
+  promotion never removes it, and force pushes. It requires a pull request
+  with resolved review threads, squash merges only, and three checks:
   `Repository checks`, so the source and history privacy audit passes before
-  anything reaches `dev`. Build and test failures may merge; fix them before
-  promoting.
+  anything reaches `dev`; `validate`, which runs the Windows suites the change
+  can affect; and `PR title`, which keeps squashed commit subjects in
+  `type: summary` form. Apply this ruleset only after the
+  [title workflow](../.github/workflows/pull-request-title.yml) is on `dev`,
+  or no pull request can report `PR title`.
+
+The script also sets the repository merge options: squash and merge commits
+titled with the pull request title and described by its body, rebase merging
+off, the Update branch button on and merged branches deleted. Repository
+checks accept a required check only when a workflow that runs on pull
+requests defines it.
 
 The solo-maintainer policy requires zero approving reviews; this does not
 establish independent review. Repository administrators have an emergency

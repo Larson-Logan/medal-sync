@@ -40,7 +40,7 @@ internal static class SetupMaintenance
         var settings = MedalSyncConfig.Load(state.ConfigPath);
         _ = state.ExistingDevice(); // Strictly read-only, including a concurrent missing-file race.
         var journal = readJournal is not null ? readJournal(settings)
-            : CoordinationStore.Open(settings.LibraryCoordinationDirectory, settings.LibraryId, settings.AccountId).ReadJournal();
+            : CoordinationStore.Open(settings).ReadJournal();
         if (journal.State != OwnershipState.Clean || journal.Owner is not null || journal.SessionId is not null)
             throw new UnsafeOperationException("The shared library is not Ready. Cancel setup, finish its session and wait for Ready, then run setup again.");
     }

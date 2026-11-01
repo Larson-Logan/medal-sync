@@ -3,8 +3,9 @@
 Medal Sync supports primary storage on an SMB server or any named rclone remote
 (cloud or a personal server), a persistent local media collection, and cloud
 replicas. Server mode shares one-PC-at-a-time library ownership through the SMB
-journal. Local mode keeps its media and journal on one PC and requires no
-server; replicas send its media to cloud storage.
+journal. Google Drive cloud mode keeps ownership, library generations and media
+in Drive and needs no SMB server. Local mode keeps its media and journal on one
+PC; replicas send its media to cloud storage.
 
 | Mode | Where Medal writes | What stays after handoff |
 | --- | --- | --- |
@@ -12,6 +13,7 @@ server; replicas send its media to cloud storage.
 | Local copy and server | Virtual drive backed by a persistent local folder | Complete referenced media on the local disk and server |
 | Local storage, with optional cloud copies | Virtual drive backed by a persistent local folder | Local media and optional verified cloud copies; no SMB dependency |
 | Cloud or personal-server primary | Virtual drive backed by a persistent local folder | Local media and the rclone primary; journal stays on the server |
+| Google Drive cloud mode | Virtual drive backed by a persistent local folder | Local media, verified Drive media and library history; ownership uses the Drive API |
 | Either mode with cloud replicas | Same recording path as above | Media copied and verified at each reachable cloud destination; offline ones retry later |
 
 The local collection and VFS cache are separate. `localCopyRoot` names a
@@ -170,7 +172,86 @@ SFTP or FTP server, a folder without a leading `/` is relative to the account's
 home directory; start it with `/` for an absolute path, for example
 `sftp-home:/srv/media/Medal`.
 
-See the [cloud primary example](../tools/medal-sync/config/medal-sync.cloud.example.json).
+For Google Drive without an SMB journal, use the cloud mode below.
+
+## Google Drive without a server
+
+Use `--storage-mode cloud` to switch the same library between PCs using only
+Google Drive. Each PC records to its persistent local copy. Drive holds the
+media, normalized library generations and an ownership journal addressed by a
+shared file ID. Ownership changes use the Drive v2 metadata ETag with
+`If-Match`; the companion first checks that the endpoint rejects a mismatching
+ETag. It refuses ownership if conditional writes are unavailable. File names,
+desktop sync status, timeouts and cached Ready state never grant ownership.
+
+Authorize a **direct Google Drive OAuth remote** with rclone as described below.
+Use the same Google account or share the dedicated folder and journal with the
+other PC. Aliases, encrypted wrappers, service accounts and other providers
+cannot host this journal. Use your own OAuth client as recommended in
+[rclone's Google Drive setup](https://rclone.org/drive/#making-your-own-client-id).
+Keep the credential file, local copy, cache and downloaded history outside
+provider desktop sync folders. Each PC keeps its own device identity.
+
+On the first PC, allocate one journal ID. This reserves an ID without creating
+a Drive file; **reuse it on every PC**:
+
+```powershell
+$cli = "$env:ProgramFiles/Medal Sync/bin/medal-sync.exe"
+$credentials = "$HOME/.medal-sync/rclone.conf"
+$journal = & $cli storage cloud-id --remote gdrive:MedalSync --rclone-config $credentials
+& $cli config create --storage-mode cloud --new-library --account-id YOUR_ACCOUNT_ID `
+  --remote gdrive:MedalSync --cloud-journal-id $journal `
+  --local-copy-root E:\MedalLibrary --cache-root E:\MedalCache `
+  --rclone-config $credentials --out "$HOME/medal-sync-candidate.json"
+```
+
+Review the preview, then repeat `config create` with `--apply`. Adopt the
+candidate through the [configuration workflow](getting-started.md#plan-configuration-before-using-live-data)
+or use the native configuration wizard's **Google Drive (no server)** mode.
+The journal ID field is shown in the review. The local `coordinationRoot`
+defaults to the state directory's `coordination` folder; it caches downloaded
+immutable history and is never the ownership authority.
+
+Quit Medal. On the first PC, preview `medal-sync relocate --from ORIGINAL_CAPTURE_FOLDER`,
+then apply it with `--apply`. This copies referenced files into the persistent
+local copy and rewrites library references to the configured virtual capture
+folder; original files and a database backup remain. Preview `medal-sync init`,
+then run `medal-sync init --apply`. Initialization uploads and verifies the
+media and generation 0 before creating the pre-generated Drive journal.
+An interrupted upload can be retried with the exact same local snapshot and
+device. An existing journal is never reinitialized.
+
+On the other PC, configure `--library-id` with the first PC's ID, the same
+`--cloud-journal-id`, Drive folder and capture folder. Choose separate local
+media/cache/history folders and authorize rclone on that PC. **Do not run init
+or enroll again.** Launch Medal through Medal Sync. An empty library joins
+automatically; existing unshared clips refuse replacement and remain protected.
+Export and preserve them before choosing the existing explicit
+`launch --replace-local-library` workflow. There is no automatic union of
+unshared libraries in cloud mode.
+
+Launch restores only library tables, backs up the database, and updates the
+capture-folder setting to the configured virtual drive when necessary; other
+device settings and sign-ins remain on that PC. Missing clips hydrate and
+verify before Medal starts. Quit Medal normally and wait for **Ready** before
+switching. Finish verifies media, uploads and reads back the new generation,
+then conditionally releases ownership. An outage or uncertain acknowledgement
+keeps ownership and local media for recovery on the same PC. Drive must be
+reachable to acquire ownership, even when all clips are already local.
+
+Cloud generations live under `.medal-sync/LIBRARY_ID/generations/` in the
+dedicated Drive folder. They contain clip titles, references and normalized
+library tables; keep that folder private. Full Medal databases, login/device
+settings and provider credentials are not uploaded. Optional cloud replicas
+still contain media only. History, ordinary launch/finish, explicit abandonment
+and optional-copy retry work in cloud mode. Maintenance that needs an SMB
+writer lock (retention, replica pruning and persistent-media refresh) refuses
+cloud mode. Keep the previous primary until migration is independently verified;
+cloud mode does not automatically migrate an existing SMB journal.
+
+The [cloud example](../tools/medal-sync/config/medal-sync.cloud.example.json)
+shows the JSON properties. All participating PCs need a version that supports
+cloud mode; older versions reject it.
 
 ### Switch primaries
 
@@ -191,8 +272,9 @@ A PC that still points at the old primary refuses to start if the library
 needs clips that are missing there and locally. Nothing is lost. The old
 primary is never modified or deleted; remove it yourself once every PC uses the new one.
 
-Enrollment copies, relocation copies, spike promotion and persistent media
-refresh (`refresh-media`) work on folder primaries only. They refuse an rclone primary.
+Enrollment copies, spike promotion and persistent media refresh (`refresh-media`)
+work on folder primaries only. Cloud mode supports first-PC relocation into its
+persistent local copy before initialization; other rclone primaries refuse relocation.
 
 ## Add OneDrive, Dropbox or Google Drive
 
@@ -268,16 +350,18 @@ Omit cloud flags to use local storage alone. The JSON property is
 `"storageMode": "LOCAL"`; configurations without it retain server mode.
 
 Local mode supervises one PC. Do not synchronize its journal between computers
-or reuse its library ID for independent writers. Use server mode and the shared
-SMB journal for automatic cross-PC handoff.
+or reuse its library ID for independent writers. Use server mode with the shared
+SMB journal or Google Drive cloud mode for cross-PC handoff.
 
 ## Verification, conflicts and recovery
 
 Copies use an exact list of known media references, including thumbnails and
 available keyboard overlays. Full Medal databases, native database backups,
 logins, arbitrary metadata paths and the live coordination journal are not
-uploaded. Cloud copies contain media only; use the existing snapshot workflow
-to retain library records separately.
+uploaded by media replication. Optional cloud copies contain media only; use
+the existing snapshot workflow to retain library records separately. Google
+Drive cloud mode separately publishes normalized library generations and its
+ownership metadata, as described above.
 
 Replication uses [rclone copy](https://rclone.org/commands/rclone_copy/) with
 immutable destinations, followed by
@@ -626,13 +710,15 @@ needs `medal-sync launch --replace-local-library` (a backup is kept). Update
 every PC to 1.3.0 or later first; the review warns about any PC that last
 published with an older version.
 
-Cloud folders cannot replace the SMB ownership journal: consumer sync does
-not provide the locking used by this companion. An rclone primary holds media
-only. Cloud-only coordination and
-automatic two-way conflict merging are not supported. Local mode avoids the
-server by keeping coordination on one PC. The reproducible integration suite
+Consumer desktop sync cannot provide the SMB ownership lock. Google Drive
+cloud mode instead uses conditional API metadata updates; other rclone
+primaries still require the SMB journal. Automatic two-way conflict merging
+is not supported. Local mode avoids the server by keeping coordination on one
+PC. The reproducible integration suite
 uses real rclone processes, named local test remotes and real WinFsp mounts.
 It verifies publication, retry, cancellation, retention, versioned updates and
 sequential synthetic PCs without contacting OneDrive, Dropbox or Google Drive.
-Provider-specific account and quota behavior requires separate service
-acceptance when you choose to connect those accounts.
+It also checks Google Drive cloud-mode ownership against a synthetic metadata
+service, including real rclone generation/media transfers and a real WinFsp
+round trip. Provider-specific account, conditional-update and quota behavior
+requires separate live acceptance; see [tests](../tests/README.md).

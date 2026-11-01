@@ -10,7 +10,7 @@ internal sealed record ReleaseAsset(string Version, string Name, string Url, str
     public bool IsSetup => Name == $"medal-sync-{Version}-setup-win-x64.exe";
 }
 
-/// <summary>Best-effort public release discovery. Never installs or sends local state.</summary>
+/// <summary>Best-effort public release discovery and download housekeeping. Never installs or sends local state.</summary>
 internal static partial class ReleaseUpdate
 {
     internal const string LatestUrl = "https://api.github.com/repos/Larson-Logan/medal-sync/releases/latest";
@@ -131,13 +131,76 @@ internal static partial class ReleaseUpdate
         }
     }
 
+    /// <summary>Per-user folder holding one subfolder per verified setup download.</summary>
+    internal static string DownloadsRoot() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MedalSync", "Downloads");
+
+    /// <summary>
+    /// Finds an earlier download of exactly this setup that still matches the release size and SHA-256,
+    /// so a postponed update does not download again. Anything else is ignored, never trusted.
+    /// </summary>
+    internal static string? FindVerifiedDownload(string root, ReleaseAsset asset)
+    {
+        if (!asset.IsSetup || !Directory.Exists(root)) return null;
+        try
+        {
+            foreach (string directory in Directory.EnumerateDirectories(root))
+            {
+                if (new DirectoryInfo(directory).Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                var file = new FileInfo(Path.Combine(directory, asset.Name));
+                if (!file.Exists || file.Attributes.HasFlag(FileAttributes.ReparsePoint) || file.Length != asset.Size) continue;
+                using var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.Read);
+                if (Convert.ToHexString(SHA256.HashData(stream)).Equals(asset.Sha256, StringComparison.OrdinalIgnoreCase))
+                    return file.FullName;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Download again instead. */ }
+        return null;
+    }
+
+    [GeneratedRegex(@"\Amedal-sync-([0-9]+(\.[0-9]+){2,3})-setup-win-x64\.exe\z")]
+    private static partial Regex SetupFile();
+
+    /// <summary>
+    /// Best effort: removes download folders that hold only setups for this version or older, which are
+    /// already installed. Folders with any other content, newer setups or links are left alone.
+    /// </summary>
+    internal static int CleanupDownloads(string root, string installed)
+    {
+        if (!Version.TryParse(installed, out var current) || !Directory.Exists(root)) return 0;
+        int removed = 0;
+        try
+        {
+            foreach (string directory in Directory.EnumerateDirectories(root))
+            {
+                try
+                {
+                    var folder = new DirectoryInfo(directory);
+                    if (folder.Attributes.HasFlag(FileAttributes.ReparsePoint) || folder.EnumerateDirectories().Any()) continue;
+                    var files = folder.GetFiles();
+                    bool installedOnly = files.All(file => !file.Attributes.HasFlag(FileAttributes.ReparsePoint)
+                        && SetupFile().Match(file.Name) is { Success: true } match
+                        && Version.TryParse(match.Groups[1].Value, out var version) && version <= current);
+                    if (!installedOnly) continue;
+                    foreach (var file in files) file.Delete();
+                    folder.Delete();
+                    removed++;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* In use; retry next time. */ }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Nothing to clean. */ }
+        return removed;
+    }
+
     public static void NotifyAtLaunch(Action<string> notify)
     {
+        if (OperatingSystem.IsWindows()) CleanupDownloads(DownloadsRoot(), ToolInfo.Version);
         using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
         using var client = new HttpClient(handler) { Timeout = LaunchTimeout };
         using var timeout = new CancellationTokenSource(LaunchTimeout);
         string? version = CheckAsync(client, ToolInfo.Version, timeout.Token).GetAwaiter().GetResult();
         if (version is not null)
-            notify($"Medal Sync {version} is available. Use Check for Medal Sync updates in the Start menu to download the verified Windows setup. Quit Medal and wait for Ready before running setup.");
+            notify($"Medal Sync {version} is available. Choose Check for updates in the Medal Sync tray menu. It downloads the verified update and installs it for you after you quit Medal.");
     }
 }

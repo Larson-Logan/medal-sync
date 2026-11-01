@@ -33,10 +33,23 @@ internal static class Program
         {
             string rclone = args[Array.IndexOf(args, "--rclone") + 1];
             if (!File.Exists(rclone)) throw new IOException("An explicit pinned rclone executable is required.");
+            if (args.Contains("--cloud-handoff-only"))
+            {
+                CloudHandoff.Run(rclone, Check, testMount: args.Contains("--mount"));
+                Console.WriteLine($"PASS: {_checks} cloud handoff assertions; all data was synthetic.");
+                return 0;
+            }
+            if (args.Contains("--google-drive"))
+            {
+                CloudHandoff.Run(rclone, Check, args[Array.IndexOf(args, "--google-drive") + 1], args[Array.IndexOf(args, "--rclone-config") + 1]);
+                Console.WriteLine($"PASS: {_checks} live Google Drive acceptance assertions; all library data was synthetic.");
+                return 0;
+            }
             TestReplication(rclone);
             TestIncrementalAndReadyRetry(rclone);
             TestReplicaAuditAndPrune(rclone);
             TestCloudPrimary(rclone);
+            CloudHandoff.Run(rclone, Check, testMount: args.Contains("--mount"));
             TestInterruptedTransfer(rclone);
             if (args.Contains("--mount"))
             {

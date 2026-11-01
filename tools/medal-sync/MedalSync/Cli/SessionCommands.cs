@@ -96,8 +96,8 @@ internal static class SessionCommands
         OwnershipRecord journal;
         try
         {
-            if (!Directory.Exists(config.CoordinationRoot)) throw new StorageOfflineException("The coordination root is missing.");
-            store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+            if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) throw new StorageOfflineException("The coordination root is missing.");
+            store = CoordinationStore.Open(config);
             journal = store.ReadJournal();
         }
         catch (IOException)
@@ -137,8 +137,8 @@ internal static class SessionCommands
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
         var device = state.ExistingDevice();
-        if (!Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
-        var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
+        var store = CoordinationStore.Open(config);
         var journal = store.ReadJournal();
         _ = store.Generations.ReadManifest(journal.CommittedGeneration);
         return DesktopStatus.Read(state, config.LibraryId, journal, device, AnotherInstanceRunning(), DateTimeOffset.UtcNow);
@@ -184,14 +184,15 @@ internal static class SessionCommands
         var config = MedalSyncConfig.Load(state.ConfigPath);
         using var instance = SingleInstance();
         if (Directory.Exists(config.LibraryCoordinationDirectory)
-            && CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId).ReadJournal().State != OwnershipState.Clean)
+            && CoordinationStore.Open(config).ReadJournal().State != OwnershipState.Clean)
             throw new UnsafeOperationException("Finish the existing session before initializing another primary.");
         return WritePrimaryInitialization(config, state, apply, output);
     }
 
     internal static int WritePrimaryInitialization(MedalSyncConfig config, LocalState state, bool apply, TextWriter output)
     {
-        if (config.StorageMode != StorageMode.Server) throw new UnsafeOperationException("Local mode keeps media in its own folder; there is no primary to initialize.");
+        if (config.StorageMode == StorageMode.Cloud) throw new UnsafeOperationException("Cloud mode binds its Drive folder to the journal. Use init on the first PC; changing primaries needs a reviewed migration.");
+        if (config.StorageMode == StorageMode.Local) throw new UnsafeOperationException("Local mode keeps media in its own folder; there is no primary to initialize.");
         if (config.Replication?.LocalCopyRoot is null)
             throw new UnsafeOperationException("Switching primaries requires replication.localCopyRoot, so this PC holds every clip to upload.");
         output.WriteLine($"Primary storage: {config.PrimaryCapture}.");
@@ -222,6 +223,8 @@ internal static class SessionCommands
         using var instance = SingleInstance();
         if (new MedalProcess(context.Install).IsRunning()) throw new UnsafeOperationException("Quit Medal from its tray icon first.");
         var snapshot = LibraryDatabase.ReadSnapshot(context.Install.DatabasePath, context.Install.AccountId);
+        if (context.Config.StorageMode == StorageMode.Cloud)
+            return InitCloud(context, snapshot, apply, output);
         var checker = PrimaryStorage.Checker(context.Config, context.State);
         var onServer = checker.OnServer(snapshot);
         var blocking = onServer.Blocking.ToList();
@@ -238,10 +241,40 @@ internal static class SessionCommands
         }
         if (checker is RcloneAssetChecker remote) remote.Initialize(allowExistingMedia: true);
         else StorageIdentity.Initialize(context.Config.ServerCapture.Display, context.Config.LibraryId);
-        CoordinationStore.Create(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, snapshot, AssetManifest.From(onServer),
+        CoordinationStore.Create(context.Config, snapshot, AssetManifest.From(onServer),
             context.Device, SessionCoordinator.NewId(), context.Install.Versions, DateTimeOffset.UtcNow);
         context.Log.Write($"init: generation 0 created from {LibraryCommands.Counts(snapshot)}");
         output.WriteLine("Shared library created as generation 0.");
+        return 0;
+    }
+
+    internal static int CloudId(Arguments args, TextWriter output)
+    {
+        string remote = args.Required("--remote");
+        string credentials = args.Required("--rclone-config");
+        string rclone = args.Value("--rclone-path") ?? ConfigCommands.DefaultRclonePath();
+        args.RequireAllUsed();
+        output.WriteLine(GoogleDriveJournal.GenerateId(Environment.ExpandEnvironmentVariables(rclone), remote, credentials));
+        return 0;
+    }
+
+    private static int InitCloud(Context context, LibrarySnapshot snapshot, bool apply, TextWriter output)
+    {
+        var config = context.Config;
+        var report = new ShareAssetChecker(config.Capture, config.MountedCapture, config.LibraryId, new FileSystemProbe()).OnServer(snapshot);
+        if (report.Blocking.Any()) throw new UnsafeOperationException("Cloud initialization requires all referenced media in the persistent local copy. Preview 'relocate --from ORIGINAL_FOLDER' first.");
+        output.WriteLine($"Google Drive library {config.LibraryId}; journal {config.CloudJournalId}; {report.Items.Count} media references.");
+        if (!apply) { output.WriteLine("Preview only. --apply uploads and verifies local media and generation 0, then creates the Drive ownership journal. No SMB server is required."); return 0; }
+        if (GoogleDriveJournal.For(config).Exists()) throw new UnsafeOperationException("The Drive journal already exists. Join or recover that library; it was not reinitialized.");
+        var checker = new RcloneAssetChecker(config, context.State);
+        checker.Initialize(allowExistingMedia: true);
+        StorageIdentity.Initialize(config.MountedCapture.Display, config.LibraryId);
+        new StorageReplication(config with { Replication = config.Replication! with { ConflictPolicy = ReplicaConflictPolicy.Stop } }, context.State, () =>
+        {
+            if (new MedalProcess(context.Install).IsRunning()) throw new UnsafeOperationException("Quit Medal before initializing cloud storage.");
+        }, primary: checker).Publish(snapshot);
+        CoordinationStore.Create(config, snapshot, AssetManifest.From(report), context.Device, SessionCoordinator.NewId(), context.Install.Versions, DateTimeOffset.UtcNow);
+        output.WriteLine("Google Drive library created. Reuse this library ID and cloud journal ID on the other PC; keep its own device identity.");
         return 0;
     }
 
@@ -266,12 +299,12 @@ internal static class SessionCommands
         using var sessionEnd = new WindowsSessionEnd(shutdown, context.Log.Write);
         // At sign-in the network or WARP can still be starting; an unreachable
         // server after the wait is reported by the normal checks below.
-        if (!Waiting.Until(() => shutdown.Ending || Directory.Exists(context.Config.CoordinationRoot), wait, TimeSpan.FromSeconds(5), new SystemClock()))
+        if (!Waiting.Until(() => shutdown.Ending || context.Config.StorageMode == StorageMode.Cloud || Directory.Exists(context.Config.CoordinationRoot), wait, TimeSpan.FromSeconds(5), new SystemClock()))
         {
             context.Log.Write($"launch: the server was still unreachable after {wait.TotalSeconds:0} s");
         }
         if (shutdown.Ending) return 3;
-        if (!Directory.Exists(context.Config.CoordinationRoot)) return WaitForStorage(context, output, status);
+        if (context.Config.StorageMode != StorageMode.Cloud && !Directory.Exists(context.Config.CoordinationRoot)) return WaitForStorage(context, output, status);
         GuardStartup(context);
         SessionCoordinator coordinator;
         CoordinationStore store;
@@ -412,7 +445,7 @@ internal static class SessionCommands
         var device = state.ExistingDevice();
         var install = MedalEnvironment.Locate();
         if (install.AccountId != config.AccountId) throw new IncompatibleLibraryException("Medal's account differs from this configuration.");
-        var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        var store = CoordinationStore.Open(config);
         var recovery = new AbortedStartRecovery(config, state, store, () =>
         {
             if (Hashing.Sha256File(state.ConfigPath) != fingerprint || state.ExistingDevice() != device)
@@ -433,7 +466,7 @@ internal static class SessionCommands
         args.RequireAllUsed();
         var context = Load();
         using var instance = SingleInstance();
-        var store = CoordinationStore.Open(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, context.Config.AccountId);
+        var store = CoordinationStore.Open(context.Config);
         return WriteAbandon(store, context.Device, session, reason, apply, output, context.Log.Write);
     }
 
@@ -527,7 +560,7 @@ internal static class SessionCommands
         string? launchLink = null, Action<SessionProgress>? progress = null, Func<LaunchPreflight>? preflight = null)
     {
         var clock = new SystemClock();
-        var store = CoordinationStore.Open(context.Config.LibraryCoordinationDirectory, context.Config.LibraryId, context.Config.AccountId);
+        var store = CoordinationStore.Open(context.Config, () => shutdown?.RequireTime());
         double bitrate;
         using (var connection = LibraryDatabase.OpenReadOnly(context.Install.DatabasePath))
         {
@@ -535,7 +568,8 @@ internal static class SessionCommands
                 System.Globalization.CultureInfo.InvariantCulture, out double b) && b > 0 ? b : throw new UnsafeOperationException("Medal's recording bitrate is not set.");
         }
         var mount = new RcloneClipMount(context.Config, context.State, bitrate, clock);
-        var library = new SqliteLocalLibrary(context.Install.DatabasePath, context.Install.AccountId, context.State.BackupDirectory, clock);
+        var library = new SqliteLocalLibrary(context.Install.DatabasePath, context.Install.AccountId, context.State.BackupDirectory, clock,
+            context.Config.StorageMode == StorageMode.Cloud ? context.Config.CaptureFolder : null);
         var checker = PrimaryStorage.Checker(context.Config, context.State, () => shutdown?.RequireTime());
         var options = new SessionOptions(context.Device, context.Config.Capture, context.Install.Versions,
             TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal);

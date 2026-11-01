@@ -39,7 +39,7 @@ internal sealed record MountConfig(
 /// <summary>A Syncthing folder that overlaps the clip destination and must ignore it.</summary>
 internal sealed record SyncExclusion(string FolderId, string Pattern);
 
-internal enum StorageMode { Server, Local }
+internal enum StorageMode { Server, Local, Cloud }
 
 /// <summary>
 /// Per-PC settings in the resolved Medal Sync user state directory.
@@ -60,8 +60,12 @@ internal sealed record MedalSyncConfig(
 {
     public const int CurrentFormat = 1;
 
-    /// <summary>Local mode owns its journal and persistent media on this PC; server mode shares ownership through SMB.</summary>
+    /// <summary>Ownership lives on this PC in local mode, on SMB in server mode, or in Drive metadata in cloud mode.</summary>
     public StorageMode StorageMode { get; init; } = StorageMode.Server;
+
+    /// <summary>A pre-generated Google Drive file ID shared by every PC. Its metadata holds the authoritative journal.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? CloudJournalId { get; init; }
 
     /// <summary>Optional persistent local storage and required media replicas.</summary>
     public ReplicationConfig? Replication { get; init; }
@@ -72,8 +76,8 @@ internal sealed record MedalSyncConfig(
     [System.Text.Json.Serialization.JsonIgnore]
     public string? PersistentMediaRoot => Replication?.LocalCopyRoot ?? (StorageMode == StorageMode.Local ? Remote : null);
 
-    /// <summary>Server-mode primary media on a named rclone remote (cloud or personal server) instead of an SMB share.</summary>
-    public bool PrimaryIsRclone => StorageMode == StorageMode.Server && ReplicationConfig.ValidRemote(Remote);
+    /// <summary>Primary media on a named rclone remote instead of an SMB share or local folder.</summary>
+    public bool PrimaryIsRclone => StorageMode != StorageMode.Local && ReplicationConfig.ValidRemote(Remote);
 
     /// <summary>The capture folder on primary storage: a share path, or an rclone path such as onedrive:MedalSync/Clips.</summary>
     public string PrimaryCapture => PrimaryIsRclone
@@ -131,9 +135,21 @@ internal sealed record MedalSyncConfig(
         if (!CoordinationStore.IsValidId(LibraryId)) problems.Add("libraryId must be 32 lowercase hex characters");
         if (string.IsNullOrEmpty(AccountId) || !AccountId.All(char.IsAsciiDigit)) problems.Add("accountId must be the numeric Medal account ID");
         if (!Enum.IsDefined(StorageMode)) problems.Add("storageMode is not supported");
-        if (StorageMode == StorageMode.Server)
+        if (StorageMode is StorageMode.Server or StorageMode.Cloud)
         {
-            if (!IsUnc(CoordinationRoot)) problems.Add("coordinationRoot must be a UNC path on the private share");
+            if (StorageMode == StorageMode.Server && !IsUnc(CoordinationRoot)) problems.Add("coordinationRoot must be a UNC path on the private share");
+            if (StorageMode == StorageMode.Cloud)
+            {
+                if (!IsLocalFolder(CoordinationRoot)) problems.Add("cloud mode requires a dedicated local coordinationRoot for downloaded history");
+                if (!PrimaryIsRclone) problems.Add("cloud mode requires a named Google Drive rclone remote as primary storage");
+                if (WindowsPath.TryParse(CaptureFolder, out var cloudCapture, out _) && cloudCapture.Segments.FirstOrDefault() == ".medal-sync")
+                    problems.Add("cloud capture must stay outside the reserved .medal-sync history folder");
+                if (!ValidCloudJournalId(CloudJournalId)) problems.Add("cloud mode requires a cloudJournalId from 'storage cloud-id'; reuse it on every PC");
+                if (WindowsPath.TryParse(CoordinationRoot, out var cloudCoordination, out _))
+                    foreach (string other in new[] { CacheRoot, CaptureFolder })
+                        if (WindowsPath.TryParse(other, out var path, out _) && (path.IsWithin(cloudCoordination) || cloudCoordination.IsWithin(path)))
+                            problems.Add("cloud coordination must not overlap cache or capture paths");
+            }
             if (PrimaryIsRclone)
             {
                 // Recording never depends on the network: the drive serves a persistent local copy.
@@ -160,6 +176,7 @@ internal sealed record MedalSyncConfig(
                         problems.Add("local coordination must not overlap cache or capture paths");
             }
         }
+        if (StorageMode != StorageMode.Cloud && CloudJournalId is not null) problems.Add("cloudJournalId is only used in cloud mode");
         if (!WindowsPath.TryParse(CaptureFolder, out var capture, out _) || capture.Root.StartsWith(@"\\", StringComparison.Ordinal) || capture.Segments.Count == 0)
         {
             problems.Add("captureFolder must be a folder on the virtual drive, such as M:\\Clips (Medal rejects drive roots)");
@@ -211,4 +228,7 @@ internal sealed record MedalSyncConfig(
 
     private static bool IsLocalFolder(string value) =>
         WindowsPath.TryParse(value, out var path, out _) && !path.Root.StartsWith(@"\\", StringComparison.Ordinal) && path.Segments.Count > 0;
+
+    internal static bool ValidCloudJournalId(string? value) => value is { Length: >= 10 and <= 200 }
+        && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
 }

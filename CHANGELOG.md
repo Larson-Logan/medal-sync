@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Add Google Drive cloud mode for cross-PC library handoff without an SMB
+  server. Each PC records to a persistent local copy; media and immutable
+  library generations verify in Drive before ownership is released through
+  conditional API metadata updates. Includes journal ID allocation, native
+  configuration, interrupted initialization recovery, competing-start tests
+  and a real rclone/WinFsp cloud handoff scenario. Live provider acceptance
+  remains a separate opt-in test with a disposable synthetic collection.
+- **Check for updates** now installs the update for you. One confirmation
+  downloads the verified setup (or reuses a saved verified download). If Medal
+  is open, an update window waits for you to quit Medal and for uploads to
+  finish, then the status app closes and setup upgrades the same folder
+  unattended and reopens the status panel. Medal is never closed for you.
+  Cancel keeps the installer for later. Download folders for already installed
+  versions are cleaned up.
+
 ## 1.3.1 — 2026-10-31
 
 - Documentation validation now checks local Markdown section anchors, including

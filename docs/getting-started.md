@@ -56,7 +56,9 @@ Repeated sign-in launches also leave an already supervised session alone.
 Use server storage with an SSD cache, keep a persistent local copy that uploads
 back to the server, and optionally add verified OneDrive, Dropbox or Google Drive
 replicas. See [storage choices and configuration](storage.md) for commands and
-multiple-provider examples. SMB remains the shared ownership authority.
+multiple-provider examples. Server mode uses SMB as the shared ownership authority.
+For cross-PC handoff using only Google Drive, follow
+[Google Drive without a server](storage.md#google-drive-without-a-server).
 Local mode keeps media and coordination on this PC, with optional cloud copies
 and no SMB dependency. It does not provide automatic handoff to another PC.
 
@@ -266,7 +268,8 @@ wait for Ready, then choose **Exit Medal Sync** in the panel or tray menu.
 Exit keeps the view open with guidance while supervision or a library operation
 is active. Reopen status at any time. Setup and uninstall require all Medal Sync
 programs to be closed. Setup guidance and update checks are also available from
-the panel; accepting a verified update closes the status app and opens setup.
+the panel; accepting an update waits for you to quit Medal and for Ready, then
+installs it and reopens the status panel.
 Shutdown closes the view
 without interactive prompts while the supervisor keeps its existing finish budget.
 

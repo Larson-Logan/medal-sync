@@ -10,8 +10,11 @@ repository administrator. It is safe to run again:
 3. Warns about any other ruleset, which still applies on top of these. With
    -RemoveOthers it deletes them instead, after the new ones are in place, so
    main is never left unprotected.
-4. Keeps merge commits enabled, which main requires for promotions from dev,
-   and enables automatic deletion of merged topic branches.
+4. Sets the merge options the rulesets rely on: squash for pull requests into
+   dev and merge commits for promotions into main, both titled with the pull
+   request title and described by its body. Rebase merging, which no ruleset
+   allows, is turned off. Enables the Update branch button and automatic
+   deletion of merged topic branches.
 5. Makes dev the default branch, unless -KeepDefaultBranch is given, and lists
    open pull requests that still target main from another branch.
 
@@ -86,8 +89,12 @@ foreach ($other in $existing | Where-Object { $_.name -cnotin $rulesets.Name }) 
     }
 }
 
-# 4 and 5. Merge commits and the default branch.
-$settings = @('api', '--method', 'PATCH', "repos/$Repository", '-F', 'allow_merge_commit=true', '-F', 'delete_branch_on_merge=true', '--silent')
+# 4 and 5. Merge options and the default branch.
+$settings = @('api', '--method', 'PATCH', "repos/$Repository",
+    '-F', 'allow_merge_commit=true', '-F', 'allow_squash_merge=true', '-F', 'allow_rebase_merge=false',
+    '-f', 'merge_commit_title=PR_TITLE', '-f', 'merge_commit_message=PR_BODY',
+    '-f', 'squash_merge_commit_title=PR_TITLE', '-f', 'squash_merge_commit_message=PR_BODY',
+    '-F', 'allow_update_branch=true', '-F', 'delete_branch_on_merge=true', '--silent')
 if (-not $KeepDefaultBranch) { $settings += @('-f', 'default_branch=dev') }
 Invoke-Gh $settings | Out-Null
 if (-not $KeepDefaultBranch) {

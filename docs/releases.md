@@ -62,12 +62,33 @@ recompiles setup from an already verified matching ZIP.
 
 | Branch | Purpose | Rules |
 | --- | --- | --- |
-| `dev` | Default branch. Every pull request targets it; it may be briefly broken. | Pull request required; `Repository checks` (privacy audit, inventory, links, workflow lint) must pass; merge or squash. |
+| `dev` | Default branch. Every pull request targets it. | Pull request required; `Repository checks`, `validate` (for the suites the change affects) and `PR title` must pass; review threads resolved; squash only. |
 | `main` | Always works. Releases are built only from it. | Only `dev` may merge in, through a pull request whose `validate` check ran every suite; merge commits only, so `dev` history and its pull requests carry over. |
 
-To promote, open a pull request from `dev` to `main`, label it `promotion` so
-release notes skip it, and merge it once `validate` is green. Fix anything it
-finds on `dev` first. The branch and tag rules are kept in
+Topic branches start from current `dev`, hold one focused change and are
+named `PREFIX/short-topic`, such as `fix/107-rclone-password-prompt`; agent
+sessions use their own prefix, such as `claude/` or `codex/`. Because pull
+requests into `dev` are squashed, the pull request title becomes the commit on
+`dev` and its line in release notes. Titles read `type: summary` or
+`type(scope): summary`, using one of `feat`, `fix`, `perf`, `docs`, `ci`,
+`build`, `deps`, `refactor`, `test`, `chore`, `release` or `revert`; add `!`
+after the type for a breaking change. The
+[title check](../.github/workflows/pull-request-title.yml) fails other titles
+and sets the release-note label from the type: `feat` and `perf` become
+`enhancement`, `fix` becomes `bug`, `docs` becomes `documentation` and `deps`
+becomes `dependencies`. The title is the source of truth: changing its type
+replaces that label. Forks and Dependabot keep the labels they have.
+
+After a pull request merges, a branch built on top of it needs
+`git rebase --onto origin/dev OLD_BASE`, where `OLD_BASE` is the last commit
+of the merged branch, because the squash commit replaces the original commits. Do not merge `dev` into a topic branch to combine changes for
+testing; branches need not be up to date to merge, and validation tests the
+merge result.
+
+To promote, open a pull request from `dev` to `main` and merge it once
+`validate` is green. Its title is free-form, and the title check labels it
+`promotion` so release notes skip it. Fix anything it finds on `dev` first.
+The branch and tag rules are kept in
 [.github/rulesets](../.github/rulesets); see
 [security maintenance](security-maintenance.md#branches-tags-and-actions).
 

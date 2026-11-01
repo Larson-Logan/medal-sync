@@ -21,9 +21,11 @@ Use Windows, PowerShell 7, the .NET SDK pinned in global.json, Node 24 and
 Python 3.11+. Fork the repository if you do not have write access, clone your
 fork, and create a branch from current `dev`. Use one branch per focused change.
 
-`dev` is the default branch, where all work lands first; it may be briefly
-broken. `main` only receives tested promotions from `dev`, always works, and is
-the only branch releases are built from. See [branches](docs/releases.md#branches).
+`dev` is the default branch, where all work lands first once the checks its
+changes need have passed. `main` only receives tested promotions from `dev`,
+always works, and is the only branch releases are built from. Name your branch
+`PREFIX/short-topic`, such as `fix/107-rclone-password-prompt`. See
+[branches](docs/releases.md#branches).
 See the [test guide](tests/README.md) for the source layout and individual suites.
 
 Tests require no account, server, credentials or recordings. Fixtures are
@@ -86,7 +88,13 @@ establish real reboot, playback, provider sign-in or two-PC acceptance.
 
 ## Open and review a pull request
 
-Target `dev` and use a title that describes the resulting behavior. Explain
+Target `dev` and use a title that describes the resulting behavior in the form
+`type: summary` or `type(scope): summary`, such as
+`fix(storage): retry failed uploads after cache cleanup`. Types are `feat`,
+`fix`, `perf`, `docs`, `ci`, `build`, `deps`, `refactor`, `test`, `chore`,
+`release` and `revert`. Pull requests into `dev` are squashed, so the title
+becomes the commit and the release-note line, and a check enforces the form
+and labels the pull request from its type. Explain
 the problem, link related issues and list the commands and results you checked.
 Use `Closes #123` only when the change fully resolves that issue; pull
 requests merged to `dev` and the issues they close join the next release's

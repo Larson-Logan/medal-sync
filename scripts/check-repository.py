@@ -93,13 +93,16 @@ def content_failures(data):
 def ruleset_failures():
     """Committed rulesets must name their branches and require checks CI reports."""
     folder = root / '.github/rulesets'
-    workflow = root / '.github/workflows/validate.yml'
     if not folder.is_dir():
         return []
-    text = workflow.read_text(encoding='utf-8') if workflow.is_file() else ''
-    jobs = text.split('\njobs:\n', 1)[-1]
-    checks = set(re.findall(r'^  ([A-Za-z0-9_-]+):\s*$', jobs, re.MULTILINE))
-    checks |= {name.strip().strip('\'"') for name in re.findall(r'^    name: (.+)$', jobs, re.MULTILINE)}
+    checks = set()
+    for workflow in sorted((root / '.github/workflows').glob('*.yml')):
+        text = workflow.read_text(encoding='utf-8')
+        if not re.search(r'^  pull_request:', text, re.MULTILINE):
+            continue  # Only pull request runs can satisfy a required check.
+        jobs = text.split('\njobs:\n', 1)[-1]
+        checks |= set(re.findall(r'^  ([A-Za-z0-9_-]+):\s*$', jobs, re.MULTILINE))
+        checks |= {name.strip().strip('\'"') for name in re.findall(r'^    name: (.+)$', jobs, re.MULTILINE)}
     failures, names = [], set()
     for path in sorted(folder.glob('*.json')):
         where = f'.github/rulesets/{path.name}'
@@ -119,7 +122,7 @@ def ruleset_failures():
                 continue
             for check in rule['parameters']['required_status_checks']:
                 if check['context'] not in checks:
-                    failures.append(f'Required check {check["context"]!r} is not a validate.yml job: {where}')
+                    failures.append(f'Required check {check["context"]!r} is not a pull request workflow job: {where}')
     return failures
 
 

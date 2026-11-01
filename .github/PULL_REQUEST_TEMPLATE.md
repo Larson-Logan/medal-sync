@@ -16,6 +16,7 @@
 ## Checklist
 
 - [ ] This pull request targets `dev`. Only promotions from `dev` target `main`.
+- [ ] The title reads `type: summary` (such as `fix(storage): retry failed uploads`); it becomes the squashed commit and the release-note line.
 - [ ] Changes are scoped and use synthetic examples; no private or runtime files are included.
 - [ ] Relevant checks and their results are recorded above; queued or skipped checks are not described as passing.
 - [ ] If files were added, removed or renamed, the public source inventory is refreshed with `python scripts/update-source-manifest.py`.

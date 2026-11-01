@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using MedalSync.Library;
+using MedalSync.Config;
 using MedalSync.Util;
 
 namespace MedalSync.Coordination;
@@ -28,13 +29,37 @@ internal sealed record HandoffRequest(int Format, DeviceIdentity Device, string 
 /// </summary>
 internal sealed partial class CoordinationStore
 {
+    private CloudCoordination? cloud;
+
+    public static CoordinationStore Open(MedalSyncConfig config, Action? requireTime = null)
+    {
+        if (config.StorageMode != StorageMode.Cloud) return Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        return OpenCloud(config, CloudCoordination.For(config, requireTime));
+    }
+
+    internal static CoordinationStore OpenCloud(MedalSyncConfig config, CloudCoordination backend)
+    {
+        var value = backend.Read().Value;
+        var store = new CoordinationStore(config.LibraryCoordinationDirectory, value.Identity, backend);
+        _ = store.ReadJournal();
+        return store;
+    }
+
+    public static void Create(MedalSyncConfig config, LibrarySnapshot snapshot, AssetManifest assets,
+        DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now)
+    {
+        if (config.StorageMode == StorageMode.Cloud) CloudCoordination.For(config).Create(snapshot, assets, device, session, medal, now);
+        else Create(config.LibraryCoordinationDirectory, config.LibraryId, snapshot, assets, device, session, medal, now);
+    }
     private static readonly TimeSpan LockRetry = TimeSpan.FromMilliseconds(200);
 
-    private CoordinationStore(string root, LibraryIdentity identity)
+    private CoordinationStore(string root, LibraryIdentity identity, CloudCoordination? backend = null)
     {
+        cloud = backend;
         Root = root;
         Identity = identity;
-        Generations = new GenerationStore(Path.Combine(root, "generations"), identity.LibraryId, identity.AccountId);
+        Generations = new GenerationStore(Path.Combine(root, "generations"), identity.LibraryId, identity.AccountId,
+            backend is null ? null : () => backend.HighWater);
     }
 
     public string Root { get; }
@@ -54,6 +79,11 @@ internal sealed partial class CoordinationStore
     /// <summary>False when the journal cannot be seen, which distinguishes an outage from a refusal.</summary>
     public bool IsReachable()
     {
+        if (cloud is not null)
+        {
+            try { _ = cloud.Read(); return true; }
+            catch (IOException) { return false; }
+        }
         try { return File.Exists(JournalPath); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
@@ -102,7 +132,7 @@ internal sealed partial class CoordinationStore
 
     public OwnershipRecord ReadJournal()
     {
-        var record = Json.ReadFile<OwnershipRecord>(JournalPath, "Ownership journal");
+        var record = cloud is null ? Json.ReadFile<OwnershipRecord>(JournalPath, "Ownership journal") : cloud.ReadJournal();
         if (record.Format != OwnershipRecord.CurrentFormat) throw new InvalidDataException($"Journal format {record.Format} is not supported.");
         if (record.LibraryId != Identity.LibraryId || record.AccountId != Identity.AccountId)
         {
@@ -118,6 +148,7 @@ internal sealed partial class CoordinationStore
     /// <summary>Applies one transition under the writer lock, checking the revision it was based on.</summary>
     public OwnershipRecord Update(Func<OwnershipRecord, OwnershipRecord> transition, TimeSpan lockTimeout)
     {
+        if (cloud is not null) return cloud.Update(transition);
         using var _ = AcquireWriterLock(lockTimeout);
         var current = ReadJournal();
         var next = transition(current);
@@ -138,6 +169,7 @@ internal sealed partial class CoordinationStore
 
     public IDisposable AcquireWriterLock(TimeSpan timeout)
     {
+        if (cloud is not null) throw new UnsafeOperationException("This maintenance command requires an SMB writer lock and is unavailable in cloud mode. Cloud launch, finish, history and optional-copy retry use conditional journal updates.");
         var deadline = DateTime.UtcNow + timeout;
         while (true)
         {
@@ -161,6 +193,7 @@ internal sealed partial class CoordinationStore
 
     public void WriteRequest(HandoffRequest request)
     {
+        if (cloud is not null) { cloud.Request(request); return; }
         if (!IsValidId(request.Device.DeviceId) || !IsValidId(request.RequestId)) throw new ArgumentException("Invalid request identity.", nameof(request));
         Directory.CreateDirectory(RequestsPath);
         AtomicFile.Replace(Path.Combine(RequestsPath, request.Device.DeviceId + ".json"), Json.Serialize(request));
@@ -181,6 +214,7 @@ internal sealed partial class CoordinationStore
 
     private List<(HandoffRequest Request, DateTimeOffset WrittenAt)> ReadRequests()
     {
+        if (cloud is not null) return cloud.Read().Value.Requests.Select(r => (r, r.RequestedAt)).ToList();
         if (!Directory.Exists(RequestsPath)) return [];
         var requests = new List<(HandoffRequest, DateTimeOffset)>();
         foreach (string file in Directory.EnumerateFiles(RequestsPath, "*.json"))
@@ -212,6 +246,8 @@ internal sealed partial class CoordinationStore
     /// </summary>
     public bool RemoveStaleRequest(HandoffRequest stale)
     {
+        // Cloud requests are pruned under CAS whenever requests change; never remove a newer request by name.
+        if (cloud is not null) return false;
         if (!IsValidId(stale.Device.DeviceId)) return false;
         string path = Path.Combine(RequestsPath, stale.Device.DeviceId + ".json");
         string aside = Path.Combine(RequestsPath, $"{stale.Device.DeviceId}.{Guid.NewGuid():N}.removing");
@@ -240,6 +276,7 @@ internal sealed partial class CoordinationStore
 
     public void RemoveRequest(DeviceIdentity device)
     {
+        if (cloud is not null) { cloud.Request(new(1, device, Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow), remove: true); return; }
         if (!IsValidId(device.DeviceId)) throw new ArgumentException("Invalid device ID.", nameof(device));
         string path = Path.Combine(RequestsPath, device.DeviceId + ".json");
         if (File.Exists(path)) File.Delete(path);

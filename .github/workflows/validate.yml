@@ -3,8 +3,9 @@ name: Medal Sync validation
 # cost no Actions minutes. Never switch these jobs to larger runners, which are
 # always billed. Jobs run in parallel to keep wall time short.
 #
-# Work lands on dev first; dev may be broken. Only dev merges into main, and a
-# pull request into main always runs every suite, so main stays releasable.
+# Work lands on dev first, and validate must pass for the suites a pull request
+# can affect. Only dev merges into main, and a pull request into main always
+# runs every suite, so main stays releasable.
 on:
   push:
     branches: [dev]
