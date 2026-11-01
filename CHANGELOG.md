@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.3.1 — 2026-10-31
+
 - Documentation validation now checks local Markdown section anchors, including
   same-page links, duplicate headings and explicit HTML anchors.
 - Fixed: new configurations use control port 53684 so the clip drive leaves
