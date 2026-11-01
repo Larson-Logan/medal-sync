@@ -23,6 +23,19 @@ internal static partial class MedalEnvironment
 
     internal static MedalInstall Locate(string installDirectory, string dataDirectory)
     {
+        string database = AccountDatabasePath(dataDirectory);
+        string account = AccountDatabase().Match(Path.GetFileName(database)).Groups[1].Value;
+        return new MedalInstall(installDirectory, database, account, Path.Combine(installDirectory, "current", "Medal.exe"), ReadVersions(installDirectory));
+    }
+
+    /// <summary>The signed-in account ID, read from the library file name only. Opens no database.</summary>
+    public static string SignedInAccountId() => SignedInAccountId(DataDirectory);
+
+    internal static string SignedInAccountId(string dataDirectory) =>
+        AccountDatabase().Match(Path.GetFileName(AccountDatabasePath(dataDirectory))).Groups[1].Value;
+
+    private static string AccountDatabasePath(string dataDirectory)
+    {
         if (!Directory.Exists(dataDirectory)) throw new UnsafeOperationException($"Medal's data folder '{dataDirectory}' does not exist.");
         var databases = Directory.EnumerateFiles(dataDirectory, "medal-*.db")
             .Where(p => AccountDatabase().IsMatch(Path.GetFileName(p)))
@@ -32,9 +45,7 @@ internal static partial class MedalEnvironment
             throw new UnsafeOperationException(
                 $"Expected exactly one signed-in Medal library in '{dataDirectory}', found {databases.Count}. Sign in to Medal with the shared account.");
         }
-        string database = databases[0];
-        string account = AccountDatabase().Match(Path.GetFileName(database)).Groups[1].Value;
-        return new MedalInstall(installDirectory, database, account, Path.Combine(installDirectory, "current", "Medal.exe"), ReadVersions(installDirectory));
+        return databases[0];
     }
 
     internal static MedalVersions ReadVersions(string installDirectory)

@@ -526,10 +526,14 @@ public sealed class CliAndConfigTests : IDisposable
         Directory.CreateDirectory(data);
         File.WriteAllText(Path.Combine(data, "medal-guest.db"), "");
         Assert.Throws<UnsafeOperationException>(() => MedalEnvironment.Locate(_fixture.PathFor("Local", "Medal"), data));
+        Assert.Throws<UnsafeOperationException>(() => MedalEnvironment.SignedInAccountId(data));
         File.WriteAllText(Path.Combine(data, "medal-60098.db"), "");
         Assert.Equal("60098", MedalEnvironment.Locate(_fixture.PathFor("Local", "Medal"), data).AccountId);
+        Assert.Equal("60098", MedalEnvironment.SignedInAccountId(data));
         File.WriteAllText(Path.Combine(data, "medal-777.db"), "");
         Assert.Throws<UnsafeOperationException>(() => MedalEnvironment.Locate(_fixture.PathFor("Local", "Medal"), data));
+        Assert.Throws<UnsafeOperationException>(() => MedalEnvironment.SignedInAccountId(data));
+        Assert.Throws<UnsafeOperationException>(() => MedalEnvironment.SignedInAccountId(_fixture.PathFor("Roaming", "Missing")));
     }
 
     [Fact]
