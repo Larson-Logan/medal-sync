@@ -4,8 +4,10 @@ name: Medal Sync validation
 # always billed. Jobs run in parallel to keep wall time short.
 #
 # Work lands on dev first, and validate must pass for the suites a pull request
-# can affect. Only dev merges into main, and a pull request into main always
-# runs every suite, so main stays releasable.
+# can affect. Every push to dev runs every suite. Only dev merges into main, and
+# a promotion's merge result is exactly the dev commit's tree, so a promotion
+# reuses that commit's passing push run, or runs every suite itself. The release
+# workflow runs every suite again, without caches, before it publishes.
 on:
   push:
     branches: [dev]
@@ -25,10 +27,15 @@ on:
 permissions:
   contents: read
 concurrency:
-  # Only superseded PR runs share a group. Calls from release must not contend
-  # with standalone validation or with the caller's release concurrency group.
-  group: validate-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer run replaces a running one for the same pull request, or for dev
+  # pushes: the newer dev commit contains the older one. Calls from release use
+  # their own group, so they never contend with standalone validation or with
+  # the caller's release concurrency group.
+  group: >-
+    validate-${{ github.workflow }}-${{ github.event.pull_request.number
+    || (github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'dev')
+    || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev') }}
 env:
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
@@ -38,7 +45,11 @@ jobs:
   checks:
     name: Repository checks
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A promotion may wait up to 15 minutes for dev's own run of the same commit.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
     outputs:
       unit: ${{ steps.scope.outputs.unit }}
       desktop: ${{ steps.scope.outputs.desktop }}
@@ -89,14 +100,46 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         # public-source.json maps every file to the suites it affects, and the
         # inventory check above proved it is current. Pull requests into dev
-        # run only those suites; pushes and pull requests into main run all.
+        # run only those suites; pushes run all. A promotion into main (already
+        # proven to come from dev) whose merge result is exactly the dev
+        # commit's tree reuses that commit's push run, waiting while it is
+        # still going. Any other outcome runs every suite here.
         run: |
-          if [ "$EVENT_NAME" = pull_request ] && [ "$BASE_REF" != main ]; then
+          run_all() { printf '%s\n' unit=true desktop=true storage=true >>"$GITHUB_OUTPUT"; }
+          reuse_dev() { printf '%s\n' unit=false desktop=false storage=false >>"$GITHUB_OUTPUT"; }
+          if [ "$EVENT_NAME" != pull_request ]; then
+            run_all
+            exit 0
+          fi
+          if [ "$BASE_REF" != main ]; then
             python scripts/update-source-manifest.py --affected HEAD^1 >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          dev="$(git rev-parse HEAD^2)"
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "$(git rev-parse "$dev^{tree}")" ]; then
+            echo "This merge differs from dev at $dev, so every suite runs." >>"$GITHUB_STEP_SUMMARY"
+            run_all
+            exit 0
+          fi
+          runs="repos/$REPO/actions/workflows/validate.yml/runs?branch=dev&event=push&head_sha=$dev"
+          for _ in $(seq 60); do
+            # On an API error gh prints the error body, so discard it and run every suite.
+            run="$(gh api "$runs" --jq '.workflow_runs[0] // {} | "\(.status // "none") \(.conclusion // "none") \(.html_url // "")"')" || run='none none'
+            read -r status conclusion url <<<"$run"
+            if [ "$status" = completed ] || [ "$status" = none ]; then break; fi
+            echo "Waiting for dev's validation of $dev ($status): $url"
+            sleep 15
+          done
+          if [ "$conclusion" = success ]; then
+            echo "Every suite already passed for dev at $dev, which this merge matches exactly: $url" >>"$GITHUB_STEP_SUMMARY"
+            reuse_dev
           else
-            printf '%s\n' unit=true desktop=true storage=true >>"$GITHUB_OUTPUT"
+            echo "dev at $dev has no passing validation run ($status, $conclusion), so every suite runs." >>"$GITHUB_STEP_SUMMARY"
+            run_all
           fi
 
   unit-tests:
@@ -253,7 +296,7 @@ jobs:
 
   # The required check for main. It passes only when every suite passed, or a
   # suite was skipped because the source inventory showed the change cannot
-  # affect it.
+  # affect it, or because a promotion reused dev's passing run.
   validate:
     if: ${{ !cancelled() }}
     needs: [checks, unit-tests, windows-build, storage-integration]

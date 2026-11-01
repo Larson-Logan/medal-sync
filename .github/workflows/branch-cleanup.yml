@@ -1,6 +1,7 @@
 name: Clean up closed PR branches
-# Only same-repository PRs need cleanup; fork PR tokens remain read-only.
-# Always check out trusted default-branch code, including on unmerged closures.
+# The repository setting deletes merged branches, so this handles only pull
+# requests closed without merging. Only same-repository PRs need cleanup; fork
+# PR tokens remain read-only. Always check out trusted default-branch code.
 on:
   pull_request:
     types: [closed]
@@ -18,7 +19,8 @@ jobs:
   cleanup:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (!github.event.pull_request.merged &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -31,11 +33,9 @@ jobs:
           persist-credentials: false
           sparse-checkout: scripts/cleanup-pr-branch.py
           sparse-checkout-cone-mode: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.13'
+      # The script uses only the standard library, so the runner's Python is enough.
       - name: Delete the closed PR branch if it is still unused and unchanged
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
-        run: python scripts/cleanup-pr-branch.py --repository "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --apply
+        run: python3 scripts/cleanup-pr-branch.py --repository "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --apply

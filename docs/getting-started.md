@@ -142,9 +142,14 @@ to check its work.
 
 Run `medal-sync-launch.exe --configure`, choose **Configure** from the status
 tray menu, or accept the wizard offered by an unconfigured desktop launch.
-Choose local storage or server (SMB) storage and explicitly choose a new library
-ID or enter the existing ID to join. Supply the account ID from `medal-sync
-inspect`, storage/coordination/cache folders, capture drive and folder, and
+Choose server (SMB), local or Google Drive storage; the wizard then shows only
+the fields that mode uses, each with a short explanation and example, and
+ignores values in hidden fields. Explicitly choose a new library ID or enter the
+existing ID to join. A new setup fills in the Medal account ID from the account
+signed in on this PC (it reads only the library file name); if none is found,
+sign in to Medal and choose **Detect**, or enter the ID from `medal-sync
+inspect`. Supply the storage, coordination and cache folders (**Browse...**
+picks folders and the rclone/credential files), capture drive and folder, and
 optional persistent local copy and cloud targets (`name=remote:folder`, one per
 line). Prefix a target with `required ` to require verification before handoff,
 or `optional ` to allow retry later. Existing targets show their requirement;
