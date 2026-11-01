@@ -32,6 +32,13 @@ and [security reporting](../SECURITY.md).
 | Technology | `.NET`, `github_actions` |
 | Existing GitHub conventions | `duplicate`, `invalid`, `wontfix`, `help wanted`, `good first issue` |
 
+On same-repository pull requests, the
+[title check](../.github/workflows/pull-request-title.yml) sets `bug`,
+`enhancement`, `documentation` or `dependencies` from the title's type and
+`promotion` on pull requests into `main`, removing the others among those
+five. Edit the title rather than the label to change it. Label fork pull
+requests by hand; Dependabot applies its own.
+
 Use `good first issue` only for a bounded task with a clear reproduction or
 acceptance condition and no need for production access. Labels classify work;
 they do not substitute for an explanation.
@@ -164,7 +171,7 @@ Validate the resulting manifests and lock files together.
 
 [Release-note categories](../.github/release.yml) use the type labels to group
 fixes, features, documentation and dependencies, with a catch-all for other
-changes. Maintainers still review generated notes, compatibility limits and
+changes such as `ci`, `refactor` or `release` pull requests. Maintainers still review generated notes, compatibility limits and
 acceptance evidence before publishing. See [the release process](releases.md).
 
 GitHub references: [issue form syntax](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-issue-forms),

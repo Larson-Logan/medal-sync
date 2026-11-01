@@ -1,0 +1,69 @@
+name: Pull request title
+# Pull requests into dev are squashed, so the title becomes the commit subject
+# on dev and the line in generated release notes. It must read
+# "type: summary" or "type(scope): summary", and its type sets the release-note
+# label. Promotions into main keep any title and get the promotion label.
+#
+# No code is checked out or run. Same-repository pull requests get labels;
+# fork tokens are read-only, so maintainers label those by hand. Dependabot
+# applies its own labels from dependabot.yml.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+permissions: {}
+concurrency:
+  group: pull-request-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  title:
+    name: PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Check the title and set its release-note label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          CURRENT: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          CAN_LABEL: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
+        run: |
+          types='feat|fix|perf|docs|ci|build|deps|refactor|test|chore|release|revert'
+          # Labels this workflow owns; at most one is kept, matching the title.
+          managed=(bug enhancement documentation dependencies promotion)
+
+          if [ "$BASE" = main ]; then
+            want=promotion
+          elif [[ "$TITLE" =~ ^($types)(\([a-z0-9._/-]+\))?!?:\ [^[:space:]] ]]; then
+            case "${BASH_REMATCH[1]}" in
+              feat|perf) want=enhancement ;;
+              fix) want=bug ;;
+              docs) want=documentation ;;
+              deps) want=dependencies ;;
+              *) want='' ;;
+            esac
+          else
+            echo "::error::Title must read 'type: summary' or 'type(scope): summary', where type is one of: ${types//|/, }. Example: 'fix(storage): retry failed uploads after cache cleanup'."
+            exit 1
+          fi
+          echo "Title is valid. Release-note label: ${want:-none}."
+
+          if [ "$CAN_LABEL" != true ]; then
+            echo "Labels are left to maintainers for pull requests from $AUTHOR or forks."
+            exit 0
+          fi
+          for label in "${managed[@]}"; do
+            has="$(jq -r --arg l "$label" 'index($l) != null' <<<"$CURRENT")"
+            if [ "$label" = "$want" ] && [ "$has" = false ]; then
+              gh api --method POST "repos/$REPO/issues/$NUMBER/labels" -f "labels[]=$label" --silent
+              echo "Added label '$label'."
+            elif [ "$label" != "$want" ] && [ "$has" = true ]; then
+              gh api --method DELETE "repos/$REPO/issues/$NUMBER/labels/$(jq -rn --arg l "$label" '$l|@uri')" --silent
+              echo "Removed label '$label'."
+            fi
+          done
