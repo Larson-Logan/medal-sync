@@ -104,27 +104,19 @@ internal sealed class StartupIntegration(string stateRoot, string launcher, Regi
     /// <summary>Puts Medal's saved entries back and retires the originals file. Returns what changed.</summary>
     public IReadOnlyList<string> Restore()
     {
-        // Under the same lock as the supervisor's repair, and with the originals file retired
-        // first, so a repair that runs during or after this sees the integration as off.
+        // Under the same lock as the supervisor's repair, so a repair in progress finishes first
+        // and none can run until the originals file is retired. The file is retired only after
+        // every entry is back: an interrupted restore stays opted in and can simply be retried.
         using var _ = StartupEntries.Lock();
         if (!Enabled) throw new MedalSyncException("Medal does not start through Medal Sync, so there is nothing to put back.");
         var saved = Json.ReadFile<StartupOriginals>(OriginalsPath, "saved Medal startup entries");
         if (saved.Format != 1) throw new InvalidDataException($"Unsupported format in '{OriginalsPath}'. Nothing was changed.");
         string stamp = now().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        var done = PutBack(saved, stamp);
         string retired = $"{OriginalsPath}.restored-{stamp}";
         File.Move(OriginalsPath, retired);
-        try
-        {
-            var done = PutBack(saved, stamp);
-            done.Add($"kept the saved originals as '{retired}'");
-            return done;
-        }
-        catch
-        {
-            // Stay opted in so the entries can be restored again; nothing is lost.
-            File.Move(retired, OriginalsPath);
-            throw;
-        }
+        done.Add($"kept the saved originals as '{retired}'");
+        return done;
     }
 
     private List<string> PutBack(StartupOriginals saved, string stamp)
