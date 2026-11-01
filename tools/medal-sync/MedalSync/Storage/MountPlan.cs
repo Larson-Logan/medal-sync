@@ -38,6 +38,13 @@ internal static class MountPlan
     private const long MiB = 1024L * 1024;
     private const long GiB = 1024 * MiB;
 
+    /// <summary>
+    /// How far rclone fetches ahead of the reader into the SSD cache. Without it rclone stays only
+    /// <c>--buffer-size</c> (16 MiB, seconds of a clip) ahead, so playback over a slow or distant link stalls.
+    /// Most clips fit, so playing one pulls it into the cache.
+    /// </summary>
+    public const long PlaybackReadAheadBytes = 256 * MiB;
+
     public static IReadOnlyList<string> Arguments(MountSettings settings)
     {
         Validate(settings);
@@ -50,6 +57,7 @@ internal static class MountPlan
             "--vfs-cache-min-free-space", Size(settings.MinFreeBytes),
             "--vfs-cache-max-age", Duration(settings.CacheMaxAge),
             "--vfs-cache-poll-interval", Duration(settings.CachePollInterval),
+            "--vfs-read-ahead", Size(PlaybackReadAheadBytes),
             "--dir-cache-time", Duration(settings.DirCacheTime),
             "--transfers", settings.Transfers.ToString(CultureInfo.InvariantCulture),
             "--cache-dir", settings.CacheDirectory,
@@ -63,9 +71,12 @@ internal static class MountPlan
         return arguments;
     }
 
-    /// <summary>An upload limit as rclone reads it: whole MiB/s, or <c>off</c> for unlimited.</summary>
+    /// <summary>
+    /// An upload limit as rclone reads it: whole MiB/s for uploads with downloads unlimited, or <c>off</c> for
+    /// unlimited. A bare rate would also cap downloads, which throttles clip playback.
+    /// </summary>
     internal static string Rate(int? bandwidthMiB) =>
-        bandwidthMiB is { } limit ? limit.ToString(CultureInfo.InvariantCulture) + "Mi" : "off";
+        bandwidthMiB is { } limit ? limit.ToString(CultureInfo.InvariantCulture) + "Mi:off" : "off";
 
     public static void Validate(MountSettings settings)
     {

@@ -25,13 +25,14 @@ internal sealed class MountUploadLimit(MountConfig mount)
     /// </summary>
     public string? Apply(RcloneControl? control, bool recording)
     {
-        string rate = MountPlan.Rate(mount.UploadLimitMiB(recording));
+        int? limitMiB = mount.UploadLimitMiB(recording);
+        string rate = MountPlan.Rate(limitMiB);
         if (_rate == rate) return null;
         string? answer = control?.Call("core/bwlimit", JsonSerializer.Serialize(new Dictionary<string, string> { ["rate"] = rate }),
             TimeSpan.FromSeconds(5));
         if (answer is null)
         {
-            string limit = rate == "off" ? "unlimited" : $"{rate[..^2]} MiB/s";
+            string limit = limitMiB is { } value ? $"{value} MiB/s" : "unlimited";
             return recording
                 ? $"The clip drive's upload limit could not be set to {limit} for recording. Recording continues; uploads may use more bandwidth until it is set."
                 : $"The clip drive's upload limit could not be set to {limit} for finishing. Uploads continue at the recording limit.";

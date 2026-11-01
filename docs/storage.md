@@ -94,13 +94,25 @@ Each is 1 to 10000 MiB/s, or `null` (the default) for unlimited. The limit
 moves to the finishing value when Medal exits, and back if Medal reopens before
 the switch completes. If the drive does not accept a change, a notice says so
 and the session continues at the previous speed; the limit never blocks
-recording or finishing. `mount-plan` shows the recording limit as `--bwlimit`.
+recording or finishing. `mount-plan` shows the recording limit as `--bwlimit`,
+for example `5Mi:off`: the limit applies to uploads only, so playing clips
+from the server is never slowed by it.
 
 A limit only changes speed. Uploads take longer, so more clips wait on the SSD
 cache, but launch already reserves room for a whole session as if nothing
 uploads, and the low disk space notices above still apply. Drain, verification
 and ownership work the same way. Cloud copies use `replication.bandwidthLimitMiB`
 instead.
+
+### Play clips away from the server
+
+Playing a clip that is not in the SSD cache reads it from the server. The clip
+drive fetches up to 256 MiB ahead of the player into the cache, so most clips
+download completely soon after playback starts and a slow or distant link
+(a VPN, tunnel or another network) does not run out after a few seconds.
+Played clips stay in the cache for `mount.cacheMaxAgeSeconds` after they are
+closed. If the connection to the server is slower than the clip's bitrate,
+let the clip load for a moment before playing, or play it again once cached.
 
 ## Keep a local copy and upload to the server
 

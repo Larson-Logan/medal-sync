@@ -122,7 +122,7 @@ public sealed class RcloneControlTests
         Assert.Null(limit.Apply(control, recording: false));
         Assert.Null(limit.Apply(control, recording: false));
         Assert.Null(limit.Apply(control, recording: true));
-        Assert.Equal(["{\"rate\":\"off\"}", "{\"rate\":\"5Mi\"}"], bodies);
+        Assert.Equal(["{\"rate\":\"off\"}", "{\"rate\":\"5Mi:off\"}"], bodies);
 
         // Attaching to a drive started elsewhere: its rate is unknown, so it is set once.
         limit.Reset();
