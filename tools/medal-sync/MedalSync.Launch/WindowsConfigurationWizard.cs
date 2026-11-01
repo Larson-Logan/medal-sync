@@ -74,8 +74,8 @@ internal sealed class WindowsConfigurationWizard : Form
         var fields = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Padding = new Padding(0, 12, 12, 12) };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210));
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        _mode.Items.AddRange(["Server (SMB)", "Local storage"]);
-        _mode.SelectedIndex = _existing?.StorageMode == StorageMode.Local ? 1 : 0;
+        _mode.Items.AddRange(["Server (SMB)", "Local storage", "Google Drive (no server)"]);
+        _mode.SelectedIndex = _existing?.StorageMode == StorageMode.Cloud ? 2 : _existing?.StorageMode == StorageMode.Local ? 1 : 0;
         Add(fields, "Storage &mode", _mode);
         _identity.Items.AddRange(["Create a new library ID", "Join an existing library ID"]);
         _identity.SelectedIndex = _existing is null ? 0 : 1;
@@ -89,6 +89,7 @@ internal sealed class WindowsConfigurationWizard : Form
         _fields["account"].ReadOnly = _existing is not null;
         Field(fields, "remote", "&Storage folder", _existing?.Remote ?? "");
         Field(fields, "coordination", "&Coordination folder", _existing?.CoordinationRoot ?? Path.Combine(state.Root, "coordination"));
+        Field(fields, "cloudJournal", "Drive journal ID (cloud mode)", _existing?.CloudJournalId ?? "");
         Field(fields, "capture", "Capture folder / &drive", _existing?.CaptureFolder ?? @"M:\Clips");
         Field(fields, "cache", "SSD cac&he folder", _existing?.CacheRoot ?? "");
         Field(fields, "rclone", "&Rclone executable", _existing?.RclonePath ?? ConfigCommands.DefaultRclonePath());
@@ -189,7 +190,8 @@ internal sealed class WindowsConfigurationWizard : Form
             },
             _existing is not null && !_editedNumbers.Contains(_hours) ? _existing.MaxSessionHours : (double)_hours.Value, exclusions)
         {
-            StorageMode = _mode.SelectedIndex == 1 ? StorageMode.Local : StorageMode.Server,
+            StorageMode = _mode.SelectedIndex == 2 ? StorageMode.Cloud : _mode.SelectedIndex == 1 ? StorageMode.Local : StorageMode.Server,
+            CloudJournalId = Optional("cloudJournal"),
             Replication = replication.LocalCopyRoot is null && replication.RcloneConfigPath is null && targets.Count == 0 ? null : replication,
         };
     }
@@ -270,7 +272,7 @@ internal sealed class WindowsConfigurationWizard : Form
 
     private static void RequireReady(MedalSyncConfig config)
     {
-        var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        var store = CoordinationStore.Open(config);
         var journal = store.ReadJournal();
         _ = store.Generations.ReadManifest(journal.CommittedGeneration);
         if (journal.State != OwnershipState.Clean || journal.Owner is not null || journal.SessionId is not null)

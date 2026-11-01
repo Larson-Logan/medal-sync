@@ -56,7 +56,7 @@ internal static class HistoryCommands
         try
         {
             if (!Directory.Exists(config.CoordinationRoot)) throw new StorageOfflineException("The coordination root is missing.");
-            var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+            var store = CoordinationStore.Open(config);
             return (store, store.ReadJournal().CommittedGeneration);
         }
         catch (IOException)

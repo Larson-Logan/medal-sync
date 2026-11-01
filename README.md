@@ -62,10 +62,13 @@ next launch can retry. Nothing is handed off until it is verified.
 | Server with SSD cache | Record through a cached virtual drive; the collection lives on your SMB server. |
 | Local copy and server | Keep a complete collection on a local disk and upload it to the server before switching PCs. |
 | Local storage only | Keep media and coordination on one PC. No server needed. |
-| Cloud or personal-server primary | Use any rclone remote as primary storage, with a persistent local copy. |
+| Cloud or personal-server primary | Use any rclone remote as primary storage, with a persistent local copy and an SMB journal. |
+| Google Drive without a server | Keep a local recording copy; use Drive for media, library history and cross-PC ownership. |
 | Cloud copies (add-on) | Add OneDrive, Dropbox, Google Drive or other rclone destinations to any mode. |
 
-Server modes share the library between PCs. Local storage only stays on one PC.
+Server modes and Google Drive cloud mode share the library between PCs. Local
+storage only stays on one PC. [Google Drive cloud setup](docs/storage.md#google-drive-without-a-server)
+requires no SMB server.
 The [storage guide](docs/storage.md) explains each mode, drive and file system
 requirements, and how to set them up.
 
@@ -107,12 +110,14 @@ verification and recovery.
 ## Limits
 
 - **Serial handoff only.** One PC owns the library at a time. Server modes use
-  an SMB coordination share; local storage only does not hand off between PCs.
+  an SMB coordination share; Google Drive cloud mode uses conditional API
+  updates. Local storage only does not hand off between PCs.
 - **No deletion sync.** Deleting a clip is not propagated to other copies.
   Cloud copies keep older files. Destination conflicts stop by default;
   optional versioned updates keep the previous file before replacing it.
 - **Private data stays private.** Provider credentials, Medal logins and full
-  Medal databases are never copied to shared storage or cloud copies.
+  Medal databases are never copied to shared storage or cloud copies. Cloud
+  mode stores normalized library snapshots and history in the private Drive folder.
 - **Conservative by design.** Unknown database schemas, uncertain uploads and
   unreviewed removals stop handoff and keep ownership and the cache.
 - **Testing.** Automated tests use synthetic data. Real provider sign-in,

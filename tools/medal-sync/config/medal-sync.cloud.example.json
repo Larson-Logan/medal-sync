@@ -2,8 +2,10 @@
   "format": 1,
   "libraryId": "00000000000000000000000000000000",
   "accountId": "0",
-  "coordinationRoot": "\\\\192.0.2.10\\Data\\AppData\\MedalSync",
-  "remote": "sftp-home:MedalSync",
+  "storageMode": "CLOUD",
+  "cloudJournalId": "EXAMPLE_REPLACE_WITH_PREGENERATED_DRIVE_FILE_ID",
+  "coordinationRoot": "C:\\MedalSyncHistory",
+  "remote": "gdrive:MedalSync",
   "captureFolder": "M:\\Clips",
   "cacheRoot": "E:\\MedalCache",
   "rclonePath": "%USERPROFILE%\\.medal-sync\\bin\\rclone.exe",
@@ -27,12 +29,6 @@
   "replication": {
     "localCopyRoot": "E:\\MedalLibrary",
     "rcloneConfigPath": "%USERPROFILE%\\.medal-sync\\rclone.conf",
-    "targets": [
-      {
-        "name": "backup",
-        "remote": "onedrive:MedalReplica",
-        "required": false
-      }
-    ]
+    "targets": []
   }
 }

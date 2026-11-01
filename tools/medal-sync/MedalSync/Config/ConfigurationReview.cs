@@ -51,6 +51,7 @@ internal sealed class ConfigurationReview
         + $"{(ReplacesExisting ? "Change existing setup (identity retained)" : _newLibrary ? "New library (not initialized)" : "Join existing library (not enrolled)")}\r\n"
         + $"Library: {Config.LibraryId}; account: {Config.AccountId}\r\n"
         + $"Storage mode: {Config.StorageMode}\r\nStorage: {Config.Remote}\r\nCoordination: {Config.CoordinationRoot}\r\n"
+        + (Config.StorageMode == StorageMode.Cloud ? $"Google Drive journal ID: {Config.CloudJournalId} (reuse on every PC; local history cache is not ownership)\r\n" : "")
         + $"Capture: {Config.CaptureFolder} (drive {Config.Capture.Root})\r\nCache: {Config.CacheRoot}\r\n"
         + $"Cache limit: {Config.Mount.CacheMaxGiB} GiB; minimum free space: {Config.Mount.MinFreeGiB} GiB; planned session: {Config.MaxSessionHours} hours\r\n"
         + $"Persistent local copy: {Config.Replication?.LocalCopyRoot ?? "none"}\r\n"
@@ -61,7 +62,10 @@ internal sealed class ConfigurationReview
         + $"Sync exclusions: {string.Join(", ", Config.SyncExclusions.Select(e => e.FolderId + " = " + e.Pattern))}\r\n\r\n"
         + (ReplacesExisting ? "Saving creates a backup before atomic replacement.\r\n" : "Saving creates configuration only; device identity is created by the existing enrollment workflow.\r\n")
         + "Next: quit Medal normally; preserve a verified database/media backup; verify assets and sync exclusions. "
-        + (_newLibrary ? "Preview init only for this genuinely new library, then explicitly apply." : "Preview enroll for this existing library, then explicitly apply.")
+        + (Config.StorageMode == StorageMode.Cloud
+            ? _newLibrary ? "Preview relocate from the original capture folder, then init. Review each operation before applying."
+                : "Join using the same library ID, Drive journal ID, Drive folder and capture path. Preserve this PC's own clips; launch refuses unshared changes."
+            : _newLibrary ? "Preview init only for this genuinely new library, then explicitly apply." : "Preview enroll for this existing library, then explicitly apply.")
         + " Authorize cloud providers separately with rclone config. No journal, mount, Medal database or startup entry is changed here.";
 
     private static string Requirement(bool required) => required ? "required" : "optional";

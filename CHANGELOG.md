@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add Google Drive cloud mode for cross-PC library handoff without an SMB
+  server. Each PC records to a persistent local copy; media and immutable
+  library generations verify in Drive before ownership is released through
+  conditional API metadata updates. Includes journal ID allocation, native
+  configuration, interrupted initialization recovery, competing-start tests
+  and a real rclone/WinFsp cloud handoff scenario. Live provider acceptance
+  remains a separate opt-in test with a disposable synthetic collection.
+
 ## 1.3.1 — 2026-10-31
 
 - Documentation validation now checks local Markdown section anchors, including

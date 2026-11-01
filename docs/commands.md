@@ -102,7 +102,8 @@ library, for example a copy.
 | Command | What it does |
 | --- | --- |
 | `config create ... --out FILE [--apply]` | Previews, then creates, a new configuration file. Options are listed below. |
-| `init [--apply]` | Creates a new shared library from this PC as generation 0. Every clip must already be on primary storage. Only for a new library; never run it against an existing journal. |
+| `storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]` | Allocates one pre-generated Google Drive journal ID for a new cloud library. Prints only the ID; creates no Drive file. Reuse it with `config create --storage-mode cloud --cloud-journal-id ID` on every PC. |
+| `init [--apply]` | Creates a new shared library from this PC as generation 0. Every clip must already be on primary storage; cloud mode instead uploads and verifies the persistent local copy first. Only for a new library; never run it against an existing journal. |
 | `enroll --out DIR [--apply]` | Adds this PC to an existing library. The preview writes a review of the merged library to `DIR`; apply uses that exact review. |
 | `enroll recover --out DIR [--apply]` | Restores the merged library and this PC's original device settings from an interrupted enrollment's review. Run `finish` afterwards. |
 | `storage init-primary [--apply]` | Marks a new, empty primary folder or rclone remote for this library, so you can [switch primaries](storage.md#switch-primaries). Needs `replication.localCopyRoot` and a Ready library. |
@@ -123,8 +124,9 @@ library, for example a copy.
 | `--new-library` or `--library-id ID` | Exactly one. Use `--library-id` with the existing ID when adding another PC. |
 | `--cache-root DIR` | Local SSD folder for the clip drive's cache. Required. |
 | `--remote PATH` | Primary storage: a UNC share, a named rclone remote and folder, or in local mode a local folder. Required. |
-| `--coordination-root PATH` | Folder for the ownership journal. A UNC share in server mode (required); in local mode it defaults to `coordination` in the state root. |
-| `--storage-mode server\|local` | Default `server`. |
+| `--coordination-root PATH` | UNC journal share in server mode (required). Local/cloud modes default to `coordination` in the state root; in cloud mode this is only a history cache. |
+| `--storage-mode server\|local\|cloud` | Default `server`. Cloud mode provides [Google Drive handoff without SMB](storage.md#google-drive-without-a-server). |
+| `--cloud-journal-id ID` | Required in cloud mode. Allocate once with `storage cloud-id`; use the same ID on every PC. |
 | `--capture-folder PATH` | Folder Medal records into on the clip drive. Default `M:\Clips`. |
 | `--rclone-path FILE` | rclone executable. Defaults to the bundled copy beside `medal-sync.exe`. |
 | `--local-copy-root DIR` | Keep a persistent local copy of the collection. |

@@ -30,8 +30,9 @@ internal static class ConfigCommands
         string cache = args.Required("--cache-root");
         string remote = args.Required("--remote");
         string mode = args.Value("--storage-mode") ?? "server";
-        if (mode is not ("server" or "local")) throw new UsageException("--storage-mode must be server or local.");
-        string coordination = args.Value("--coordination-root") ?? (mode == "local"
+        if (mode is not ("server" or "local" or "cloud")) throw new UsageException("--storage-mode must be server, local or cloud.");
+        string? journal = args.Value("--cloud-journal-id");
+        string coordination = args.Value("--coordination-root") ?? (mode != "server"
             ? Path.Combine(LocalState.ForCurrentUser().Root, "coordination") : throw new UsageException("--coordination-root is required for server mode."));
         string target = Path.GetFullPath(args.Required("--out"));
         string? library = args.Value("--library-id");
@@ -58,13 +59,14 @@ internal static class ConfigCommands
             new MountConfig(5, 20, 20, 300, 30, 1000, 2, spike ? 53683 : MountConfig.DefaultControlPort), 4,
             spike || folder is null ? [] : [new SyncExclusion(folder, pattern)])
         {
-            StorageMode = mode == "local" ? StorageMode.Local : StorageMode.Server,
+            StorageMode = mode == "cloud" ? StorageMode.Cloud : mode == "local" ? StorageMode.Local : StorageMode.Server,
+            CloudJournalId = journal,
             Replication = localCopy is null && cloudRemote is null && cloudConfig is null && conflicts == "stop" ? null
                 : new ReplicationConfig(localCopy, cloudConfig, cloudRemote is null ? [] : [new ReplicaTarget("cloud", cloudRemote)])
                     { ConflictPolicy = conflicts == "version" ? ReplicaConflictPolicy.Version : ReplicaConflictPolicy.Stop },
         };
         config.Validate();
-        if (spike && !config.RemoteRoot.Segments.LastOrDefault("").Contains("spike", StringComparison.OrdinalIgnoreCase))
+        if (spike && (config.PrimaryIsRclone || !config.RemoteRoot.Segments.LastOrDefault("").Contains("spike", StringComparison.OrdinalIgnoreCase)))
             throw new UsageException("A spike remote must end in a folder whose name contains 'spike'.");
         byte[] bytes = Json.Serialize(config);
         if (!apply)

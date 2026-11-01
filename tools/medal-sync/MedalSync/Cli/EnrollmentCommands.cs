@@ -31,7 +31,7 @@ internal static class EnrollmentCommands
         if (review.LibraryId != config.LibraryId || review.DeviceId != device.DeviceId || install.AccountId != config.AccountId)
             throw new UnsafeOperationException("Enrollment recovery belongs to another device, library or account.");
         var candidate = LibrarySnapshot.FromCanonicalJson(File.ReadAllBytes(Path.Combine(directory, "candidate.json")));
-        var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        var store = CoordinationStore.Open(config);
         var journal = store.ReadJournal();
         if (candidate.Digest() != review.CandidateDigest || store.Generations.Read(journal.CommittedGeneration).Snapshot.Digest() != review.CandidateDigest
             || journal.Owner?.DeviceId != device.DeviceId || journal.State != OwnershipState.Draining)
@@ -88,7 +88,7 @@ internal static class EnrollmentCommands
         try
         {
             if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Quit Medal from its tray before preparing or applying enrollment.");
-            var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+            var store = CoordinationStore.Open(config);
             var journal = store.ReadJournal();
             if (journal.State != OwnershipState.Clean) throw new UnsafeOperationException("Both PCs must be Ready before enrollment. The existing owner must finish first.");
             var shared = store.Generations.Read(journal.CommittedGeneration);

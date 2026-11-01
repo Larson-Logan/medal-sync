@@ -15,7 +15,7 @@ internal static class ReplicationCommands
         args.RequireAllUsed();
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
-        var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        var store = CoordinationStore.Open(config);
         using var operation = new ReadyOperation(state, config, apply, "Cloud retry", "unfinished copies remain pending",
             "Quit Medal before retrying pending cloud copies.", "Configuration changed; preview the cloud retry again.");
         ReplicaRetryStatus? telemetry = null;
