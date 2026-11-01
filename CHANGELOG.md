@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add **Start Medal at sign-in** to the Medal Sync tray menu, and
+  `medal-sync startup [--apply | --restore]`, so an installed copy can start
+  Medal through Medal Sync whenever you sign in. Before this, only the
+  portable `set-medal-startup.ps1` could do it, which needs PowerShell 7 and
+  is not included in setup. It shows what will change and asks first, and it
+  saves Medal's original entries in the same file the script uses, so either
+  one can turn it off again. It needs a configuration first, and it reports,
+  without changing, Windows' own Startup apps switch.
 - Fix an older portable copy starting at sign-in after installing with setup,
   so the status panel showed the old version after a restart. An installed
   copy now always owns Medal's startup entry, `medal://` handler and Medal
