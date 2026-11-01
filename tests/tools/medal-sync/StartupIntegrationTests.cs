@@ -169,6 +169,67 @@ public sealed class StartupIntegrationTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_state, StartupEntries.OriginalsFile)));
     }
 
+    [Fact]
+    public void RestoreWaitsForARepairInProgressAndALaterRepairLeavesItOff()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using (var run = Key(StartupEntries.RunSubkey)) run.SetValue("Medal", $"\"{Medal}\"");
+        using (var startup = Startup()) startup.Apply();
+
+        // A repair holding the lock (as the supervisor's timer would) blocks the restore until it finishes.
+        // Mutexes belong to threads, so these are plain threads rather than tasks.
+        using var repairing = new ManualResetEvent(false);
+        using var release = new ManualResetEvent(false);
+        Exception? failure = null;
+        var repair = new Thread(() =>
+        {
+            using var held = StartupEntries.Lock();
+            repairing.Set();
+            release.WaitOne();
+        });
+        repair.Start();
+        Assert.True(repairing.WaitOne(TimeSpan.FromSeconds(10)));
+        var restore = new Thread(() =>
+        {
+            try { using var startup = Startup(1); startup.Restore(); }
+            catch (Exception ex) { failure = ex; }
+        });
+        restore.Start();
+        Assert.False(restore.Join(300));
+        Assert.True(File.Exists(Path.Combine(_state, StartupEntries.OriginalsFile)));
+        release.Set();
+        Assert.True(repair.Join(TimeSpan.FromSeconds(10)));
+        Assert.True(restore.Join(TimeSpan.FromSeconds(30)));
+        Assert.Null(failure);
+
+        // The originals file is retired, so the next repair changes nothing.
+        using (var software = Registry.CurrentUser.CreateSubKey(_keyPath))
+        {
+            Assert.Empty(StartupEntries.Enforce(_state, _launcher, software, StartupEntries.Shortcuts([_programs, _desktop])));
+        }
+        using (var run = Key(StartupEntries.RunSubkey))
+        {
+            Assert.Equal($"\"{Medal}\"", run.GetValue("Medal"));
+            Assert.Null(run.GetValue(StartupEntries.RunValue));
+        }
+    }
+
+    [Fact]
+    public void StartupLockIsExclusiveAcrossThreadsAndReentrantOnOne()
+    {
+        using var held = StartupEntries.Lock();
+        using (StartupEntries.Lock(TimeSpan.Zero)) { } // Same thread: re-entrant.
+        Exception? seen = null;
+        var other = new Thread(() =>
+        {
+            try { StartupEntries.Lock(TimeSpan.Zero).Dispose(); }
+            catch (Exception ex) { seen = ex; }
+        });
+        other.Start();
+        Assert.True(other.Join(TimeSpan.FromSeconds(10)));
+        Assert.IsType<IOException>(seen);
+    }
+
     [Theory]
     [InlineData(new byte[] { 3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8 }, true)]
     [InlineData(new byte[] { 1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8 }, true)]
