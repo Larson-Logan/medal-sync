@@ -125,7 +125,7 @@ command before running it, and ask me whenever a choice is mine.
    with --apply in those steps.
 
 Rules: never run `init --apply`, `enroll --apply`, `abandon`, `repair`,
-`finish --accept-library-changes` or set-medal-startup.ps1 -Apply. Never
+`finish --accept-library-changes`, `startup --apply` or set-medal-startup.ps1 -Apply. Never
 force-close Medal, delete SQLite -wal/-shm files, clear the cache, reset or
 initialize an existing journal, or edit Medal's database. If any command
 refuses or reports a problem, stop, show me its exact output and explain it;
@@ -226,16 +226,24 @@ new shared library. A second PC uses the same library ID and `enroll` preview
 to review its existing records. Never initialize an existing journal.
 
 The new Start menu shortcut opens the companion without replacing Medal's own
-startup entries. Existing portable startup integration remains in place. Advanced
-per-user integration can be changed using the portable startup helper after
-configuration and enrollment have been verified:
+startup entries. Setup never changes them. After configuration and enrollment
+have been verified, choose **Start Medal at sign-in** in the Medal Sync tray
+menu to start Medal through Medal Sync whenever you sign in. It lists exactly
+what changes and asks first. The same change is available from a terminal:
 
 ```powershell
-& "$HOME/.medal-sync/bin/set-medal-startup.ps1" -StateRoot "$HOME/.medal-sync"
-# Apply the reviewed changes with the same command plus -Apply.
+medal-sync startup            # preview; changes nothing
+medal-sync startup --apply    # start Medal through Medal Sync at sign-in
+medal-sync startup --restore  # put Medal's own startup entries back
 ```
 
-The helper saves originals before changes. Launch through the Medal Library
+Turning it on saves Medal's original Run value, `medal://` handler and
+shortcuts first (`startup-originals.json` in your state folder), and the
+launcher keeps them pointed at Medal Sync after Medal updates. Turning it off
+puts the originals back. If Windows has Medal Sync turned off in **Settings >
+Apps > Startup**, Medal Sync reports it and leaves that switch to you. Portable
+installs can still use `set-medal-startup.ps1` from their `bin` folder; both
+use the same saved originals. Launch through the Medal Library
 shortcut so storage and ownership are checked before Medal opens. After exit,
 wait for **Ready** before switching PCs, updating or uninstalling.
 
