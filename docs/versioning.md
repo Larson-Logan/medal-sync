@@ -65,6 +65,18 @@ PC to update before the next switch.
 | Generation `assets.json` | Media present on primary storage, and media the library references but that is missing. |
 | Handoff requests | A PC asking the owner to finish its session. |
 
+Google Drive cloud mode uses the same generation formats under
+`.medal-sync/LIBRARY_ID/generations/`. Its format `1` journal is the
+`description` metadata of one Drive file addressed by the configured
+`cloudJournalId`. It contains `identity`, `journal`, `requests`, `storageFolderId`,
+`captureFolder` and `headManifestHash` (SHA-256), read together with the Drive
+v2 file ETag. The hash binds the committed head to its verified manifest, so a
+private unpublished generation with the same number cannot be mistaken for
+another PC's committed snapshot. Conditional
+updates preserve requests while advancing ownership. Local history caches are
+not journals. Older clients reject `storageMode: "CLOUD"`; update every PC
+before enabling it. Existing SMB/local formats and configurations are unchanged.
+
 ### This PC only
 
 | File | Contents |

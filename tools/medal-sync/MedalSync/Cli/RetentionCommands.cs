@@ -30,7 +30,7 @@ internal static class RetentionCommands
         using var instance = SessionCommands.SingleInstance();
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
-        var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+        var store = CoordinationStore.Open(config);
         var retention = new Retention(config, state, state.ExistingDevice(), store);
         if (!apply)
         {

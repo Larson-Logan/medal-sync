@@ -98,9 +98,9 @@ internal static class DiagnosticCollector
         facts = facts with { Device = device };
         try
         {
-            if (!Directory.Exists(config.CoordinationRoot)) return facts with { CoordinationReachable = false };
+            if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) return facts with { CoordinationReachable = false };
             facts = facts with { CoordinationReachable = true };
-            var store = CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId);
+            var store = CoordinationStore.Open(config);
             var journal = store.ReadJournal();
             facts = facts with
             {

@@ -27,6 +27,10 @@ The Medal Sync executables already include .NET.</p></article>
 Your media and journal stay on this PC; an SMB server is not required.</li>
 <li><strong>Server and persistent local copy:</strong> add <code>--local-copy-root E:\MedalLibrary</code> when creating configuration.
 Clips are recorded locally and copied to the server before handoff. The local collection stays after the session.</li>
+<li><strong>Google Drive without a server:</strong> choose <code>--storage-mode cloud</code> or the wizard's Google Drive mode.
+Keep a persistent local recording copy and use Drive for media, library history and cross-PC ownership.
+Follow <a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/storage.md#google-drive-without-a-server">cloud setup</a>
+to allocate one journal ID and reuse it on every PC. Initialize only the first PC; additional PCs join by launching.</li>
 <li><strong>Cloud replicas:</strong> configure OneDrive, Dropbox or Google Drive using <code>rclone config --config C:\Private\rclone.conf</code>,
 then add <code>--cloud-remote onedrive:MedalSync --rclone-config C:\Private\rclone.conf</code>.
 Cloud copies contain referenced media. Server mode keeps the shared journal on SMB; local mode keeps its journal on this PC.</li>
@@ -34,7 +38,7 @@ Cloud copies contain referenced media. Server mode keeps the shared journal on S
 <article><h2>3. Preview, verify, then enroll</h2>
 <p>Quit Medal normally and keep an independent media backup. Use <code>config create</code> to preview a candidate configuration,
 then <code>config validate --config FILE</code>. Follow the getting started guide to verify assets and initialize a new library,
-or enroll an additional PC into an existing one.</p><p>Your account login, microphone settings and device identity stay on each PC.</p></article>
+or enroll an additional PC into an existing one. For cloud mode, use the cloud setup guide's initialization and join steps.</p><p>Your account login, microphone settings and device identity stay on each PC.</p></article>
 <article><h2>4. Launch through Medal Sync</h2>
 <p>Open Medal Sync from the Start menu. After quitting Medal, wait for <strong>Ready</strong> before switching PCs.
 An interrupted upload keeps the session and local files for retry. Updates and uninstall also require Ready.</p>

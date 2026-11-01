@@ -2,7 +2,7 @@
 Tests real rclone copies, named remotes, cancellation and sequential two-PC WinFsp handoff using disposable synthetic data.
 #>
 [CmdletBinding()]
-param([switch]$SkipMount)
+param([switch]$SkipMount, [string]$GoogleDriveRemote, [string]$RcloneConfig)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $IsWindows) { throw 'Storage integration runs on Windows.' }
@@ -20,5 +20,10 @@ if (-not $SkipMount -and -not $driverPresent) {
 if ($LASTEXITCODE -ne 0) { throw 'Integration restore failed.' }
 $arguments = @('run','--project',(Join-Path $root 'tests/integration/MedalSync.Integration.csproj'),'-c','Release','--no-restore','--','--rclone',(Join-Path $dependencies 'rclone.exe'))
 if (-not $SkipMount) { $arguments += '--mount' }
+if ($GoogleDriveRemote) {
+    if (-not $RcloneConfig -or -not (Test-Path -LiteralPath $RcloneConfig -PathType Leaf)) { throw 'Live Google Drive acceptance requires -RcloneConfig pointing to an authorized rclone config.' }
+    $arguments += @('--google-drive', $GoogleDriveRemote, '--rclone-config', (Resolve-Path -LiteralPath $RcloneConfig).Path)
+}
+elseif ($RcloneConfig) { throw '-RcloneConfig is only used with -GoogleDriveRemote.' }
 & dotnet @arguments
 if ($LASTEXITCODE -ne 0) { throw 'Real-process storage integration failed.' }

@@ -152,7 +152,7 @@ internal static class ReplicaCommands
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
         if (config.Replication is not { Targets.Count: > 0 }) throw new UnsafeOperationException("No cloud copies are configured.");
-        return (state, config, CoordinationStore.Open(config.LibraryCoordinationDirectory, config.LibraryId, config.AccountId));
+        return (state, config, CoordinationStore.Open(config));
     }
 
     internal static int Number(string name, string value, int min, int max) =>

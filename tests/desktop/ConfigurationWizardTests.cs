@@ -120,6 +120,20 @@ internal static class ConfigurationWizardTests
                     "Explicit numeric edits replace preserved values");
                 wizard.Close();
             }
+            using (var wizard = new WindowsConfigurationWizard(state, (_, _) => { }, () => new Guard()))
+            {
+                var fields = Field<Dictionary<string, TextBox>>(wizard, "_fields");
+                Field<ComboBox>(wizard, "_mode").SelectedIndex = 2;
+                fields["remote"].Text = "gdrive:MedalSync";
+                fields["copy"].Text = @"E:\SyntheticPersistent";
+                fields["cloudConfig"].Text = @"C:\Private\rclone.conf";
+                fields["cloudJournal"].Text = "synthetic-cloud-journal-id";
+                var cloud = wizard.Candidate();
+                cloud.Validate();
+                check(cloud.StorageMode == StorageMode.Cloud && cloud.CloudJournalId == "synthetic-cloud-journal-id",
+                    "Native wizard retains Drive journal identity and configures cloud handoff without SMB");
+                check(!fields["coordination"].Text.StartsWith(@"\\", StringComparison.Ordinal), "Cloud setup uses a local history cache");
+            }
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

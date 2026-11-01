@@ -56,7 +56,9 @@ Repeated sign-in launches also leave an already supervised session alone.
 Use server storage with an SSD cache, keep a persistent local copy that uploads
 back to the server, and optionally add verified OneDrive, Dropbox or Google Drive
 replicas. See [storage choices and configuration](storage.md) for commands and
-multiple-provider examples. SMB remains the shared ownership authority.
+multiple-provider examples. Server mode uses SMB as the shared ownership authority.
+For cross-PC handoff using only Google Drive, follow
+[Google Drive without a server](storage.md#google-drive-without-a-server).
 Local mode keeps media and coordination on this PC, with optional cloud copies
 and no SMB dependency. It does not provide automatic handoff to another PC.
 

@@ -16,7 +16,7 @@ internal static class CommandRunner
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
         "--from", "--to", "--limit", "--before", "--wait-for-server", "--state-root", "--medal-link",
         "--local-copy-root", "--cloud-remote", "--rclone-config",
-        "--storage-mode",
+        "--storage-mode", "--cloud-journal-id",
         "--replica-conflicts",
         "--grace-days", "--history-older-than", "--older-than", "--keep", "--keep-days",
         "--account-id", "--cache-root", "--remote", "--coordination-root", "--library-id", "--capture-folder", "--rclone-path", "--sync-folder", "--sync-pattern", "--spike-config", "--server-ignore",
@@ -52,12 +52,15 @@ internal static class CommandRunner
                         (--new-library | --library-id ID) [--spike] [--apply]
                         [--capture-folder M:\Clips] [--rclone-path FILE] [--sync-folder ID] [--sync-pattern PATTERN]
                         [--local-copy-root DIR] [--cloud-remote NAME:FOLDER --rclone-config FILE]
-                        [--storage-mode server|local]  Local mode keeps media/journal on this PC; no SMB needed
-                        [--coordination-root PATH]  Required UNC share in server mode; optional local folder in local mode
+                        [--storage-mode server|local|cloud]  Cloud mode hands off through Google Drive, without SMB
+                        [--cloud-journal-id ID]  Required in cloud mode; obtain once with storage cloud-id and reuse on every PC
+                        [--coordination-root PATH]  Required UNC share in server mode; optional local folder in local/cloud modes
                         [--replica-conflicts stop|version]  Preserve earlier destination files when updating
                                                  Preview/create a config; never overwrite an existing file
           init [--apply]                         Create the shared library from this PC (generation 0)
           storage init-primary [--apply]         Mark an empty primary folder or rclone remote for this library
+          storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]
+                                                 Allocate a Google Drive journal ID for a new cloud library; creates no file
           replicate retry [--target NAME] [--apply]  Preview/retry pending optional cloud copies while Ready
           replica verify [--target NAME] [--apply]  Preview/read back cloud copies while Ready; never copies or deletes
           replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]
@@ -151,6 +154,7 @@ internal static class CommandRunner
             "init" => SessionCommands.Init(args, output),
             "storage init-primary" => SessionCommands.InitPrimary(args, output),
             "storage check" => SessionCommands.CheckStorage(args, output),
+            "storage cloud-id" => SessionCommands.CloudId(args, output),
             "replicate retry" => ReplicationCommands.Retry(args, output),
             "replica verify" => ReplicaCommands.Verify(args, output),
             "replica history" => ReplicaCommands.History(args, output),

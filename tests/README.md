@@ -57,3 +57,25 @@ Shell progress dialog with an in-memory synthetic download and no network reques
 No test needs a real Medal account, database, recording or server. Real provider
 account behavior, playback in Medal, physical PCs and reboot acceptance remain
 separate from these reproducible integration checks.
+
+Cloud-mode tests cover competing starts, stale ETags, endpoints that ignore
+conditions, lost acknowledgements, interrupted initialization/publication,
+second-PC restoration and preserved device settings. The storage integration
+suite uses real rclone generation/media transfers and a real WinFsp cloud-mode
+round trip with a synthetic Drive metadata service. This does not establish
+Google's actual API behavior.
+
+To check a real authorized Google Drive remote explicitly:
+
+```powershell
+pwsh -File scripts/test-storage-integration.ps1 -SkipMount `
+  -GoogleDriveRemote gdrive:MedalSyncTests -RcloneConfig C:\Private\rclone.conf
+```
+
+This contacts Google, creates one uniquely named synthetic collection below
+that remote folder and a pre-generated journal, and verifies real conditional
+updates, stale-write refusal, interrupted publication recovery, library history
+and second-PC media hydration. It retains the test collection for review;
+remove that named collection yourself afterwards. It never reads a live Medal
+library, changes an existing cloud collection or installs a driver. No live
+provider test runs by default. Use a direct Drive OAuth remote with write access.

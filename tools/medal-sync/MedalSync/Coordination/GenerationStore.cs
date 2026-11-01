@@ -86,7 +86,7 @@ internal sealed record GenerationRetention(int Format, long HighWater, IReadOnly
 /// folder, verified, then renamed into place in one step, so a numbered folder
 /// is always complete; interrupted staging folders are ignored.
 /// </summary>
-internal sealed partial class GenerationStore(string directory, string libraryId, string accountId)
+internal sealed partial class GenerationStore(string directory, string libraryId, string accountId, Func<long>? externalHighWater = null)
 {
     private const string LibraryFile = "library.json";
     private const string AssetsFile = "assets.json";
@@ -136,7 +136,7 @@ internal sealed partial class GenerationStore(string directory, string libraryId
     /// <summary>The number for a new generation published on top of <paramref name="committed"/>: above every folder and the retention high-water mark.</summary>
     public long Next(long committed)
     {
-        long highest = Math.Max(committed, Numbered().DefaultIfEmpty(-1).Max());
+        long highest = Math.Max(Math.Max(committed, Numbered().DefaultIfEmpty(-1).Max()), externalHighWater?.Invoke() ?? -1);
         return Math.Max(highest, ReadRetention()?.HighWater ?? -1) + 1;
     }
 
