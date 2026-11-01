@@ -16,10 +16,12 @@ internal static class Program
             if (args is ["--status"] or ["--tray"]) return WindowsTrayStatus.Run(args[0] == "--status");
             if (args is ["--check-updates"]) return WindowsReleaseUpdate.Run(ui, () =>
             {
-                SetupMaintenance.RequireReady(LocalState.ForCurrentUser().Root,
-                    SetupMaintenance.MedalRunning(), SessionCommands.AnotherInstanceRunning());
-                WindowsTrayStatus.CloseForUpdate();
-            });
+                // Wait for the user to quit Medal and for supervision to finish its handoff; never end either.
+                if (SetupMaintenance.MedalRunning()) return UpdateReadiness.MedalRunning;
+                if (SessionCommands.AnotherInstanceRunning()) return UpdateReadiness.Finishing;
+                SetupMaintenance.RequireReady(LocalState.ForCurrentUser().Root, false, false);
+                return UpdateReadiness.Ready;
+            }, () => WindowsTrayStatus.CloseForUpdate());
             if (args is ["--configure"]) return WindowsConfigurationWizard.Run(LocalState.ForCurrentUser());
             return Launcher.Run(args, ui, state => WindowsConfigurationWizard.Run(state));
         }

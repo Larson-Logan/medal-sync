@@ -268,7 +268,8 @@ wait for Ready, then choose **Exit Medal Sync** in the panel or tray menu.
 Exit keeps the view open with guidance while supervision or a library operation
 is active. Reopen status at any time. Setup and uninstall require all Medal Sync
 programs to be closed. Setup guidance and update checks are also available from
-the panel; accepting a verified update closes the status app and opens setup.
+the panel; accepting an update waits for you to quit Medal and for Ready, then
+installs it and reopens the status panel.
 Shutdown closes the view
 without interactive prompts while the supervisor keeps its existing finish budget.
 

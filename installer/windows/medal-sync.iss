@@ -444,6 +444,25 @@ begin
   end;
 end;
 
+{ The in-app updater passes /MEDALSYNCRELAUNCH=status after closing the status app. Reopen it as the
+  original user whether setup succeeded, was refused or failed, so Medal Sync is never left closed. }
+procedure DeinitializeSetup();
+var
+  Launcher: String;
+  ResultCode: Integer;
+begin
+  if CompareText(ExpandConstant('{param:MEDALSYNCRELAUNCH|}'), 'status') <> 0 then exit;
+  try
+    Launcher := ExpandConstant('{app}\bin\medal-sync-launch.exe');
+  except
+    Log('Status app not reopened: the program folder is not known yet.');
+    exit;
+  end;
+  if FileExists(Launcher) and
+     not ExecAsOriginalUser(Launcher, '--status', ExpandConstant('{app}\bin'), SW_SHOWNORMAL, ewNoWait, ResultCode) then
+    Log('Could not reopen the Medal Sync status app.');
+end;
+
 procedure InitializeWizard();
 var
   WinFspDirectory, DependencyStatus: String;

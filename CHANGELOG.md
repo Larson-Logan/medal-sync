@@ -9,6 +9,13 @@
   configuration, interrupted initialization recovery, competing-start tests
   and a real rclone/WinFsp cloud handoff scenario. Live provider acceptance
   remains a separate opt-in test with a disposable synthetic collection.
+- **Check for updates** now installs the update for you. One confirmation
+  downloads the verified setup (or reuses a saved verified download). If Medal
+  is open, an update window waits for you to quit Medal and for uploads to
+  finish, then the status app closes and setup upgrades the same folder
+  unattended and reopens the status panel. Medal is never closed for you.
+  Cancel keeps the installer for later. Download folders for already installed
+  versions are cleaned up.
 
 ## 1.3.1 — 2026-10-31
 

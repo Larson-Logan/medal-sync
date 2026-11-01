@@ -186,6 +186,56 @@ public sealed class ReleaseUpdateTests
         Assert.False(Directory.Exists(directory));
     }
 
+    [Fact]
+    public void ReusesOnlyAnEarlierDownloadThatStillMatchesTheRelease()
+    {
+        using var fixture = new MedalFixture();
+        byte[] bytes = [1, 2, 3, 4];
+        var asset = SetupAsset(bytes);
+        string root = fixture.PathFor("downloads");
+        Assert.Null(ReleaseUpdate.FindVerifiedDownload(root, asset));
+        Directory.CreateDirectory(Path.Combine(root, "tampered"));
+        File.WriteAllBytes(Path.Combine(root, "tampered", asset.Name), [4, 3, 2, 1]);
+        Directory.CreateDirectory(Path.Combine(root, "truncated"));
+        File.WriteAllBytes(Path.Combine(root, "truncated", asset.Name), [1, 2]);
+        Assert.Null(ReleaseUpdate.FindVerifiedDownload(root, asset));
+        string good = Path.Combine(root, "good", asset.Name);
+        Directory.CreateDirectory(Path.GetDirectoryName(good)!);
+        File.WriteAllBytes(good, bytes);
+        Assert.Equal(good, ReleaseUpdate.FindVerifiedDownload(root, asset));
+        Assert.Null(ReleaseUpdate.FindVerifiedDownload(root, asset with { Name = "medal-sync-0.5.0.01-win-x64.zip" }));
+    }
+
+    [Fact]
+    public void CleanupRemovesOnlyFoldersHoldingAlreadyInstalledSetups()
+    {
+        using var fixture = new MedalFixture();
+        string root = fixture.PathFor("downloads");
+        string Folder(string name, params string[] files)
+        {
+            string directory = Path.Combine(root, name);
+            Directory.CreateDirectory(directory);
+            foreach (string file in files) File.WriteAllBytes(Path.Combine(directory, file), [1]);
+            return directory;
+        }
+        string older = Folder("older", "medal-sync-1.3.0-setup-win-x64.exe");
+        string same = Folder("same", "medal-sync-1.3.1.00-setup-win-x64.exe");
+        string newer = Folder("newer", "medal-sync-1.3.1.01-setup-win-x64.exe");
+        string other = Folder("other", "medal-sync-1.3.0.01-setup-win-x64.exe", "notes.txt");
+        string empty = Folder("empty");
+        string nested = Folder("nested", "medal-sync-1.3.0.01-setup-win-x64.exe");
+        Directory.CreateDirectory(Path.Combine(nested, "child"));
+        Assert.Equal(3, ReleaseUpdate.CleanupDownloads(root, "1.3.1.00"));
+        Assert.False(Directory.Exists(older));
+        Assert.False(Directory.Exists(same));
+        Assert.False(Directory.Exists(empty));
+        Assert.True(File.Exists(Path.Combine(newer, "medal-sync-1.3.1.01-setup-win-x64.exe")));
+        Assert.True(File.Exists(Path.Combine(other, "notes.txt")));
+        Assert.True(Directory.Exists(nested));
+        Assert.Equal(0, ReleaseUpdate.CleanupDownloads(fixture.PathFor("missing"), "1.3.1.00"));
+        Assert.Equal(0, ReleaseUpdate.CleanupDownloads(root, "not a version"));
+    }
+
     private sealed class UnknownLengthContent(byte[] bytes) : HttpContent
     {
         protected override bool TryComputeLength(out long length) { length = 0; return false; }
