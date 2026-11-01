@@ -166,22 +166,55 @@ public sealed class LauncherAndRelocationTests : IDisposable
     }
 
     [Fact]
-    public void NativeSupervisorPreservesTheOptedInLauncherAndCanRecoverAnOverwrittenRunEntry()
+    public void InstalledCopyOwnsStartupAndReplacesASupersededPortableLauncher()
     {
         string state = _fixture.PathFor("state"), native = _fixture.PathFor("Programs", "Medal Sync", "bin");
-        string portableLauncher = Path.Combine(state, "bin", StartupEntries.LauncherFile);
+        string portable = Path.Combine(state, "bin");
+        string portableLauncher = Path.Combine(portable, StartupEntries.LauncherFile);
         string nativeLauncher = Path.Combine(native, StartupEntries.LauncherFile);
-        Directory.CreateDirectory(Path.GetDirectoryName(portableLauncher)!);
+        Directory.CreateDirectory(portable);
         Directory.CreateDirectory(native);
         File.WriteAllText(portableLauncher, "synthetic");
         File.WriteAllText(nativeLauncher, "synthetic");
-        Assert.Equal(portableLauncher, StartupEntries.GuardLauncher(state, native, true, StartupEntries.RunCommand(portableLauncher)));
-        Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(state, native, true, StartupEntries.RunCommand(nativeLauncher)));
-        Assert.Equal(portableLauncher, StartupEntries.GuardLauncher(state, native, true, @"""C:\Medal\Medal.exe"""));
-        Assert.Equal(portableLauncher, StartupEntries.GuardLauncher(state, native, true, StartupEntries.RunCommand(nativeLauncher) + " --unexpected"));
-        File.Delete(portableLauncher);
-        Assert.Null(StartupEntries.GuardLauncher(state, native, true, null));
-        Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(state, native, false, null));
+
+        // An installed copy always uses its own launcher, even if the Run value names an older one that still exists.
+        Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(native, true, StartupEntries.RunCommand(portableLauncher)));
+        Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(native, true, StartupEntries.RunCommand(nativeLauncher)));
+        Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(native, true, @"""C:\Medal\Medal.exe"""));
+        Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(native, true, null));
+
+        // A portable copy keeps an existing target (including a native one) and otherwise uses itself.
+        Assert.Equal(nativeLauncher, StartupEntries.GuardLauncher(portable, false, StartupEntries.RunCommand(nativeLauncher)));
+        Assert.Equal(portableLauncher, StartupEntries.GuardLauncher(portable, false, StartupEntries.RunCommand(nativeLauncher) + " --unexpected"));
+        Assert.Equal(portableLauncher, StartupEntries.GuardLauncher(portable, false, null));
+
+        File.Delete(nativeLauncher);
+        Assert.Null(StartupEntries.GuardLauncher(native, true, StartupEntries.RunCommand(portableLauncher)));
+        Assert.Equal(portableLauncher, StartupEntries.GuardLauncher(portable, false, StartupEntries.RunCommand(nativeLauncher)));
+    }
+
+    [Theory]
+    [InlineData(@"""C:\Users\u\.medal-sync\bin\medal-sync-launch.exe"" --at-sign-in", true)]
+    [InlineData(@"""C:\Users\u\.medal-sync\bin\medal-sync-launch.exe"" ""%1""", true)]
+    [InlineData(@"C:\Users\u\.medal-sync\bin\medal-sync-launch.exe", true)]
+    [InlineData(@"""C:\Programs\Medal Sync\bin\medal-sync-launch.exe"" ""%1""", false)]
+    [InlineData(@"C:\PROGRAMS\Medal Sync\bin\MEDAL-SYNC-LAUNCH.EXE", false)]
+    [InlineData(@"""C:\Medal\current\Medal.exe"" ""%1""", false)]
+    [InlineData(null, false)]
+    public void StartupEntries_DetectEntriesLeftOnAnotherLauncher(string? command, bool other)
+    {
+        Assert.Equal(other, StartupEntries.StartsOtherLauncher(command, @"C:\Programs\Medal Sync\bin\medal-sync-launch.exe"));
+    }
+
+    [Fact]
+    public void StartupEntries_ReadOnlyTheExactRunSyntax()
+    {
+        Assert.Equal(@"C:\b\medal-sync-launch.exe", StartupEntries.RunTarget(@"""C:\b\medal-sync-launch.exe"" --at-sign-in"));
+        Assert.Null(StartupEntries.RunTarget(@"""C:\b\medal-sync-launch.exe"" --at-sign-in --x"));
+        Assert.Null(StartupEntries.RunTarget(@"""C:\b\Medal.exe"" --at-sign-in"));
+        Assert.Null(StartupEntries.RunTarget(@"""medal-sync-launch.exe"" --at-sign-in"));
+        Assert.Null(StartupEntries.RunTarget(@"C:\b\medal-sync-launch.exe --at-sign-in"));
+        Assert.Null(StartupEntries.RunTarget(null));
     }
 
     [Theory]
@@ -216,6 +249,42 @@ public sealed class LauncherAndRelocationTests : IDisposable
 
             after.TargetPath = @"C:\Other\Unrelated.exe";
             after.Save();
+            Assert.False(StartupEntries.RepairShortcut(path, launcher));
+        }
+        finally
+        {
+            if (restored is not null) Marshal.FinalReleaseComObject(restored);
+            if (shortcut is not null) Marshal.FinalReleaseComObject(shortcut);
+            Marshal.FinalReleaseComObject(shell);
+        }
+    }
+
+    [Fact]
+    public void StartupEntries_RepointAShortcutLeftOnASupersededLauncherAndKeepItsArguments()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string path = _fixture.PathFor("Medal Status.lnk");
+        string old = _fixture.PathFor("old", "bin", StartupEntries.LauncherFile);
+        string launcher = _fixture.PathFor("Programs", "Medal Sync", "bin", StartupEntries.LauncherFile);
+        object shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", throwOnError: true)!)!;
+        object? shortcut = null;
+        object? restored = null;
+        try
+        {
+            shortcut = ((dynamic)shell).CreateShortcut(path);
+            dynamic link = shortcut;
+            link.TargetPath = old;
+            link.Arguments = "--status";
+            link.IconLocation = old + ",0";
+            link.Save();
+
+            Assert.True(StartupEntries.RepairShortcut(path, launcher));
+            restored = ((dynamic)shell).CreateShortcut(path);
+            dynamic after = restored;
+            Assert.Equal(launcher, (string)after.TargetPath, ignoreCase: true);
+            Assert.Equal("--status", (string)after.Arguments);
+            Assert.Equal(launcher + ",0", (string)after.IconLocation, ignoreCase: true);
+            Assert.Equal(Path.GetDirectoryName(launcher), (string)after.WorkingDirectory, ignoreCase: true);
             Assert.False(StartupEntries.RepairShortcut(path, launcher));
         }
         finally
