@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fix **Check for updates** closing without a message as soon as the setup
+  download began. The download progress window was updated from background
+  threads, which Windows refused, and the update process crashed. Only the
+  update window's own thread now touches it.
 - The configuration wizard shows only the fields the chosen storage mode uses,
   with a short explanation and example under each, and ignores values left in
   hidden fields. A new setup fills in the signed-in Medal account ID (with a
