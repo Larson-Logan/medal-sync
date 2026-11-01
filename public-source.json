@@ -23,6 +23,7 @@
     ".github/rulesets/release-tags.json": [],
     ".github/workflows/branch-cleanup.yml": [],
     ".github/workflows/milestones.yml": [],
+    ".github/workflows/pull-request-title.yml": ["unit", "desktop", "storage"],
     ".github/workflows/release.yml": [],
     ".github/workflows/validate.yml": ["unit", "desktop", "storage"],
     ".gitignore": ["unit", "desktop", "storage"],
