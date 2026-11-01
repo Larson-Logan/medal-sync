@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using MedalSync;
 using MedalSync.Cli;
+using MedalSync.Config;
 using MedalSync.Platform;
 using MedalSync.Session;
 
@@ -138,6 +140,10 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         menu.Items.Add("Setup &guide", null, (_, _) => OpenGuide());
         menu.Items.Add("&Configure", null, (_, _) => StartLauncher("--configure"));
         menu.Items.Add("Check for &updates", null, (_, _) => StartLauncher("--check-updates"));
+        var signIn = new ToolStripMenuItem("Start Medal at &sign-in");
+        signIn.Click += (_, _) => ToggleSignIn();
+        menu.Opening += (_, _) => signIn.Checked = SignInEnabled();
+        menu.Items.Add(signIn);
         menu.Items.Add("E&xit Medal Sync", null, (_, _) => TryExit());
         _icon = new NotifyIcon { Icon = _icons.For(SessionPhase.Unknown), Text = "Medal Sync: Unknown", Visible = true, ContextMenuStrip = menu };
         _icon.DoubleClick += (_, _) => ShowPanel();
@@ -254,6 +260,41 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         start.ArgumentList.Add(argument);
         try { Process.Start(start)?.Dispose(); }
         catch (System.ComponentModel.Win32Exception) { _status.Text = "The update check could not start. Check the installation and try again."; }
+    }
+
+    private static StartupIntegration OpenStartup() =>
+        StartupIntegration.ForCurrentUser(LocalState.ForCurrentUser().Root, Path.Combine(AppContext.BaseDirectory, StartupEntries.LauncherFile));
+
+    private static bool SignInEnabled()
+    {
+        try { using var startup = OpenStartup(); return startup.Enabled; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { return false; }
+    }
+
+    /// <summary>Turns starting Medal through Medal Sync on or off after showing exactly what changes.</summary>
+    private void ToggleSignIn()
+    {
+        if (_ending) return;
+        const string Title = "Medal Sync";
+        try
+        {
+            using var startup = OpenStartup();
+            bool on = startup.Enabled;
+            string question = on
+                ? "Stop starting Medal through Medal Sync?\n\nMedal's own startup entries and shortcuts are put back. Medal then starts without its clip drive unless you open it through Medal Sync."
+                : "Start Medal through Medal Sync when you sign in?\n\n" + string.Join("\n", startup.Preview().Select(line => "• " + line))
+                  + "\n\nMedal's entries are saved first, and you can turn this off again from this menu.";
+            if (MessageBox.Show(question, Title, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            var done = on ? startup.Restore() : startup.Apply();
+            string result = on ? "Medal starts with its own entries again." : "Medal now starts through Medal Sync when you sign in.";
+            bool warn = !on && startup.TurnedOffInWindows;
+            MessageBox.Show(result + (warn ? "\n\n" + StartupIntegration.TurnedOffMessage : ""), Title, MessageBoxButtons.OK,
+                warn ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        }
+        catch (Exception ex) when (ex is MedalSyncException or IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            MessageBox.Show(ex.Message, Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     protected override void ExitThreadCore()

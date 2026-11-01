@@ -66,6 +66,7 @@ shows it too.
 | `medal-sync-launch.exe --configure` | Opens the configuration wizard. |
 | `medal-sync-launch.exe --status` | Opens the status panel. |
 | `medal-sync-launch.exe --tray` | Starts the status icon without opening the panel. |
+| `medal-sync startup [--apply \| --restore]` | Previews, turns on or turns off starting Medal through Medal Sync at sign-in (the tray menu's **Start Medal at sign-in**). Turning it on needs a configuration and saves Medal's original entries first. See [getting started](getting-started.md). |
 | `medal-sync-launch.exe --check-updates` | Checks for a newer release, downloads and verifies setup, then offers to exit the status app and run the installer. See [updates](updates.md#upgrade-and-repair). |
 
 ## Check this PC (read-only)

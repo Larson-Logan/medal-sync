@@ -21,8 +21,11 @@ internal static class StartupEntries
     public const string SignInFlag = "--at-sign-in";
     public const string RunValue = "MedalSync";
     public const string OriginalsFile = "startup-originals.json";
-    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ProtocolKey = @"Software\Classes\medal\shell\open\command";
+    internal const string RunSubkey = @"Microsoft\Windows\CurrentVersion\Run";
+    internal const string ProtocolSubkey = @"Classes\medal\shell\open\command";
+    internal const string StartupApprovedSubkey = @"Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+    private const string RunKey = @"Software\" + RunSubkey;
+    private const string ProtocolKey = @"Software\" + ProtocolSubkey;
 
     public static bool StartsLauncher(string? command) =>
         command is not null && command.Contains(LauncherFile, StringComparison.OrdinalIgnoreCase);
@@ -158,13 +161,20 @@ internal static class StartupEntries
 
     /// <summary>Medal shortcuts in Startup, Start menu, Desktop and the pinned taskbar.</summary>
     [SupportedOSPlatform("windows")]
-    public static IEnumerable<string> Shortcuts()
+    public static IEnumerable<string> Shortcuts() => Shortcuts(ShortcutFolders());
+
+    [SupportedOSPlatform("windows")]
+    public static IReadOnlyList<string> ShortcutFolders()
     {
         string pinned = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar");
-        var folders = new[] { Environment.SpecialFolder.Startup, Environment.SpecialFolder.Programs, Environment.SpecialFolder.DesktopDirectory }
+        return [.. new[] { Environment.SpecialFolder.Startup, Environment.SpecialFolder.Programs, Environment.SpecialFolder.DesktopDirectory }
             .Select(Environment.GetFolderPath)
-            .Append(pinned);
+            .Append(pinned)];
+    }
+
+    public static IEnumerable<string> Shortcuts(IEnumerable<string> folders)
+    {
         foreach (string folder in folders)
         {
             if (!Directory.Exists(folder)) continue;
@@ -181,9 +191,19 @@ internal static class StartupEntries
     [SupportedOSPlatform("windows")]
     public static IReadOnlyList<string> Enforce(string stateRoot, string launcher)
     {
+        using var software = Registry.CurrentUser.CreateSubKey("Software");
+        return Enforce(stateRoot, launcher, software, Shortcuts());
+    }
+
+    /// <summary>As <see cref="Enforce(string, string)"/>, under <paramref name="software"/> (HKCU\Software, or a test key).</summary>
+    [SupportedOSPlatform("windows")]
+    internal static IReadOnlyList<string> Enforce(string stateRoot, string launcher, RegistryKey software, IEnumerable<string> shortcuts)
+    {
+        // The supervisor's repair timer must never interleave with turning sign-in startup on or off.
+        using var _ = Lock();
         var done = new List<string>();
         if (!File.Exists(Path.Combine(stateRoot, OriginalsFile)) || !File.Exists(launcher)) return done;
-        using (var run = Registry.CurrentUser.CreateSubKey(RunKey))
+        using (var run = software.CreateSubKey(RunSubkey))
         {
             foreach (string name in run.GetValueNames())
             {
@@ -202,7 +222,7 @@ internal static class StartupEntries
                     : $"restored the Run value '{RunValue}'");
             }
         }
-        using (var protocol = Registry.CurrentUser.OpenSubKey(ProtocolKey, writable: true))
+        using (var protocol = software.OpenSubKey(ProtocolSubkey, writable: true))
         {
             string? handler = protocol?.GetValue(null) as string;
             if (protocol is not null && (StartsMedalDirectly(handler) || StartsOtherLauncher(handler, launcher)))
@@ -211,11 +231,81 @@ internal static class StartupEntries
                 done.Add("pointed the medal:// handler back at the launcher");
             }
         }
-        foreach (string shortcut in Shortcuts())
+        foreach (string shortcut in shortcuts)
         {
             if (RepairShortcut(shortcut, launcher)) done.Add($"pointed the shortcut '{shortcut}' back at the launcher");
         }
         return done;
+    }
+
+    internal const string LockName = @"Local\LarsonServer.MedalSync.StartupEntries";
+
+    /// <summary>
+    /// Serializes every change to Medal's startup entries for this user session, across
+    /// the supervisor, the status tray and the command line. Re-entrant on one thread.
+    /// </summary>
+    internal static IDisposable Lock(TimeSpan? timeout = null)
+    {
+        var mutex = new Mutex(false, LockName);
+        try
+        {
+            if (!mutex.WaitOne(timeout ?? TimeSpan.FromSeconds(30)))
+            {
+                throw new IOException("Another Medal Sync process is updating Medal's startup entries. Try again in a moment.");
+            }
+        }
+        catch (AbandonedMutexException) { /* The previous holder exited; the entries are re-read under the lock. */ }
+        catch { mutex.Dispose(); throw; }
+        return new Held(mutex);
+    }
+
+    private sealed class Held(Mutex mutex) : IDisposable
+    {
+        private Mutex? _mutex = mutex;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _mutex, null) is not { } held) return;
+            held.ReleaseMutex();
+            held.Dispose();
+        }
+    }
+
+    /// <summary>The shortcut's target path, read with WScript.</summary>
+    [SupportedOSPlatform("windows")]
+    internal static string ShortcutTarget(string path) => WithShortcut(path, link => (string)link.TargetPath);
+
+    /// <summary>The shortcut's icon location (path,index), read with WScript.</summary>
+    [SupportedOSPlatform("windows")]
+    internal static string ShortcutIcon(string path) => WithShortcut(path, link => (string)link.IconLocation);
+
+    /// <summary>Points a shortcut at <paramref name="target"/> with no arguments, keeping its icon.</summary>
+    [SupportedOSPlatform("windows")]
+    internal static void RetargetShortcut(string path, string target) => WithShortcut(path, link =>
+    {
+        link.TargetPath = target;
+        link.Arguments = "";
+        link.WorkingDirectory = Path.GetDirectoryName(target)!;
+        link.Save();
+        return true;
+    });
+
+    [SupportedOSPlatform("windows")]
+    private static T WithShortcut<T>(string path, Func<dynamic, T> use)
+    {
+        object? shell = null;
+        object? shortcut = null;
+        try
+        {
+            shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", throwOnError: true)!);
+            shortcut = ((dynamic)shell!).CreateShortcut(path);
+            return use(shortcut!);
+        }
+        finally
+        {
+            if (shortcut is not null) Marshal.FinalReleaseComObject(shortcut);
+            if (shell is not null) Marshal.FinalReleaseComObject(shell);
+        }
     }
 
     /// <summary>
