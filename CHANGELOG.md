@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The configuration wizard shows only the fields the chosen storage mode uses,
+  with a short explanation and example under each, and ignores values left in
+  hidden fields. A new setup fills in the signed-in Medal account ID (with a
+  **Detect** button to retry), and folder and file fields have **Browse...**
+  buttons. Review, confirmation and save checks are unchanged.
 - Add Google Drive cloud mode for cross-PC library handoff without an SMB
   server. Each PC records to a persistent local copy; media and immutable
   library generations verify in Drive before ownership is released through

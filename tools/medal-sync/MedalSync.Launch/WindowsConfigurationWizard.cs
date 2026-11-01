@@ -14,7 +14,10 @@ internal sealed class WindowsConfigurationWizard : Form
     private readonly Action<MedalSyncConfig, bool> _validate;
     private readonly Action<MedalSyncConfig> _validateExisting;
     private readonly Func<IDisposable> _acquireGuard;
+    private readonly Func<string>? _detectAccount;
     private readonly Dictionary<string, TextBox> _fields = [];
+    private readonly Dictionary<string, Row> _rows = [];
+    private StorageMode _appliedMode;
     private readonly HashSet<NumericUpDown> _editedNumbers = [];
     private readonly List<string> _displayWarnings = [];
     private readonly ComboBox _mode = new() { DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Storage mode" };
@@ -48,18 +51,21 @@ internal sealed class WindowsConfigurationWizard : Form
         }
     }
 
-    internal WindowsConfigurationWizard(LocalState state, Action<MedalSyncConfig, bool>? validate = null, Func<IDisposable>? acquireGuard = null)
+    internal WindowsConfigurationWizard(LocalState state, Action<MedalSyncConfig, bool>? validate = null, Func<IDisposable>? acquireGuard = null,
+        Func<string>? detectAccount = null)
     {
         _state = state;
         _validate = validate ?? ValidateEnvironment;
         _validateExisting = validate is null ? RequireReady : config => validate(config, false);
         _acquireGuard = acquireGuard ?? AcquireGuard;
+        // Tests that replace validation never read the real Medal profile unless they pass a detector.
+        _detectAccount = detectAccount ?? (validate is null ? MedalEnvironment.SignedInAccountId : null);
         _existing = File.Exists(state.ConfigPath) ? MedalSyncConfig.Load(state.ConfigPath) : null;
         Text = "Medal Sync configuration";
         Icon = AppIcons.LoadApplicationIcon();
         AccessibleName = Text;
         AutoScaleMode = AutoScaleMode.Dpi;
-        Size = new Size(850, 760);
+        Size = new Size(880, 800);
         MinimumSize = new Size(650, 520);
         StartPosition = FormStartPosition.CenterScreen;
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), RowCount = 4, ColumnCount = 1 };
@@ -68,45 +74,55 @@ internal sealed class WindowsConfigurationWizard : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(750, 0), Text = $"Resolved configuration: {state.ConfigPath}\r\n"
-            + (_existing is null ? "Prepare a configuration, review it, then confirm saving. Enrollment is a separate step."
+            + (_existing is null ? "Choose a storage mode; only the fields it uses are shown. Review, then confirm saving. Enrollment is a separate step."
                 : "Existing setup found. Account, library and device identities are preserved. Quit Medal and wait for Ready before changing it.") }, 0, 0);
         _edit = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-        var fields = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Padding = new Padding(0, 12, 12, 12) };
-        fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210));
+        var fields = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Padding = new Padding(0, 12, 12, 12) };
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _mode.Items.AddRange(["Server (SMB)", "Local storage", "Google Drive (no server)"]);
         _mode.SelectedIndex = _existing?.StorageMode == StorageMode.Cloud ? 2 : _existing?.StorageMode == StorageMode.Local ? 1 : 0;
-        Add(fields, "Storage &mode", _mode);
+        _appliedMode = SelectedMode;
+        AddRow(fields, "mode", _mode);
         _identity.Items.AddRange(["Create a new library ID", "Join an existing library ID"]);
         _identity.SelectedIndex = _existing is null ? 0 : 1;
         _identity.Enabled = _existing is null;
-        Add(fields, "Library &choice", _identity);
-        Field(fields, "library", "&Existing library ID", _existing?.LibraryId ?? "");
+        AddRow(fields, "identity", _identity);
+        Field(fields, "library", _existing?.LibraryId ?? "");
         _fields["library"].ReadOnly = _existing is not null;
         _fields["library"].Enabled = _identity.SelectedIndex == 1;
-        _identity.SelectedIndexChanged += (_, _) => _fields["library"].Enabled = _identity.SelectedIndex == 1;
-        Field(fields, "account", "Medal &account ID", _existing?.AccountId ?? "");
+        _identity.SelectedIndexChanged += (_, _) => { _fields["library"].Enabled = _identity.SelectedIndex == 1; ShowLibraryHint(); };
+        Button? detect = _existing is null && _detectAccount is not null
+            ? new Button { Text = "De&tect", AutoSize = true, AccessibleName = "Detect the signed-in Medal account" } : null;
+        Field(fields, "account", _existing?.AccountId ?? "", action: detect);
         _fields["account"].ReadOnly = _existing is not null;
-        Field(fields, "remote", "&Storage folder", _existing?.Remote ?? "");
-        Field(fields, "coordination", "&Coordination folder", _existing?.CoordinationRoot ?? Path.Combine(state.Root, "coordination"));
-        Field(fields, "cloudJournal", "Drive journal ID (cloud mode)", _existing?.CloudJournalId ?? "");
-        Field(fields, "capture", "Capture folder / &drive", _existing?.CaptureFolder ?? @"M:\Clips");
-        Field(fields, "cache", "SSD cac&he folder", _existing?.CacheRoot ?? "");
-        Field(fields, "rclone", "&Rclone executable", _existing?.RclonePath ?? ConfigCommands.DefaultRclonePath());
-        Field(fields, "copy", "Persistent local copy (optional)", _existing?.Replication?.LocalCopyRoot ?? "");
-        Field(fields, "cloudConfig", "Provider config file (optional)", _existing?.Replication?.RcloneConfigPath ?? "");
-        Field(fields, "targets", "Cloud targets (one per line)", string.Join(Environment.NewLine, _existing?.Replication?.Targets.Select(t => (t.Required ? "required " : "optional ") + t.Name + "=" + t.Remote) ?? []), true);
-        Add(fields, "Cloud copy requirements", new Label { AutoSize = true, Text = "Use name=remote:folder. Prefix with 'required ' to block handoff until verified, or 'optional ' to allow retry later. Existing names keep their requirement when no prefix is given." });
-        Field(fields, "syncFolder", "Sync folder ID (optional)", _existing?.SyncExclusions.FirstOrDefault()?.FolderId ?? "");
-        Field(fields, "syncPattern", "Sync exclusion pattern", _existing?.SyncExclusions.FirstOrDefault()?.Pattern ?? "/Videos/Clips");
+        Field(fields, "remote", _existing?.Remote ?? "", Pick.Folder);
+        Field(fields, "coordination", _existing?.CoordinationRoot ?? DefaultCoordination(SelectedMode), Pick.Folder);
+        Field(fields, "cloudJournal", _existing?.CloudJournalId ?? "");
+        Field(fields, "capture", _existing?.CaptureFolder ?? @"M:\Clips");
+        Field(fields, "cache", _existing?.CacheRoot ?? "", Pick.Folder);
+        Field(fields, "rclone", _existing?.RclonePath ?? ConfigCommands.DefaultRclonePath(), Pick.Executable);
+        Field(fields, "copy", _existing?.Replication?.LocalCopyRoot ?? "", Pick.Folder);
+        Field(fields, "cloudConfig", _existing?.Replication?.RcloneConfigPath ?? "", Pick.Credentials);
+        Field(fields, "targets", string.Join(Environment.NewLine, _existing?.Replication?.Targets.Select(t => (t.Required ? "required " : "optional ") + t.Name + "=" + t.Remote) ?? []), multiline: true);
+        Field(fields, "syncFolder", _existing?.SyncExclusions.FirstOrDefault()?.FolderId ?? "");
+        Field(fields, "syncPattern", _existing?.SyncExclusions.FirstOrDefault()?.Pattern ?? "/Videos/Clips");
         LoadNumber(_cacheLimit, _existing?.Mount.CacheMaxGiB ?? 20);
         LoadNumber(_reserve, _existing?.Mount.MinFreeGiB ?? 20);
         double hours = _existing?.MaxSessionHours ?? 4;
         LoadNumber(_hours, (decimal)hours, hours != (double)(decimal)hours);
         _message.Text = string.Join(Environment.NewLine, _displayWarnings);
-        Add(fields, "Cache limit (GiB)", _cacheLimit);
-        Add(fields, "Minimum free space (GiB)", _reserve);
-        Add(fields, "Maximum session hours", _hours);
+        AddRow(fields, "cacheLimit", _cacheLimit);
+        AddRow(fields, "reserve", _reserve);
+        AddRow(fields, "hours", _hours);
+        _mode.SelectedIndexChanged += (_, _) => ApplyMode();
+        if (detect is not null) detect.Click += (_, _) => { if (!_busy) DetectAccount(); };
+        ApplyMode();
+        ShowLibraryHint();
+        if (_existing is not null) SetHint("account", "Kept from the existing setup.");
+        else if (_detectAccount is null) SetHint("account", "Numeric ID from 'medal-sync inspect'. It must match the account signed in to Medal.");
+        else DetectAccount();
         _edit.Controls.Add(fields);
         var content = new Panel { Dock = DockStyle.Fill };
         content.Controls.Add(_edit);
@@ -126,21 +142,183 @@ internal sealed class WindowsConfigurationWizard : Form
         Controls.Add(layout);
     }
 
-    private static void Add(TableLayoutPanel table, string label, Control control)
+    private enum Pick { None, Folder, Executable, Credentials }
+
+    private sealed record Row(Label Caption, Control Input, Button? Action, Label Hint);
+
+    private StorageMode SelectedMode => _mode.SelectedIndex switch { 2 => StorageMode.Cloud, 1 => StorageMode.Local, _ => StorageMode.Server };
+
+    /// <summary>Fields a storage mode never uses are hidden and ignored, so a hidden value cannot reach the saved file.</summary>
+    internal static bool Applies(string key, StorageMode mode) => key switch
+    {
+        "cloudJournal" => mode == StorageMode.Cloud,
+        "copy" => mode != StorageMode.Local,
+        _ => true,
+    };
+
+    // A Google Drive remote is not a folder on this PC.
+    private static bool CanBrowse(string key, StorageMode mode) => key != "remote" || mode != StorageMode.Cloud;
+
+    private string DefaultCoordination(StorageMode mode) => mode == StorageMode.Server ? "" : Path.Combine(_state.Root, "coordination");
+
+    private static (string Caption, string Hint) Describe(string key, StorageMode mode) => key switch
+    {
+        "mode" => ("Storage &mode", mode switch
+        {
+            StorageMode.Local => "Clips and the ownership journal stay on this PC.",
+            StorageMode.Cloud => "Clips and library handoff go through Google Drive without an SMB server. Medal records into a persistent local copy.",
+            _ => "Clips upload to a private SMB share or rclone remote. PCs hand off the library through a journal on the share.",
+        }),
+        "identity" => ("&Library choice", ""),
+        "library" => ("&Existing library ID", ""),
+        "account" => ("Medal &account ID", ""),
+        "remote" => mode switch
+        {
+            StorageMode.Local => ("&Storage folder", @"Dedicated folder on this PC that keeps every clip, such as D:\MedalLibrary."),
+            StorageMode.Cloud => ("Drive &storage folder", "Google Drive rclone remote and dedicated folder, such as gdrive:MedalSync."),
+            _ => ("&Storage share or remote", @"Private UNC share such as \\server\Medal\Media, or an rclone remote and folder such as onedrive:MedalSync."),
+        },
+        "coordination" => mode switch
+        {
+            StorageMode.Server => ("&Coordination share", @"UNC folder on the private share for the ownership journal, such as \\server\Medal\Coordination."),
+            StorageMode.Cloud => ("&Coordination history cache", "Dedicated local folder for downloaded library history. Ownership is read from Google Drive."),
+            _ => ("&Coordination folder", "Dedicated local folder for the ownership journal, outside the storage, cache and capture folders."),
+        },
+        "cloudJournal" => ("Drive &journal ID", "From 'medal-sync storage cloud-id'. Use the same ID on every PC that shares this library."),
+        "capture" => ("Capture folder / &drive", @"Folder on the clip drive Medal Sync mounts at launch, such as M:\Clips. Drive D to Z, and not a drive root."),
+        "cache" => ("SSD cac&he folder", "Local SSD folder for the clip drive's cache. Not the share or the clip drive."),
+        "rclone" => ("&Rclone executable", "The rclone.exe installed with Medal Sync is selected by default."),
+        "copy" => mode == StorageMode.Cloud
+            ? ("Persistent local cop&y", "Required. Medal records into this complete local copy; Drive receives verified uploads.")
+            : ("Persistent local cop&y (optional)", "Keeps a complete copy of the library on this PC. Required when storage is an rclone remote."),
+        "cloudConfig" => mode == StorageMode.Cloud
+            ? ("Provider credential &file", "rclone.conf holding the Google Drive sign-in from 'rclone config'. Required in this mode.")
+            : ("Provider credential &file (optional)", "rclone.conf from 'rclone config'. Required for cloud copies or an rclone storage remote."),
+        "targets" => ("Cloud targets (one per line)", "Use name=remote:folder. Prefix with 'required ' to block handoff until verified, or 'optional ' to allow retry later. Existing names keep their requirement when no prefix is given."),
+        "syncFolder" => ("Sync folder ID (optional)", "Only when Syncthing shares a folder that contains the clip folder. Most setups leave this empty."),
+        "syncPattern" => ("Sync exclusion pattern", "Rooted folder the Syncthing folder must ignore, such as /Videos/Clips."),
+        "cacheLimit" => ("Cache limit (GiB)", "Soft size limit for cached clips. New recordings stay cached until they upload."),
+        "reserve" => ("Minimum free space (GiB)", "Free space to keep on the cache's disk."),
+        "hours" => ("Maximum session hours", "Launch checks that this much recording fits on the cache's disk above the free-space reserve."),
+        _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Unknown configuration field."),
+    };
+
+    private void AddRow(TableLayoutPanel table, string key, Control input, Button? action = null)
     {
         int row = table.RowCount++;
-        control.Dock = DockStyle.Fill;
-        control.Margin = new Padding(3, 5, 3, 5);
-        table.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, UseMnemonic = true }, 0, row);
-        table.Controls.Add(control, 1, row);
+        input.Dock = DockStyle.Fill;
+        input.Margin = new Padding(3, 5, 3, 5);
+        var caption = new Label { AutoSize = true, Anchor = AnchorStyles.Left, UseMnemonic = true };
+        table.Controls.Add(caption, 0, row);
+        table.Controls.Add(input, 1, row);
+        if (action is null) table.SetColumnSpan(input, 2);
+        else
+        {
+            action.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+            action.Margin = new Padding(3, 4, 3, 4);
+            table.Controls.Add(action, 2, row);
+        }
+        var hint = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, MaximumSize = new Size(600, 0), Margin = new Padding(3, 0, 3, 8), UseMnemonic = false };
+        int hintRow = table.RowCount++;
+        table.Controls.Add(hint, 1, hintRow);
+        table.SetColumnSpan(hint, 2);
+        _rows.Add(key, new(caption, input, action, hint));
     }
 
-    private void Field(TableLayoutPanel table, string key, string label, string value, bool multiline = false)
+    private void Field(TableLayoutPanel table, string key, string value, Pick pick = Pick.None, bool multiline = false, Button? action = null)
     {
-        var text = new TextBox { Text = value, AccessibleName = label.Replace("&", "", StringComparison.Ordinal), Multiline = multiline };
+        var text = new TextBox { Text = value, Multiline = multiline };
         if (multiline) { text.Height = 55; text.ScrollBars = ScrollBars.Vertical; }
         _fields.Add(key, text);
-        Add(table, label, text);
+        if (pick != Pick.None)
+        {
+            action = new Button { Text = "Browse...", AutoSize = true, Tag = pick };
+            action.Click += (_, _) => { if (!_busy) Browse(key, pick); };
+        }
+        AddRow(table, key, text, action);
+    }
+
+    private void ApplyMode()
+    {
+        StorageMode mode = SelectedMode;
+        // A new setup's untouched default coordination location follows the mode; saved and typed values are kept.
+        if (_existing is null && _fields["coordination"].Text.Trim() == DefaultCoordination(_appliedMode))
+            _fields["coordination"].Text = DefaultCoordination(mode);
+        _appliedMode = mode;
+        _edit.SuspendLayout();
+        foreach (var (key, row) in _rows)
+        {
+            bool shown = Applies(key, mode);
+            var (caption, hint) = Describe(key, mode);
+            row.Caption.Text = caption;
+            row.Caption.Visible = row.Input.Visible = shown;
+            if (row.Input is TextBox) row.Input.AccessibleName = caption.Replace("&", "", StringComparison.Ordinal);
+            if (row.Action is not null)
+            {
+                bool action = shown && CanBrowse(key, mode);
+                row.Action.Visible = action;
+                // Without its button the field takes the whole row.
+                if (row.Input.Parent is TableLayoutPanel table) table.SetColumnSpan(row.Input, action ? 1 : 2);
+                if (row.Action.Tag is Pick) row.Action.AccessibleName = "Browse for " + caption.Replace("&", "", StringComparison.Ordinal);
+            }
+            if (key is not ("account" or "library")) SetHint(key, hint);
+            else row.Hint.Visible = shown && row.Hint.Text.Length > 0;
+        }
+        _edit.ResumeLayout(true);
+    }
+
+    private void SetHint(string key, string text)
+    {
+        var row = _rows[key];
+        row.Hint.Text = text;
+        row.Input.AccessibleDescription = text.Length > 0 ? text : null;
+        row.Hint.Visible = Applies(key, SelectedMode) && text.Length > 0;
+    }
+
+    private void ShowLibraryHint() => SetHint("library", _existing is not null ? "Kept from the existing setup."
+        : _identity.SelectedIndex == 0 ? "A new ID is generated when you review. Other PCs join this library with that ID."
+        : "Copy libraryId from config.json on a PC that already uses this library.");
+
+    /// <summary>Reads only the signed-in library's file name; Medal's database is never opened here.</summary>
+    private void DetectAccount()
+    {
+        if (_detectAccount is null) return;
+        try
+        {
+            _fields["account"].Text = _detectAccount();
+            SetHint("account", "Detected from the Medal account signed in on this PC.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MedalSyncException)
+        {
+            SetHint("account", "Not detected. " + ex.Message + " Then choose Detect, or enter the ID from 'medal-sync inspect'.");
+        }
+    }
+
+    private void Browse(string key, Pick pick)
+    {
+        var field = _fields[key];
+        string title = "Select " + field.AccessibleName;
+        string current = Environment.ExpandEnvironmentVariables(field.Text.Trim());
+        if (pick == Pick.Folder)
+        {
+            using var folder = new FolderBrowserDialog { Description = title, UseDescriptionForTitle = true, ShowNewFolderButton = true };
+            if (current.Length > 0 && Directory.Exists(current)) folder.InitialDirectory = current;
+            if (folder.ShowDialog(this) == DialogResult.OK) field.Text = folder.SelectedPath;
+            return;
+        }
+        using var file = new OpenFileDialog
+        {
+            Title = title,
+            CheckFileExists = true,
+            RestoreDirectory = true,
+            Filter = pick == Pick.Executable ? "rclone (rclone.exe)|rclone.exe|Programs (*.exe)|*.exe" : "rclone configuration (*.conf)|*.conf|All files (*.*)|*.*",
+        };
+        if (current.Length > 0 && Path.GetDirectoryName(current) is { Length: > 0 } directory && Directory.Exists(directory))
+        {
+            file.InitialDirectory = directory;
+            file.FileName = Path.GetFileName(current);
+        }
+        if (file.ShowDialog(this) == DialogResult.OK) field.Text = file.FileName;
     }
 
     private void LoadNumber(NumericUpDown control, decimal saved, bool precisionLost = false)
@@ -154,8 +332,9 @@ internal sealed class WindowsConfigurationWizard : Form
 
     internal MedalSyncConfig Candidate()
     {
+        StorageMode mode = SelectedMode;
         string Value(string key) => _fields[key].Text.Trim();
-        string? Optional(string key) => Value(key) is { Length: > 0 } value ? value : null;
+        string? Optional(string key) => Applies(key, mode) && Value(key) is { Length: > 0 } value ? value : null;
         bool fresh = _identity.SelectedIndex == 0;
         string library = fresh ? Guid.NewGuid().ToString("N") : Value("library");
         if (string.IsNullOrEmpty(library)) throw new InvalidDataException("Enter the existing library ID to join; obtain it from the configured PC.");
@@ -190,7 +369,7 @@ internal sealed class WindowsConfigurationWizard : Form
             },
             _existing is not null && !_editedNumbers.Contains(_hours) ? _existing.MaxSessionHours : (double)_hours.Value, exclusions)
         {
-            StorageMode = _mode.SelectedIndex == 2 ? StorageMode.Cloud : _mode.SelectedIndex == 1 ? StorageMode.Local : StorageMode.Server,
+            StorageMode = mode,
             CloudJournalId = Optional("cloudJournal"),
             Replication = replication.LocalCopyRoot is null && replication.RcloneConfigPath is null && targets.Count == 0 ? null : replication,
         };
