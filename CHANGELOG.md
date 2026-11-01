@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix an older portable copy starting at sign-in after installing with setup,
+  so the status panel showed the old version after a restart. An installed
+  copy now always owns Medal's startup entry, `medal://` handler and Medal
+  shortcuts, and repoints any left on another launcher. This happens as soon
+  as the installed launcher or status panel runs, not only after the next
+  supervised session.
 - Fix **Check for updates** closing without a message as soon as the setup
   download began. The download progress window was updated from background
   threads, which Windows refused, and the update process crashed. Only the
