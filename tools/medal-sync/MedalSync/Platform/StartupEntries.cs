@@ -199,6 +199,8 @@ internal static class StartupEntries
     [SupportedOSPlatform("windows")]
     internal static IReadOnlyList<string> Enforce(string stateRoot, string launcher, RegistryKey software, IEnumerable<string> shortcuts)
     {
+        // The supervisor's repair timer must never interleave with turning sign-in startup on or off.
+        using var _ = Lock();
         var done = new List<string>();
         if (!File.Exists(Path.Combine(stateRoot, OriginalsFile)) || !File.Exists(launcher)) return done;
         using (var run = software.CreateSubKey(RunSubkey))
@@ -234,6 +236,39 @@ internal static class StartupEntries
             if (RepairShortcut(shortcut, launcher)) done.Add($"pointed the shortcut '{shortcut}' back at the launcher");
         }
         return done;
+    }
+
+    internal const string LockName = @"Local\LarsonServer.MedalSync.StartupEntries";
+
+    /// <summary>
+    /// Serializes every change to Medal's startup entries for this user session, across
+    /// the supervisor, the status tray and the command line. Re-entrant on one thread.
+    /// </summary>
+    internal static IDisposable Lock(TimeSpan? timeout = null)
+    {
+        var mutex = new Mutex(false, LockName);
+        try
+        {
+            if (!mutex.WaitOne(timeout ?? TimeSpan.FromSeconds(30)))
+            {
+                throw new IOException("Another Medal Sync process is updating Medal's startup entries. Try again in a moment.");
+            }
+        }
+        catch (AbandonedMutexException) { /* The previous holder exited; the entries are re-read under the lock. */ }
+        catch { mutex.Dispose(); throw; }
+        return new Held(mutex);
+    }
+
+    private sealed class Held(Mutex mutex) : IDisposable
+    {
+        private Mutex? _mutex = mutex;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _mutex, null) is not { } held) return;
+            held.ReleaseMutex();
+            held.Dispose();
+        }
     }
 
     /// <summary>The shortcut's target path, read with WScript.</summary>

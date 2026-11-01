@@ -93,6 +93,7 @@ internal sealed class StartupIntegration(string stateRoot, string launcher, Regi
         {
             throw new MedalSyncException("Configure Medal Sync before starting Medal through it at sign-in. Until then the launcher cannot start Medal.");
         }
+        using var _ = StartupEntries.Lock();
         var done = new List<string>();
         if (!Enabled) done.Add(SaveOriginals());
         done.AddRange(StartupEntries.Enforce(stateRoot, launcher, software, Shortcuts()));
@@ -103,10 +104,31 @@ internal sealed class StartupIntegration(string stateRoot, string launcher, Regi
     /// <summary>Puts Medal's saved entries back and retires the originals file. Returns what changed.</summary>
     public IReadOnlyList<string> Restore()
     {
+        // Under the same lock as the supervisor's repair, and with the originals file retired
+        // first, so a repair that runs during or after this sees the integration as off.
+        using var _ = StartupEntries.Lock();
         if (!Enabled) throw new MedalSyncException("Medal does not start through Medal Sync, so there is nothing to put back.");
         var saved = Json.ReadFile<StartupOriginals>(OriginalsPath, "saved Medal startup entries");
         if (saved.Format != 1) throw new InvalidDataException($"Unsupported format in '{OriginalsPath}'. Nothing was changed.");
         string stamp = now().ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        string retired = $"{OriginalsPath}.restored-{stamp}";
+        File.Move(OriginalsPath, retired);
+        try
+        {
+            var done = PutBack(saved, stamp);
+            done.Add($"kept the saved originals as '{retired}'");
+            return done;
+        }
+        catch
+        {
+            // Stay opted in so the entries can be restored again; nothing is lost.
+            File.Move(retired, OriginalsPath);
+            throw;
+        }
+    }
+
+    private List<string> PutBack(StartupOriginals saved, string stamp)
+    {
         var done = new List<string>();
         using (var run = software.CreateSubKey(StartupEntries.RunSubkey))
         {
@@ -150,9 +172,6 @@ internal sealed class StartupIntegration(string stateRoot, string launcher, Regi
                 done.Add($"pointed the shortcut '{shortcut}' back at Medal");
             }
         }
-        string retired = $"{OriginalsPath}.restored-{stamp}";
-        File.Move(OriginalsPath, retired);
-        done.Add($"kept the saved originals as '{retired}'");
         return done;
     }
 
