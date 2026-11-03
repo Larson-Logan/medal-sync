@@ -44,6 +44,125 @@ public sealed class ReleaseUpdateTests
         Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.0.05"), "1.3.1.00"));
     }
 
+    [Fact]
+    public void OffersTheReleaseABetaLeadsUpTo()
+    {
+        // Betas from dev are MAJOR.MINOR.PATCH.NN-beta.N of the next release.
+        Assert.Equal("1.3.1.02", ReleaseUpdate.AvailableVersion(Release("1.3.1.02"), "1.3.1.02-beta.3"));
+        Assert.Equal("1.3.2.00", ReleaseUpdate.AvailableVersion(Release("1.3.2.00"), "1.3.1.02-beta.1"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.1.01"), "1.3.1.02-beta.1"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.1.02"), "1.3.1.03-beta.1"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.1.02"), "1.3.1.02-rc.1"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.1.02"), "1.3.1.02-beta.0"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.1.02"), "unknown"));
+    }
+
+    [Fact]
+    public void NeverOffersABetaWithoutOptingIn()
+    {
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.1.02-beta.1", prerelease: true), "1.3.1.01"));
+        Assert.Null(ReleaseUpdate.AvailableVersion(Release("1.3.1.02-beta.1"), "1.3.1.01"));
+    }
+
+    private static string Releases(params string[] releases) => "[" + string.Join(",", releases) + "]";
+
+    private static string? Newest(params string[] releases) => ReleaseUpdate.NewestAsset(Releases(releases))?.Version;
+
+    [Fact]
+    public void OptedInPcsGetTheNewestOfReleasesAndBetas()
+    {
+        string stable = Release("1.3.1.01");
+        string beta1 = Release("1.3.1.02-beta.1", prerelease: true);
+        string beta2 = Release("1.3.1.02-beta.2", prerelease: true);
+        Assert.Equal("1.3.1.02-beta.2", Newest(beta2, beta1, stable));
+        Assert.Equal("1.3.1.02-beta.2", Newest(stable, beta1, beta2));
+        // The release a beta leads up to replaces it.
+        Assert.Equal("1.3.1.02", Newest(Release("1.3.1.02"), beta2, beta1, stable));
+        Assert.Equal("1.3.1.01", Newest(stable, Release("1.3.1.02-beta.3", draft: true, prerelease: true)));
+        Assert.Null(Newest());
+    }
+
+    [Fact]
+    public void OptedInPcsStillRefuseMislabeledOrMalformedBetas()
+    {
+        string stable = Release("1.3.1.01");
+        // A beta tag must be a prerelease, and a prerelease must carry a beta tag.
+        Assert.Equal("1.3.1.01", Newest(stable, Release("1.3.1.02-beta.1")));
+        Assert.Equal("1.3.1.01", Newest(stable, Release("1.3.1.02", prerelease: true)));
+        foreach (string version in new[] { "1.3.1-beta.1", "1.3.1.02-beta.0", "1.3.1.02-rc.1", "1.3.1.2-beta.1", "1.3.1.02-beta.01" })
+            Assert.Equal("1.3.1.01", Newest(stable, Release(version, prerelease: true)));
+        Assert.Equal("1.3.1.01", Newest(stable, Release("1.3.1.02-beta.1", prerelease: true, digest: "sha256:bad")));
+    }
+
+    [Fact]
+    public void OrdersBetasBeforeTheirReleaseAndByNumber()
+    {
+        Assert.True(ReleaseUpdate.IsNewer("1.3.1.02-beta.2", "1.3.1.02-beta.1"));
+        Assert.True(ReleaseUpdate.IsNewer("1.3.1.02-beta.10", "1.3.1.02-beta.9"));
+        Assert.True(ReleaseUpdate.IsNewer("1.3.1.02-beta.1", "1.3.1.01"));
+        Assert.True(ReleaseUpdate.IsNewer("1.3.1.02", "1.3.1.02-beta.5"));
+        Assert.False(ReleaseUpdate.IsNewer("1.3.1.02-beta.5", "1.3.1.02"));
+        Assert.False(ReleaseUpdate.IsNewer("1.3.1.02-beta.1", "1.3.1.02-beta.1"));
+        Assert.False(ReleaseUpdate.IsNewer("1.3.1.02-beta.1", "1.3.1.03-beta.1"));
+    }
+
+    [Fact]
+    public async Task OptedInChecksReadRecentReleasesAndDownloadBetaSetups()
+    {
+        using var fixture = new MedalFixture();
+        byte[] bytes = [5, 6, 7];
+        string sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        const string Tag = "v1.3.1.02-beta.1";
+        const string Name = "medal-sync-1.3.1.02-beta.1-setup-win-x64.exe";
+        string url = $"https://github.com/Larson-Logan/medal-sync/releases/download/{Tag}/{Name}";
+        string beta = JsonSerializer.Serialize(new
+        {
+            draft = false, prerelease = true, tag_name = Tag,
+            assets = new[] { new { name = Name, browser_download_url = url, digest = "sha256:" + sha, size = bytes.LongLength } },
+        });
+        var requested = new List<string>();
+        using var client = new HttpClient(new Handler(request =>
+        {
+            requested.Add(request.RequestUri!.AbsoluteUri);
+            return request.RequestUri.AbsoluteUri == ReleaseUpdate.RecentUrl
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Releases(beta, Release("1.3.1.01"))) }
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+        }));
+        Assert.Equal("1.3.1.02-beta.1", await ReleaseUpdate.CheckAsync(client, "1.3.1.01", CancellationToken.None, betas: true));
+        var asset = await ReleaseUpdate.LatestAsync(client, CancellationToken.None, requireSetup: true, betas: true);
+        Assert.NotNull(asset);
+        Assert.True(asset.IsSetup);
+        string path = await ReleaseUpdate.DownloadSetupAsync(client, asset, Path.Combine(fixture.PathFor("downloads"), "beta"), null, CancellationToken.None);
+        Assert.Equal(bytes, File.ReadAllBytes(path));
+        Assert.Equal(ReleaseUpdate.RecentUrl, requested[0]);
+        // Once installed, the beta's setup is housekeeping, while the release it leads up to is not.
+        Assert.Equal(1, ReleaseUpdate.CleanupDownloads(fixture.PathFor("downloads"), "1.3.1.02-beta.1"));
+    }
+
+    [Fact]
+    public void BetaUpdatesAreOffUnlessThisPcsConfigurationOptsIn()
+    {
+        using var fixture = new MedalFixture();
+        var config = new MedalSync.Config.MedalSyncConfig(
+            1, "0123456789abcdef0123456789abcdef", "12345",
+            @"\\192.0.2.10\Data\AppData\MedalSync", @"\\192.0.2.10\Data\Media\Videos", @"M:\Clips", @"E:\MedalCache",
+            @"%LOCALAPPDATA%\MedalSync\bin\rclone.exe",
+            new MedalSync.Config.MountConfig(5, 20, 20, 300, 30, 1000, 2, 53684), 4, []);
+        string path = fixture.PathFor("config.json");
+        Assert.False(ReleaseUpdate.BetaUpdatesEnabled(path));
+        File.WriteAllBytes(path, MedalSync.Util.Json.Serialize(config));
+        Assert.DoesNotContain("betaUpdates", File.ReadAllText(path), StringComparison.Ordinal);
+        Assert.False(ReleaseUpdate.BetaUpdatesEnabled(path));
+        File.WriteAllBytes(path, MedalSync.Util.Json.Serialize(config with { BetaUpdates = true }));
+        Assert.Contains("\"betaUpdates\": true", File.ReadAllText(path), StringComparison.Ordinal);
+        Assert.True(ReleaseUpdate.BetaUpdatesEnabled(path));
+        // An unreadable or invalid configuration means stable releases only.
+        File.WriteAllText(path, "{ \"betaUpdates\": true");
+        Assert.False(ReleaseUpdate.BetaUpdatesEnabled(path));
+        File.WriteAllBytes(path, MedalSync.Util.Json.Serialize(config with { BetaUpdates = true, AccountId = "not numeric" }));
+        Assert.False(ReleaseUpdate.BetaUpdatesEnabled(path));
+    }
+
     [Theory]
     [InlineData("1.3.0.1")]
     [InlineData("1.3.0.001")]
@@ -234,6 +353,25 @@ public sealed class ReleaseUpdateTests
         Assert.True(Directory.Exists(nested));
         Assert.Equal(0, ReleaseUpdate.CleanupDownloads(fixture.PathFor("missing"), "1.3.1.00"));
         Assert.Equal(0, ReleaseUpdate.CleanupDownloads(root, "not a version"));
+    }
+
+    [Fact]
+    public void CleanupKeepsTheReleaseAnInstalledBetaLeadsUpTo()
+    {
+        using var fixture = new MedalFixture();
+        string root = fixture.PathFor("downloads");
+        string Folder(string name, string file)
+        {
+            string directory = Path.Combine(root, name);
+            Directory.CreateDirectory(directory);
+            File.WriteAllBytes(Path.Combine(directory, file), [1]);
+            return directory;
+        }
+        string older = Folder("older", "medal-sync-1.3.1.01-setup-win-x64.exe");
+        string release = Folder("release", "medal-sync-1.3.1.02-setup-win-x64.exe");
+        Assert.Equal(1, ReleaseUpdate.CleanupDownloads(root, "1.3.1.02-beta.2"));
+        Assert.False(Directory.Exists(older));
+        Assert.True(Directory.Exists(release));
     }
 
     private sealed class UnknownLengthContent(byte[] bytes) : HttpContent

@@ -21,6 +21,7 @@
     ".github/rulesets/dev.json": [],
     ".github/rulesets/main.json": [],
     ".github/rulesets/release-tags.json": [],
+    ".github/workflows/beta.yml": [],
     ".github/workflows/branch-cleanup.yml": [],
     ".github/workflows/milestones.yml": [],
     ".github/workflows/pull-request-title.yml": ["unit", "desktop", "storage"],

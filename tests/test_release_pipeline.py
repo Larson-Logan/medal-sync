@@ -1,4 +1,4 @@
-"""Exercise the actual publish-step asset checks with disposable files."""
+"""Exercise the actual release and beta workflow steps with disposable files and a stubbed gh."""
 import hashlib
 import os
 from pathlib import Path
@@ -10,18 +10,28 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def step_script(name):
-    workflow = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+def step_script(name, workflow='release.yml'):
+    workflow = (ROOT / '.github/workflows' / workflow).read_text(encoding='utf-8')
     # Read the literal PowerShell step without adding a YAML dependency to CI.
     step = workflow.split(f'- name: {name}\n', 1)[1]
-    step = step.split('      - name:', 1)[0]
-    return textwrap.dedent(step.split('        run: |\n', 1)[1])
+    body = step.split('        run: |\n', 1)[1].splitlines(keepends=True)
+    # The block ends at the first line indented less than the script itself:
+    # the next step, or the next job after a job's last step.
+    script = []
+    for line in body:
+        if line.strip() and not line.startswith(' ' * 10):
+            break
+        script.append(line)
+    return textwrap.dedent(''.join(script))
 
 
 class ReleaseAssetTests(unittest.TestCase):
+    WORKFLOW = 'release.yml'
+    VERSION = '1.3.0.02'
+
     @classmethod
     def setUpClass(cls):
-        cls.script = step_script('Verify planned asset names and checksums')
+        cls.script = step_script('Verify planned asset names and checksums', cls.WORKFLOW)
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='release-assets-')
@@ -29,7 +39,7 @@ class ReleaseAssetTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.assets = self.root / '.medal-sync-dist'
         self.assets.mkdir()
-        self.version = '1.3.0.02'
+        self.version = self.VERSION
         self.setup = f'medal-sync-{self.version}-setup-win-x64.exe'
         self.archive = f'medal-sync-{self.version}-win-x64.zip'
         for name in (self.setup, self.archive):
@@ -90,6 +100,15 @@ class ReleaseAssetTests(unittest.TestCase):
         self.verify(succeeds=False)
 
 
+class BetaAssetTests(ReleaseAssetTests):
+    WORKFLOW = 'beta.yml'
+    VERSION = '1.3.1.02-beta.3'
+
+    def test_rejects_the_stable_assets_of_the_same_version(self):
+        self.version = '1.3.1.02'
+        self.verify(succeeds=False)
+
+
 class ReleasePublishTests(unittest.TestCase):
     def test_publishes_to_the_explicit_repository_without_a_checkout(self):
         with tempfile.TemporaryDirectory(prefix='release-publish-') as temporary:
@@ -128,6 +147,158 @@ class ReleasePublishTests(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertIn('https://example.com/release', summary.read_text(encoding='utf-8'))
+
+
+class BetaPublishTests(unittest.TestCase):
+    """Runs the actual beta publish step against a fake gh that records each call."""
+
+    STUB = textwrap.dedent(r"""
+        $ErrorActionPreference = 'Stop'
+        $global:calls = @()
+        function gh {
+            $global:LASTEXITCODE = 0
+            if ($args[0] -eq 'api') {
+                if ($args -contains "repos/$env:GITHUB_REPOSITORY/releases/latest") { return 'v1.3.1.01' }
+                if ($env:EXISTING) { return $env:EXISTING }
+                return
+            }
+            $global:calls += ($args -join ' ')
+            $repositoryIndex = [Array]::IndexOf($args, '--repo')
+            if ($repositoryIndex -lt 0 -or $args[$repositoryIndex + 1] -cne $env:GITHUB_REPOSITORY) {
+                throw 'Release command requires the explicit target repository.'
+            }
+            if ($args[1] -eq 'create') { 'https://example.com/beta' }
+        }
+    """)
+    REPORT = "\n} finally { $global:calls | Set-Content -LiteralPath calls.txt -Encoding utf8 }\n"
+
+    def publish(self, existing=''):
+        with tempfile.TemporaryDirectory(prefix='beta-publish-') as temporary:
+            root = Path(temporary)
+            script = root / 'publish.ps1'
+            body = step_script('Publish GitHub prerelease', 'beta.yml')
+            script.write_text(self.STUB + 'try {\n' + body + self.REPORT, encoding='utf-8')
+            environment = {**os.environ, 'GITHUB_REPOSITORY': 'example/project',
+                           'GITHUB_SHA': 'b' * 40, 'GITHUB_STEP_SUMMARY': str(root / 'summary.md'),
+                           'VERSION': '1.3.1.02-beta.3', 'EXISTING': existing}
+            result = subprocess.run(
+                ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(script)],
+                cwd=root, env=environment, capture_output=True, text=True,
+            )
+            calls_file, summary_file = root / 'calls.txt', root / 'summary.md'
+            calls = calls_file.read_text(encoding='utf-8-sig').splitlines() if calls_file.exists() else []
+            summary = summary_file.read_text(encoding='utf-8') if summary_file.exists() else ''
+            return result, [call.split(' ') for call in calls if call], summary
+
+    def test_publishes_a_prerelease_that_is_never_latest(self):
+        result, calls, summary = self.publish()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(2, len(calls), calls)
+        create, edit = calls
+        self.assertEqual(['release', 'create', 'v1.3.1.02-beta.3'], create[:3])
+        for flag in ('--draft', '--prerelease', '--latest=false', '--generate-notes'):
+            self.assertIn(flag, create)
+        self.assertEqual('b' * 40, create[create.index('--target') + 1])
+        # Notes start at the latest stable release, so a beta lists all of dev since then.
+        self.assertEqual('v1.3.1.01', create[create.index('--notes-start-tag') + 1])
+        self.assertIn('.medal-sync-dist/medal-sync-1.3.1.02-beta.3-setup-win-x64.exe', create)
+        self.assertEqual(['release', 'edit', 'v1.3.1.02-beta.3'], edit[:3])
+        for flag in ('--draft=false', '--prerelease', '--latest=false'):
+            self.assertIn(flag, edit)
+        self.assertIn('https://example.com/beta', summary)
+
+    def test_refuses_when_the_beta_or_its_release_already_exists(self):
+        result, calls, _ = self.publish(existing='https://example.com/releases/v1.3.1.02')
+        self.assertNotEqual(0, result.returncode, 'A beta was published over an existing release')
+        self.assertEqual([], calls)
+
+
+class BetaPlanTests(unittest.TestCase):
+    """Runs the actual beta planning step against a fake gh with a synthetic release history."""
+
+    STUB = textwrap.dedent(r"""
+        gh() {
+          local args="$*" prefix
+          case "$args" in
+            *contents/Directory.Build.props*)
+              printf '<Project>\n  <PropertyGroup>\n    <VersionPrefix>%s</VersionPrefix>\n  </PropertyGroup>\n</Project>\n' "$STUB_PREFIX" ;;
+            *commits/dev*) echo "$STUB_HEAD" ;;
+            *target_commitish*) if [ -n "$STUB_EXISTING" ]; then echo "$STUB_EXISTING"; fi ;;
+            *matching-refs/tags/*)
+              prefix="${args#*matching-refs/tags/}"
+              prefix="${prefix%% *}"
+              printf '%s\n' $STUB_TAGS | awk -v p="$prefix" 'index($0, p) == 1' ;;
+            */releases*) printf '%s\n' $STUB_RELEASES ;;
+            *) echo "unexpected gh call: $args" >&2; return 1 ;;
+          esac
+        }
+    """)
+
+    def plan(self, prefix='1.3.1', releases=(), tags=(), head='c' * 40, existing=''):
+        with tempfile.TemporaryDirectory(prefix='beta-plan-') as temporary:
+            root = Path(temporary)
+            script = root / 'plan.sh'
+            # GitHub runs bash steps with -eo pipefail.
+            script.write_text('set -eo pipefail\n' + self.STUB + step_script('Plan beta version', 'beta.yml'),
+                              encoding='utf-8', newline='\n')
+            output, summary = root / 'output', root / 'summary'
+            output.touch()
+            environment = {**os.environ, 'REPO': 'example/project', 'SHA': 'c' * 40,
+                           'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(summary),
+                           'STUB_PREFIX': prefix, 'STUB_HEAD': head, 'STUB_EXISTING': existing,
+                           'STUB_RELEASES': ' '.join(releases), 'STUB_TAGS': ' '.join(tags)}
+            result = subprocess.run(['bash', script.name], cwd=root, env=environment,
+                                    capture_output=True, text=True)
+            values = dict(line.split('=', 1) for line in output.read_text(encoding='utf-8').splitlines())
+            return result, values
+
+    def planned(self, **history):
+        result, values = self.plan(**history)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual('true', values.get('release'), values)
+        base, prerelease = values['version'].split('-', 1)
+        self.assertEqual(values['revision'], base.split('.')[3])
+        self.assertEqual(values['prerelease'], prerelease)
+        return values['version']
+
+    def test_first_beta_leads_up_to_the_next_hotfix(self):
+        stable = ('v1.3.0.05', 'v1.3.1.00', 'v1.3.1.01')
+        self.assertEqual('1.3.1.02-beta.1', self.planned(releases=stable, tags=stable))
+
+    def test_later_betas_count_up_from_releases_and_tags(self):
+        releases = ('v1.3.1.00', 'v1.3.1.01', 'v1.3.1.01-beta.7', 'v1.3.1.02-beta.1', 'v1.3.1.02-beta.2')
+        tags = releases + ('v1.3.1.02-beta.3',)
+        self.assertEqual('1.3.1.02-beta.4', self.planned(releases=releases, tags=tags))
+
+    def test_betas_never_raise_the_stable_counter(self):
+        releases = ('v1.3.1.00', 'v1.3.1.01-beta.1', 'v1.3.1.01-beta.2')
+        self.assertEqual('1.3.1.01-beta.3', self.planned(releases=releases, tags=releases))
+
+    def test_a_raised_version_prefix_starts_at_00(self):
+        releases = ('v1.3.1.01', 'v1.3.1.02-beta.4')
+        self.assertEqual('1.4.0.00-beta.1', self.planned(prefix='1.4.0', releases=releases, tags=releases))
+
+    def test_the_bridge_release_counts_as_00(self):
+        self.assertEqual('1.3.0.01-beta.1',
+                         self.planned(prefix='1.3.0', releases=('v1.2.0', 'v1.3.0'), tags=('v1.3.0',)))
+
+    def test_counter_keeps_counting_past_99(self):
+        releases = ('v1.3.1.99', 'v1.3.1.100-beta.1')
+        self.assertEqual('1.3.1.100-beta.2', self.planned(releases=releases, tags=releases))
+
+    def test_skips_a_commit_that_is_no_longer_the_tip_of_dev(self):
+        result, values = self.plan(head='d' * 40)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual({'release': 'false'}, values)
+
+    def test_skips_a_commit_that_already_has_a_release(self):
+        result, values = self.plan(existing='https://example.com/releases/v1.3.1.02-beta.1')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual({'release': 'false'}, values)
+
+    def test_refuses_a_malformed_version_prefix(self):
+        result, _ = self.plan(prefix='1.3')
+        self.assertNotEqual(0, result.returncode)
 
 
 if __name__ == '__main__':

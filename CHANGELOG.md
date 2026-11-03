@@ -19,6 +19,13 @@
   time instead (`--vfs-fast-fingerprint`). New configurations also keep played
   clips cached for an hour instead of five minutes (`mount.cacheMaxAgeSeconds`);
   existing configurations keep their value.
+- Publish a beta for every merge to `dev`, as a GitHub prerelease of the next
+  release, tagged `vMAJOR.MINOR.PATCH.NN-beta.N` (for example
+  `v1.3.1.02-beta.1`). Betas are built and tested like releases but never
+  marked Latest. Update checks offer them only on a PC that opts in with
+  `"betaUpdates": true` in its configuration. A PC running a beta is offered
+  the release it leads up to once it is published, and setup installs that
+  release over the beta.
 - Add **Start Medal at sign-in** to the Medal Sync tray menu, and
   `medal-sync startup [--apply | --restore]`, so an installed copy can start
   Medal through Medal Sync whenever you sign in. Before this, only the
