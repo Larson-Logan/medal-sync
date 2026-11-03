@@ -76,8 +76,11 @@ try {
 </Project>
 '@ | Set-Content -LiteralPath (Join-Path $props 'Directory.Build.props')
         $saved = $env:MedalReleaseRevision
+        # A beta validation run sets MedalPrerelease for the whole job; this test is about stable builds.
+        $savedPrerelease = $env:MedalPrerelease
         try {
             $env:MedalReleaseRevision = $null
+            $env:MedalPrerelease = $null
             Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.00') 'Local builds must use counter 00.'
             $env:MedalReleaseRevision = '07'
             Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.07') 'Release builds must use the workflow counter.'
@@ -85,7 +88,7 @@ try {
             Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2') 'The bridge release must use three parts.'
             $env:MedalReleaseRevision = '7'
             Refuses { Get-MedalBuildVersion $props } '*two or more digits*'
-        } finally { $env:MedalReleaseRevision = $saved }
+        } finally { $env:MedalReleaseRevision = $saved; $env:MedalPrerelease = $savedPrerelease }
     }
     Test-Case 'Beta builds add the prerelease label to the release they lead up to' {
         $props = Join-Path $scratch 'beta-props'
