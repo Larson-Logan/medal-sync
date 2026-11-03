@@ -87,6 +87,30 @@ try {
             Refuses { Get-MedalBuildVersion $props } '*two or more digits*'
         } finally { $env:MedalReleaseRevision = $saved }
     }
+    Test-Case 'Beta builds add the prerelease label to the release they lead up to' {
+        $props = Join-Path $scratch 'beta-props'
+        $null = New-Item -ItemType Directory -Path $props
+        '<Project><PropertyGroup><VersionPrefix>1.4.2</VersionPrefix><MedalReleaseRevision>00</MedalReleaseRevision></PropertyGroup></Project>' |
+            Set-Content -LiteralPath (Join-Path $props 'Directory.Build.props')
+        $savedRevision = $env:MedalReleaseRevision
+        $savedPrerelease = $env:MedalPrerelease
+        try {
+            $env:MedalReleaseRevision = '03'
+            $env:MedalPrerelease = 'beta.12'
+            Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.03-beta.12') 'Beta builds must append the label.'
+            foreach ($label in @('beta.0', 'beta', 'rc.1', 'beta.01', 'Beta.1')) {
+                $env:MedalPrerelease = $label
+                Refuses { Get-MedalBuildVersion $props } '*must be beta.N*'
+            }
+            $env:MedalPrerelease = 'beta.1'
+            $env:MedalReleaseRevision = 'none'
+            Refuses { Get-MedalBuildVersion $props } '*hotfix counter*'
+        } finally { $env:MedalReleaseRevision = $savedRevision; $env:MedalPrerelease = $savedPrerelease }
+        foreach ($value in @('1.0.0', '1.0.0.01', '1.0.0.01-beta.1', '1.0.0.100-beta.20')) { Assert-MedalBuildVersion $value }
+        foreach ($value in @('1.0.0-beta.1', '1.0.0.01-beta.0', '1.0.0.01-rc.1', '1.0.0.1-beta.1', 'v1.0.0.01-beta.1')) { Refuses { Assert-MedalBuildVersion $value } '*version*' }
+        # The portable updater stays stable-only.
+        Refuses { Assert-MedalVersion '1.0.0.01-beta.1' } '*stable version*'
+    }
     Test-Case 'Keep the hotfix counter when normalizing release tags' {
         & $module {
             function script:Invoke-RestMethod {

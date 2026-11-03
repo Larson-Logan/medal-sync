@@ -4,7 +4,8 @@
 programs. Every merge to `main` publishes a release tagged
 `vMAJOR.MINOR.PATCH.NN`, where `NN` is a hotfix counter: `.00` when the merge
 changes `VersionPrefix`, otherwise one more than the last release of that
-version.
+version. Every merge to `dev` also publishes a beta of the next release, such
+as `v1.3.1.02-beta.1`; see [beta releases](#beta-releases).
 [Versions and schemas](versioning.md) explains which part to raise and how file
 formats and Medal schemas are versioned.
 
@@ -234,10 +235,39 @@ closes that milestone once it is empty. Milestones are titled
 
 Releases are published without a manual review. `validate` on the promotion
 pull request gates `main`, and the release run's own uncached validation of
-every suite gates publishing. Drafts and prereleases are invisible
-to automatic update checks. A published stable setup is advertised on the
+every suite gates publishing. Drafts are invisible to automatic update
+checks, and prereleases are too unless a PC opts in to
+[betas](#beta-releases). A published stable setup is advertised on the
 next desktop launch; installation stays
 explicit and verifies Ready status. Publisher code signing is not configured.
 
 Repository visibility, branch/tag rules and vulnerability reporting remain
 separate GitHub settings. No build or test deploys onto a live library.
+
+## Beta releases
+
+The [beta workflow](../.github/workflows/beta.yml) publishes every push to
+`dev` as a GitHub prerelease of the release that promoting `dev` would publish
+next, tagged `vMAJOR.MINOR.PATCH.NN-beta.N`, such as `v1.3.1.02-beta.3`.
+[Versions and schemas](versioning.md#betas) explains the numbering. It can also
+be started from **Run workflow** on the Actions tab for `dev`; it never builds
+another branch.
+
+It works like the release workflow. Runs never overlap, and a queued newer push
+replaces an older one; it uses its own concurrency group, so a beta never
+replaces a queued release. It does nothing when the commit is no longer the tip
+of `dev` or already has a release. Otherwise it passes the beta label to the
+full validation workflow, which checks the commit is on `dev`, builds both
+packages with that version and no caches and runs every suite. The publish job
+then verifies, attests and uploads the tested files to a draft with notes since
+the latest stable release, and publishes it with the same app token, marked as a
+prerelease and never as Latest. It refuses to publish when that beta, or the
+release it leads up to, already exists, so a beta never follows its own
+release; choose **Run workflow** on `dev` to take the next number.
+
+Because each push to `dev` is validated twice, once by validation itself and
+once for its beta, both on free standard runners, a beta appears about as soon
+as the push's own validation finishes. Publishing a beta never closes a
+milestone, and the release workflow ignores betas when it chooses the next
+hotfix number. Release notes for a stable release start at the previous stable
+release, never at a beta. Betas are never deleted automatically.

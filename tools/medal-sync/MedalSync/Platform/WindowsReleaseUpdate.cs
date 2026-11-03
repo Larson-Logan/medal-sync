@@ -28,13 +28,14 @@ internal static class WindowsReleaseUpdate
         using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var asset = ReleaseUpdate.LatestAsync(client, timeout.Token, requireSetup: true).GetAwaiter().GetResult();
+        bool betas = ReleaseUpdate.BetaUpdatesEnabled();
+        var asset = ReleaseUpdate.LatestAsync(client, timeout.Token, requireSetup: true, betas).GetAwaiter().GetResult();
         if (asset is null)
         {
             ui.Show($"Could not check for Medal Sync updates. You have version {ToolInfo.Version}.\n\nCheck your connection and try again. A private repository, rate limit or missing published Windows setup can also prevent this check.\n\nReleases:\n{Releases}");
             return 1;
         }
-        if (Version.Parse(asset.Version) <= Version.Parse(ToolInfo.Version))
+        if (!ReleaseUpdate.IsNewer(asset.Version, ToolInfo.Version))
         {
             ui.Show($"Medal Sync {ToolInfo.Version} is up to date. No newer published Windows setup is available.");
             return 0;

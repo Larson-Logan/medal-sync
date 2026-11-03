@@ -50,6 +50,7 @@ Ready-made examples, with placeholder values:
 | `maxSessionHours` | `4` | Longest session to plan for. Launch checks that this much recording fits on the cache's disk, above the free-space reserve. More than 0, at most 24. |
 | `syncExclusions` | `[]` | Syncthing folders that overlap the clip folder and must ignore it. Each entry is `{ "folderId": "ID", "pattern": "/Videos/Clips" }`, with one rooted folder pattern and no wildcards. `inspect` reports whether each ignore rule is in place. Most setups leave this empty. |
 | `replication` | Absent | Optional persistent local copy and cloud copies. See below. |
+| `betaUpdates` | Absent (`false`) | `true` lets this PC's update checks offer [betas](versioning.md#betas) built from `dev` as well as releases, whichever is newer. Betas are less tested than releases. Set it back to `false`, or remove it, to return to releases only: the next release at or above your beta is offered as usual. Earlier Medal Sync versions refuse a file with this field. |
 
 ## `mount`: the clip drive
 

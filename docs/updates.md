@@ -74,6 +74,14 @@ limits and missing or malformed releases continue normal launch. When an update
 is available, the launch notice points you to **Check for updates**. Nothing
 installs until you ask for it.
 
+Update checks offer only stable releases unless this PC opts in to betas: add
+`"betaUpdates": true` to its [configuration](configuration.md#top-level-fields).
+Each PC opts in on its own. An opted-in PC is offered the newest of the latest
+releases and [betas](versioning.md#betas), which are built from `dev` before a
+release and are less tested. Before configuration, and whenever the
+configuration cannot be read, checks offer stable releases only. The portable
+lifecycle tool never installs betas.
+
 Choose **Check for updates** in the status panel or tray menu, or **Check for
 Medal Sync updates** in the Start menu. It also works before configuration or
 enrollment, and reports unavailable checks separately from an up-to-date

@@ -8,15 +8,25 @@ function Get-MedalPayloadNames { return $script:Payload.Clone() }
 # MAJOR.MINOR.PATCH.NN, where NN is the two-digit hotfix counter. Versions
 # before 1.3.0.00 had no counter, so installed programs may still report three parts.
 $script:StableVersion = '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0[0-9]|[1-9][0-9]+))?'
+# Beta builds from dev add -beta.N to the four-part release they lead up to.
+$script:Prerelease = 'beta\.[1-9][0-9]*'
 
 function Assert-MedalVersion([string]$Version) {
     if ($Version -cnotmatch "^$script:StableVersion$") { throw 'Expected a stable version such as 0.2.0.01.' }
     return [version]$Version
 }
 
+# Any version a build can carry: a stable version, or a four-part one with -beta.N.
+function Assert-MedalBuildVersion([string]$Version) {
+    $stable = $Version -creplace "-$script:Prerelease$", ''
+    if ($stable -cne $Version -and $stable.Split('.').Count -ne 4) { throw 'Expected a beta version such as 0.2.0.01-beta.1.' }
+    $null = Assert-MedalVersion $stable
+}
+
 function Get-MedalBuildVersion([string]$Root) {
     # VersionPrefix from Directory.Build.props plus the hotfix counter, which the
-    # release workflow passes in the MedalReleaseRevision environment variable.
+    # release workflow passes in the MedalReleaseRevision environment variable,
+    # and, for beta builds from dev, the MedalPrerelease label such as beta.3.
     $props = [xml](Get-Content -LiteralPath (Join-Path $Root 'Directory.Build.props') -Raw)
     $prefix = $props.SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText
     $revision = if ($env:MedalReleaseRevision) { $env:MedalReleaseRevision } else { $props.SelectSingleNode('/Project/PropertyGroup/MedalReleaseRevision').InnerText }
@@ -24,6 +34,12 @@ function Get-MedalBuildVersion([string]$Root) {
     # "none" is the one-time three-part bridge release for pre-1.3.0 updaters.
     $version = if ($revision -ceq 'none') { $prefix } else { "$prefix.$revision" }
     $null = Assert-MedalVersion $version
+    $prerelease = if ($env:MedalPrerelease) { $env:MedalPrerelease } else { '' }
+    if ($prerelease) {
+        if ($prerelease -cnotmatch "^$script:Prerelease$") { throw "MedalPrerelease '$prerelease' must be beta.N, such as beta.1." }
+        if ($revision -ceq 'none') { throw 'A beta build needs a hotfix counter, not none.' }
+        $version = "$version-$prerelease"
+    }
     return $version
 }
 
@@ -43,7 +59,7 @@ function Read-MedalReleasePackage([string]$PackagePath, [string]$ExpectedSha256,
         $reader = [IO.StreamReader]::new($zip.GetEntry('release.json').Open())
         try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
         if ($manifest.format -ne 1 -or $manifest.runtime -cne 'win-x64') { throw 'Unsupported release manifest.' }
-        $null = Assert-MedalVersion $manifest.version
+        Assert-MedalBuildVersion $manifest.version
         if (@($manifest.files).Count -ne $script:Payload.Count) { throw 'Incomplete release manifest.' }
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         foreach ($file in $manifest.files) {
@@ -152,6 +168,7 @@ function Restore-MedalStartup([string]$Root) {
 }
 
 function Install-MedalFresh([string]$StateRoot, [string]$Staged, $Manifest) {
+    $null = Assert-MedalVersion $Manifest.version
     $root = Assert-MedalLocalPath $StateRoot
     Assert-MedalNoInterruptedUpdate $root
     $configured = (Test-Path -LiteralPath (Join-Path $root 'config.json')) -and (Test-Path -LiteralPath (Join-Path $root 'device.json'))
@@ -243,6 +260,7 @@ function Uninstall-MedalRelease([string]$StateRoot) {
 
 function Install-MedalRelease([string]$Root, [string]$Staged, $Manifest) {
     # Caller holds the same mutex as launch/finish throughout this transaction.
+    $null = Assert-MedalVersion $Manifest.version
     $Root = Assert-MedalInstallPath $Root
     $updates = Join-Path $Root 'updates'
     Assert-MedalNoInterruptedUpdate $Root
@@ -295,4 +313,4 @@ function Install-MedalRelease([string]$Root, [string]$Staged, $Manifest) {
     return $receiptPath
 }
 
-Export-ModuleMember -Function Get-MedalPayloadNames, Assert-MedalVersion, Get-MedalBuildVersion, Read-MedalReleasePackage, Get-MedalRelease, Assert-MedalInstallPath, Assert-MedalLocalPath, Install-MedalRelease, Install-MedalFresh, Uninstall-MedalRelease
+Export-ModuleMember -Function Get-MedalPayloadNames, Assert-MedalVersion, Assert-MedalBuildVersion, Get-MedalBuildVersion, Read-MedalReleasePackage, Get-MedalRelease, Assert-MedalInstallPath, Assert-MedalLocalPath, Install-MedalRelease, Install-MedalFresh, Uninstall-MedalRelease
