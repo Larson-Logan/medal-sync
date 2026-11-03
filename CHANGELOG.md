@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Fix the status panel saying **Recording / Active** whenever Medal was open.
+  It now says **Recording** only while Medal writes its replay buffer for a
+  game, and **Medal open** otherwise, with a purple tray dot instead of red.
+  `medal-sync status` says **Active (Medal open)**. If Medal keeps its replay
+  buffer in memory, the panel always shows **Medal open**.
+- Make switching PCs after quitting Medal much faster. The check that every
+  library file is on the server looked up each file separately, several
+  network round trips per file; with about 1,200 files that took around
+  100 seconds. It now lists each server folder once and takes a few seconds.
+  Any file a listing does not show is still checked directly before it is
+  reported missing.
+- Make clips open and play without long waits or stalls from a share. rclone
+  hashed the whole clip over the network each time Medal opened it (and again
+  on seeks that reopen it); the clip drive now identifies files by size and
+  time instead (`--vfs-fast-fingerprint`). New configurations also keep played
+  clips cached for an hour instead of five minutes (`mount.cacheMaxAgeSeconds`);
+  existing configurations keep their value.
 - Add **Start Medal at sign-in** to the Medal Sync tray menu, and
   `medal-sync startup [--apply | --restore]`, so an installed copy can start
   Medal through Medal Sync whenever you sign in. Before this, only the

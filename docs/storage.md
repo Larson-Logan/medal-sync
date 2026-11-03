@@ -113,7 +113,10 @@ drive fetches up to 256 MiB ahead of the player into the cache, so most clips
 download completely soon after playback starts and a slow or distant link
 (a VPN, tunnel or another network) does not run out after a few seconds.
 Played clips stay in the cache for `mount.cacheMaxAgeSeconds` after they are
-closed. If the connection to the server is slower than the clip's bitrate,
+closed (an hour for new configurations; raise an older configuration's `300`
+to keep clips you replay on the SSD). The drive recognizes a cached clip by its
+size and modification time, so opening or seeking in one never re-reads the
+whole file from the server first. If the connection to the server is slower than the clip's bitrate,
 let the clip load for a moment before playing, or play it again once cached.
 
 ## Keep a local copy and upload to the server

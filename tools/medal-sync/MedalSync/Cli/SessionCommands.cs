@@ -573,7 +573,7 @@ internal static class SessionCommands
         var checker = PrimaryStorage.Checker(context.Config, context.State, () => shutdown?.RequireTime());
         var options = new SessionOptions(context.Device, context.Config.Capture, context.Install.Versions,
             TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal);
-        return (new SessionCoordinator(store, library, mount, new MedalProcess(context.Install, launchLink), checker, clock, options,
+        return (new SessionCoordinator(store, library, mount, new MedalProcess(context.Install, launchLink, capture: context.Config.Capture), checker, clock, options,
             () => NativeBackupCompatibility.Prepare(context.Config, context.Install, context.State),
             reviewLibraryChanges is null ? null : review =>
             {

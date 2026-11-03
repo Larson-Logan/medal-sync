@@ -102,6 +102,8 @@ public sealed class StorageTests
         Assert.Contains("--vfs-cache-max-size 20Gi", line, StringComparison.Ordinal);
         Assert.Contains("--vfs-cache-min-free-space 20Gi", line, StringComparison.Ordinal);
         Assert.Contains("--vfs-read-ahead 256Mi", line, StringComparison.Ordinal);
+        // Without it rclone hashes a whole clip over the network each time Medal opens it.
+        Assert.Contains("--vfs-fast-fingerprint", args);
         Assert.Contains("--dir-cache-time 3600000s", line, StringComparison.Ordinal);
         Assert.Contains("--rc-addr 127.0.0.1:53682", line, StringComparison.Ordinal);
         Assert.DoesNotContain("--rc-user", line, StringComparison.Ordinal);

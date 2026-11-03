@@ -58,6 +58,11 @@ internal static class MountPlan
             "--vfs-cache-max-age", Duration(settings.CacheMaxAge),
             "--vfs-cache-poll-interval", Duration(settings.CachePollInterval),
             "--vfs-read-ahead", Size(PlaybackReadAheadBytes),
+            // A share or local folder is served by rclone's local backend, whose full fingerprint includes an MD5
+            // hash. rclone recomputes it every time a file is opened, reading the whole clip over the network before
+            // playback can start (and again on each reopen while seeking). Size and modification time are enough to
+            // notice a changed file; files with unsent changes are kept whatever their fingerprint.
+            "--vfs-fast-fingerprint",
             "--dir-cache-time", Duration(settings.DirCacheTime),
             "--transfers", settings.Transfers.ToString(CultureInfo.InvariantCulture),
             "--cache-dir", settings.CacheDirectory,

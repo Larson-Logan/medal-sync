@@ -100,13 +100,43 @@ internal static partial class MedalEnvironment
 /// tray instance, recorder, encoder and updater. Closing the window only hides
 /// Medal in the tray, so the window is never taken as proof that it exited.
 /// </summary>
+/// <param name="capture">Medal's clip folder, which holds its replay buffer; null reports Medal as never recording.</param>
 [SupportedOSPlatform("windows")]
-internal sealed class MedalProcess(MedalInstall install, string? launchLink = null, Action<ProcessStartInfo>? start = null) : IMedalProcess
+internal sealed class MedalProcess(MedalInstall install, string? launchLink = null, Action<ProcessStartInfo>? start = null,
+    Util.WindowsPath? capture = null) : IMedalProcess
 {
     private static readonly string[] Names = ["Medal", "MedalEncoder", "Update"];
 
+    /// <summary>How long a poll waits for the replay buffer check before reusing the last answer.</summary>
+    private static readonly TimeSpan RecordingWait = TimeSpan.FromSeconds(1);
+
     private readonly object _gate = new();
     private Process? _seen;
+    private readonly object _recordingGate = new();
+    private Task<bool>? _recordingCheck;
+    private bool _recording;
+
+    public bool IsRecording()
+    {
+        if (capture is null) return false;
+        lock (_recordingGate)
+        {
+            // The buffer is on the clip drive. A slow drive keeps the last answer instead of holding up supervision,
+            // and at most one check is ever outstanding.
+            _recordingCheck ??= Task.Run(() => MedalRecording.IsRecording(MedalRecording.BufferFolder(capture).Display, DateTime.UtcNow));
+            try
+            {
+                if (!_recordingCheck.Wait(RecordingWait)) return _recording;
+                _recording = _recordingCheck.Result;
+            }
+            catch (AggregateException)
+            {
+                _recording = false;
+            }
+            _recordingCheck = null;
+            return _recording;
+        }
+    }
 
     /// <summary>
     /// Called every few seconds while Medal runs. The Medal process found last time is checked first, through
@@ -216,6 +246,38 @@ internal sealed class MedalProcess(MedalInstall install, string? launchLink = nu
         {
             throw new UnsafeOperationException($"Windows could not open Medal at '{install.Executable}': {ex.Message}. Check the Medal installation, then retry through Medal Sync. Your session and cache are retained.");
         }
+    }
+}
+
+/// <summary>
+/// Whether Medal is recording a game. Its recorder process runs whenever Medal is open, so the process list cannot
+/// tell. While it records, Medal writes replay buffer segments into <c>Temp\RecordingBuffer</c> under its clip
+/// folder every few seconds, and it empties that folder when the game closes. Medal set to buffer in memory writes
+/// none, so it then reads as open: this can understate recording, never invent it.
+/// </summary>
+internal static class MedalRecording
+{
+    /// <summary>A segment written this recently means recording; older leftovers (after a crash) do not.</summary>
+    internal static readonly TimeSpan Recent = TimeSpan.FromSeconds(60);
+
+    public static Util.WindowsPath BufferFolder(Util.WindowsPath capture) => capture.Append("Temp", "RecordingBuffer");
+
+    public static bool IsRecording(string bufferFolder, DateTime nowUtc)
+    {
+        try
+        {
+            foreach (var file in new DirectoryInfo(bufferFolder).EnumerateFiles("*", new EnumerationOptions { AttributesToSkip = 0 }))
+            {
+                var written = file.LastWriteTimeUtc > file.CreationTimeUtc ? file.LastWriteTimeUtc : file.CreationTimeUtc;
+                var age = nowUtc - written;
+                if (age <= Recent && age >= -Recent) return true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // No buffer folder (no game recorded yet) or an unreadable one: not known to be recording.
+        }
+        return false;
     }
 }
 

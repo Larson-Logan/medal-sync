@@ -34,11 +34,11 @@ internal sealed record FinishCommandResult(int ExitCode, string Output, string E
 
 internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, DateTimeOffset? ConfirmedAt,
     int? QueuedFiles = null, long? QueuedBytes = null, string? Replica = null, bool CanRetry = false, string? Notice = null,
-    string? LastResult = null)
+    string? LastResult = null, bool Recording = false)
 {
     public string Title => Phase switch
     {
-        SessionPhase.Active => "Recording / Active",
+        SessionPhase.Active => Recording ? "Recording" : "Medal open",
         SessionPhase.Waiting => "Waiting for another PC",
         SessionPhase.RecoveryNeeded => "Recovery needed",
         SessionPhase.Unknown => "Unknown / unreachable",
@@ -124,7 +124,8 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         }
         if (progress is null || report is null || progress.SessionId != journal.SessionId) return Unknown(report?.ConfirmedAt);
         if (!Enum.IsDefined(progress.Phase) || progress.Phase is SessionPhase.Ready or SessionPhase.Waiting) return Unknown(report.ConfirmedAt);
-        return new(progress.Phase, progress.NextAction, report.ConfirmedAt, progress.QueuedFiles, progress.QueuedBytes, progress.Replica);
+        return new(progress.Phase, progress.NextAction, report.ConfirmedAt, progress.QueuedFiles, progress.QueuedBytes, progress.Replica,
+            Recording: progress.Phase == SessionPhase.Active && progress.Recording);
     }
 }
 

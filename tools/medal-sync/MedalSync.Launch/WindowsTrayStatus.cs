@@ -178,7 +178,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         string? lastResult = _finishFailure ?? status.LastResult;
         _retry.Enabled = !_finishing && status.CanRetry;
         _icon.Text = "Medal Sync: " + status.Title;
-        var icon = _icons.For(status.Phase);
+        var icon = _icons.For(status.Phase, status.Recording);
         if (!ReferenceEquals(_icon.Icon, icon)) _icon.Icon = icon;
         string text = $"{status.Title}\r\n\r\nNext action: {status.NextAction}\r\n\r\n"
             + $"Queued files: {status.QueuedFiles?.ToString() ?? "unavailable"}\r\n"

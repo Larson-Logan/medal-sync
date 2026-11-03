@@ -11,7 +11,7 @@
     "writeBackSeconds": 5,
     "cacheMaxGiB": 20,
     "minFreeGiB": 20,
-    "cacheMaxAgeSeconds": 300,
+    "cacheMaxAgeSeconds": 3600,
     "cachePollSeconds": 30,
     "dirCacheHours": 1000,
     "transfers": 2,

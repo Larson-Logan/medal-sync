@@ -84,6 +84,86 @@ public sealed class AssetAndAuditTests : IDisposable
     }
 
     [Fact]
+    public void ListedProbe_AnswersLikeTheDirectProbeFromOneListingPerFolder()
+    {
+        string root = _fixture.PathFor("listed");
+        Directory.CreateDirectory(Path.Combine(root, "Clips", "Game"));
+        Directory.CreateDirectory(Path.Combine(root, "Thumbnails"));
+        File.WriteAllBytes(Path.Combine(root, "Clips", "Game", "a.mp4"), new byte[123]);
+        File.WriteAllBytes(Path.Combine(root, "Clips", "Game", "b.mp4"), new byte[7]);
+        File.WriteAllBytes(Path.Combine(root, "Thumbnails", "a.jpg"), new byte[5]);
+        var rootPath = WindowsPath.Parse(root);
+        var direct = new CountingProbe();
+        var listed = new FileSystemProbe().ForBatch();
+        var fallback = new ListedFileSystemProbe(direct);
+        string[] paths =
+        [
+            Path.Combine(root, "Clips", "Game", "a.mp4"), Path.Combine(root, "Clips", "Game", "b.mp4"),
+            Path.Combine(root, "CLIPS", "game", "A.MP4"), Path.Combine(root, "Thumbnails", "a.jpg"),
+            Path.Combine(root, "Clips", "Game"), Path.Combine(root, "Clips", "Game", "missing.mp4"),
+            Path.Combine(root, "Absent", "x.mp4"), Path.Combine(root, "Clips", "Game", "a.mp4", "under-a-file"),
+        ];
+
+        foreach (string path in paths)
+        {
+            var expected = new FileSystemProbe().Probe(WindowsPath.Parse(path), rootPath);
+            Assert.Equal(expected, listed.Probe(WindowsPath.Parse(path), rootPath));
+            Assert.Equal(expected, fallback.Probe(WindowsPath.Parse(path), rootPath));
+        }
+        // Only what a listing cannot answer for certain is probed directly: the missing file, the absent folder
+        // and the path below a file.
+        Assert.Equal(3, direct.Calls);
+    }
+
+    [Fact]
+    public void ListedProbe_SeesFilesAddedBeforeItsFirstListingOnly()
+    {
+        string root = _fixture.PathFor("batch");
+        Directory.CreateDirectory(root);
+        var rootPath = WindowsPath.Parse(root);
+        var file = WindowsPath.Parse(Path.Combine(root, "late.mp4"));
+        var batch = new FileSystemProbe().ForBatch();
+
+        Assert.False(batch.Probe(file, rootPath).Exists);
+        File.WriteAllBytes(file.Display, new byte[3]);
+        // Absent names are always confirmed directly, so a file that appears is never reported missing.
+        Assert.True(batch.Probe(file, rootPath).Exists);
+        Assert.True(new FileSystemProbe().ForBatch().Probe(file, rootPath).Exists);
+    }
+
+    [Fact]
+    public void Check_UsesOneBatchProbeForTheWholePass()
+    {
+        var probe = new BatchingProbe();
+        AssetInventory.Check(AssetInventory.Collect(Library()), [WindowsPath.Parse(@"M:\Clips")], probe);
+        Assert.Equal(1, probe.Batches);
+    }
+
+    private sealed class CountingProbe : IFileProbe
+    {
+        public int Calls { get; private set; }
+
+        public FileProbeResult Probe(WindowsPath path, WindowsPath root)
+        {
+            Calls++;
+            return new FileSystemProbe().Probe(path, root);
+        }
+    }
+
+    private sealed class BatchingProbe : IFileProbe
+    {
+        public int Batches { get; private set; }
+
+        public FileProbeResult Probe(WindowsPath path, WindowsPath root) => throw new InvalidOperationException("Only the batch probe is used.");
+
+        public IFileProbe ForBatch()
+        {
+            Batches++;
+            return new FakeProbe();
+        }
+    }
+
+    [Fact]
     public void Audit_DetectsMissingMediaChangesAndRepairsOnlyWhatExists()
     {
         string db = _fixture.CreateLibrary("pc");

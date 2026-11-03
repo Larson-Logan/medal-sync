@@ -249,10 +249,13 @@ wait for **Ready** before switching PCs, updating or uninstalling.
 
 Open **Medal Sync Status** from the Start menu, double-click its notification-area
 icon, or run `medal-sync-launch.exe --status`. A configured desktop launch starts
-the tray view automatically. Starting, Recording / Active, Uploading, Verifying,
+the tray view automatically. Starting, Medal open, Recording, Uploading, Verifying,
 Ready, Waiting for another PC, Recovery needed and Unknown / unreachable are
-distinct states. The notification-area icon carries a colored dot for the
-state: green for Ready, red while recording, blue while starting, uploading or
+distinct states. Recording means Medal is writing its replay buffer for a game;
+Medal open means it is running without recording (if Medal keeps its replay
+buffer in memory, it always shows as Medal open). The notification-area icon
+carries a colored dot for the state: green for Ready, red while recording,
+purple while Medal is open but not recording, blue while starting, uploading or
 verifying, gray while waiting for another PC or for storage, and amber when
 recovery is needed or the state is unknown. Hover over it for the state's name.
 The panel shows available queued files and bytes, the current

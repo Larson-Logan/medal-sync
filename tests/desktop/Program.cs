@@ -52,9 +52,13 @@ internal static class Program
             Check(status.Text.Contains("synthetic-replica", StringComparison.Ordinal), "Replica is readable");
             Check(status.Text.Contains("Last confirmed:", StringComparison.Ordinal), "Confirmation time is readable");
             Check(retry.Enabled == (phase == SessionPhase.RecoveryNeeded), "Only supported recovery enables retry");
-            Check(ReferenceEquals(icon.Icon, icons.For(phase)), "The tray shows the Medal Sync icon with this state's dot");
+            Check(ReferenceEquals(icon.Icon, icons.For(phase, recording: false)), "The tray shows the Medal Sync icon with this state's dot");
             Check(icon.Text == "Medal Sync: " + new DesktopStatus(phase, "", null).Title, "The tooltip names the state, so color is never the only cue");
         }
+        lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
+        Until(view, () => status.Text.Contains("Next action: Synthetic recording\r\n", StringComparison.Ordinal));
+        Check(icon.Text == "Medal Sync: Recording" && ReferenceEquals(icon.Icon, icons.For(SessionPhase.Active)), "Only a recording session shows the red recording dot");
+        Check(!ReferenceEquals(icons.For(SessionPhase.Active, recording: false), icons.For(SessionPhase.Active)), "Medal open without a game has its own dot");
         CheckIcons(icons, panel);
         Check(status.ReadOnly && status.TabStop && status.AccessibleName!.Contains("next action", StringComparison.Ordinal), "Status supports keyboard and accessibility APIs");
         Check(panel.CancelButton is Button, "Escape closes the panel");
@@ -97,7 +101,7 @@ internal static class Program
     {
         Check(ReferenceEquals(panel.Icon, icons.Window), "The status window uses the Medal Sync icon");
         Check(new[] { SessionPhase.Ready, SessionPhase.Active, SessionPhase.Uploading, SessionPhase.Waiting, SessionPhase.RecoveryNeeded }
-            .Select(AppIcons.DotColor).Distinct().Count() == 5, "Ready, recording, working, waiting and attention have distinct dots");
+            .Select(AppIcons.DotColor).Append(AppIcons.OpenColor).Distinct().Count() == 6, "Ready, recording, Medal open, working, waiting and attention have distinct dots");
         // System.Drawing's size matching ignores 256 px entries (stored as 0), so read the icon file's own directory.
         using (var stream = typeof(AppIcons).Assembly.GetManifestResourceStream("MedalSync.Launch.medal-sync.ico")!)
         using (var reader = new BinaryReader(stream))

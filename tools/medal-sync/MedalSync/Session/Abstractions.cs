@@ -11,6 +11,12 @@ internal interface IMedalProcess
     /// <summary>True while any Medal process (UI, tray, recorder, encoder) is alive.</summary>
     bool IsRunning();
 
+    /// <summary>
+    /// True while Medal is recording a game. Medal's recorder runs whenever Medal is open, so this is read from
+    /// its replay buffer instead. Advisory: it only changes the status shown, never ownership or uploads.
+    /// </summary>
+    bool IsRecording() => false;
+
     /// <summary>Starts Medal normally, as the user, without elevation.</summary>
     void Launch();
 }

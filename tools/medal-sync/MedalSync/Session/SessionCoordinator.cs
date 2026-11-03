@@ -82,7 +82,8 @@ internal sealed class SessionCoordinator(
     Func<LaunchPreflight>? preflight = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
-    private const string ActiveMessage = "Medal is active. Quit Medal normally from its tray icon when you want to switch PCs.";
+    private const string ActiveMessage = "Medal is open. Quit Medal normally from its tray icon when you want to switch PCs.";
+    private const string RecordingMessage = "Medal is recording a game. Quit Medal normally from its tray icon when you want to switch PCs.";
     private string? _uploadSession;
     private readonly Dictionary<ulong, (DateTimeOffset Since, long Tries)> _uploadRetries = [];
 
@@ -746,7 +747,8 @@ internal sealed class SessionCoordinator(
                     consecutiveStatusFailures = 0;
                     // Also restores the recording limit if Medal reopened while uploads were finishing.
                     if (mount.UseUploadLimit(recording: true) is { } limitProblem) Once(limitProblem);
-                    Report(SessionPhase.Active, ActiveMessage, session);
+                    bool recording = IsRecording();
+                    Report(SessionPhase.Active, recording ? RecordingMessage : ActiveMessage, session, recording: recording);
                 }
                 else
                 {
@@ -787,10 +789,18 @@ internal sealed class SessionCoordinator(
     private static bool IsExpected(Exception ex) =>
         ex is MedalSyncException or IOException or InvalidDataException or UnauthorizedAccessException or DbException;
 
-    private void Report(SessionPhase phase, string action, string? session = null, int? files = null, long? bytes = null, string? replica = null, bool isOutcome = false)
+    /// <summary>Whether Medal is recording a game. Only changes the status shown, so a failed check means "open".</summary>
+    private bool IsRecording()
+    {
+        try { return medal.IsRecording(); }
+        catch (Exception) { return false; }
+    }
+
+    private void Report(SessionPhase phase, string action, string? session = null, int? files = null, long? bytes = null, string? replica = null,
+        bool isOutcome = false, bool recording = false)
     {
         // A disconnected or failed view must never change ownership, uploads or recovery.
-        try { progress?.Invoke(new(phase, action, session, files, bytes, replica, isOutcome)); }
+        try { progress?.Invoke(new(phase, action, session, files, bytes, replica, isOutcome, recording)); }
         catch (Exception) { /* Telemetry is advisory. */ }
     }
 

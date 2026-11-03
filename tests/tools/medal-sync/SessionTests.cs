@@ -49,6 +49,10 @@ public sealed class SessionTests : IDisposable
 
         public bool IsRunning() => Running;
 
+        public Func<bool>? Recording { get; set; }
+
+        public bool IsRecording() => Recording?.Invoke() ?? false;
+
         public void Launch()
         {
             OnLaunch?.Invoke();
@@ -462,6 +466,34 @@ public sealed class SessionTests : IDisposable
         Assert.True(pc.Medal.Running);
         Assert.True(pc.Mount.IsRunning);
         Assert.Empty(pc.Mount.Forgotten);
+        Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void SupervisionReportsRecordingOnlyWhileMedalRecordsAGame()
+    {
+        var reports = new List<SessionProgress>();
+        var pc = Computer(FirstPc, "first", progress: reports.Add);
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        int polls = 0;
+        // Idle, then a game, then a failing check: a check that cannot run never claims recording.
+        pc.Medal.Recording = () => polls switch
+        {
+            < 2 => false,
+            < 4 => true,
+            _ => throw new IOException("clip drive is slow"),
+        };
+        using var cancel = new CancellationTokenSource();
+        _clock.OnSleep = () => { if (++polls == 6) cancel.Cancel(); };
+
+        Assert.Equal(FinishStatus.Pending, pc.Coordinator.Supervise(session, _ => { }, cancel.Token).Status);
+
+        var active = reports.Where(r => r.Phase == SessionPhase.Active).ToList();
+        Assert.False(active[0].Recording);
+        Assert.Contains("Medal is open", active[0].NextAction, StringComparison.Ordinal);
+        Assert.Contains(active, r => r.Recording && r.NextAction.Contains("recording a game", StringComparison.Ordinal));
+        Assert.False(active[^1].Recording);
         Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
     }
 

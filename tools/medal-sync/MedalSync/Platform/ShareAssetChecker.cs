@@ -61,5 +61,7 @@ internal sealed class ShareAssetChecker(WindowsPath capture, WindowsPath serverC
     private sealed class RebasingProbe(WindowsPath from, WindowsPath to, IFileProbe inner) : IFileProbe
     {
         public FileProbeResult Probe(WindowsPath path, WindowsPath root) => inner.Probe(path.Rebase(from, to), root.Rebase(from, to));
+
+        public IFileProbe ForBatch() => new RebasingProbe(from, to, inner.ForBatch());
     }
 }

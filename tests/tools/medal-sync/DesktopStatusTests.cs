@@ -37,6 +37,55 @@ public sealed class DesktopStatusTests
         Assert.False(status.CanRetry);
     }
 
+    [Theory]
+    [InlineData(false, "Medal open")]
+    [InlineData(true, "Recording")]
+    public void ActiveSaysRecordingOnlyWhileMedalRecords(bool recording, string title)
+    {
+        var report = Report(SessionPhase.Active);
+        report = report with { Progress = report.Progress with { Recording = recording } };
+
+        var status = DesktopStatus.Resolve(Journal, Me, report, true, Now);
+
+        Assert.Equal(SessionPhase.Active, status.Phase);
+        Assert.Equal(recording, status.Recording);
+        Assert.Equal(title, status.Title);
+    }
+
+    [Fact]
+    public void RecordingIsIgnoredOutsideTheActivePhase()
+    {
+        var report = Report(SessionPhase.Uploading);
+        report = report with { Progress = report.Progress with { Recording = true } };
+
+        Assert.False(DesktopStatus.Resolve(Journal, Me, report, true, Now).Recording);
+    }
+
+    [Fact]
+    public void ReplayBufferSegmentsShowWhetherMedalIsRecording()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "medal-sync-recording-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var now = DateTime.UtcNow;
+            Assert.False(MedalRecording.IsRecording(folder, now));
+            Directory.CreateDirectory(folder);
+            Assert.False(MedalRecording.IsRecording(folder, now));
+            string segment = Path.Combine(folder, "buffer-vbuf-1.0.bin");
+            File.WriteAllBytes(segment, new byte[16]);
+            Assert.True(MedalRecording.IsRecording(folder, DateTime.UtcNow));
+            // A leftover from a crash is not a game being recorded.
+            File.SetCreationTimeUtc(segment, now.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(segment, now.AddMinutes(-10));
+            Assert.False(MedalRecording.IsRecording(folder, now));
+            Assert.Equal(@"M:\Clips\Temp\RecordingBuffer", MedalRecording.BufferFolder(WindowsPath.Parse(@"M:\Clips")).Display);
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
     [Fact]
     public void StorageOutageIsACalmWaitNotAnError()
     {

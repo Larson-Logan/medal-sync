@@ -62,7 +62,7 @@ The defaults suit most PCs.
 | `cacheMaxGiB` | `20` | At least 1 | Soft size limit for cached files (`--vfs-cache-max-size`). New recordings stay cached until they upload, even past this limit. |
 | `minFreeGiB` | `20` | At least 1 | Free space to keep on the cache's disk (`--vfs-cache-min-free-space`). Launch and downloads into the persistent copy refuse to go below it. |
 | `spaceWarningGiB` | Twice `minFreeGiB`, and at least 10 above it | Above `minFreeGiB`, at most 1000000 | Free space at which the *Low disk space* notice appears while recording. See [low disk space while recording](storage.md#low-disk-space-while-recording). |
-| `cacheMaxAgeSeconds` | `300` | Whole seconds, above 0 | How long unused files stay in the cache (`--vfs-cache-max-age`). |
+| `cacheMaxAgeSeconds` | `3600` | Whole seconds, above 0 | How long unused files stay in the cache (`--vfs-cache-max-age`), so a clip played again soon after is read from the SSD. The cache never grows past `cacheMaxGiB`. |
 | `cachePollSeconds` | `30` | Whole seconds, above 0 | How often rclone checks the cache for expired files (`--vfs-cache-poll-interval`). |
 | `dirCacheHours` | `1000` | At least 1 | How long folder listings are cached (`--dir-cache-time`). |
 | `transfers` | `2` | 1 to 8 | Uploads run in parallel (`--transfers`). |
