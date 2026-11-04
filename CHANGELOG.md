@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix the backup that `launch --replace-local-library` promises being deleted
+  after about ten ordinary handoffs, together with the never-shared clips it
+  held. That backup, and the ones `repair` and `relocate` take, now go to
+  `Backups/kept-library-TIME-ID/`, which the automatic prune never touches.
+  Only a reviewed `retention` removes them, as a new kind it lists and warns
+  about (#106).
 - Fix the status panel saying **Recording / Active** whenever Medal was open.
   It now says **Recording** only while Medal writes its replay buffer for a
   game, and **Medal open** otherwise, with a purple tray dot instead of red.

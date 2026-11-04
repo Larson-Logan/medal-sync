@@ -219,7 +219,8 @@ internal sealed class SessionCoordinator(
             // The verified committed generation may intentionally contain no
             // clips. The history check above (or explicit replacement review)
             // authorizes replacing this PC's old entries, with a backup.
-            restored = library.Restore(generation.Snapshot, allowEmptyReplacement: true);
+            // --replace-local-library skipped the history check, so this backup may hold the only copy of unshared entries.
+            restored = library.Restore(generation.Snapshot, allowEmptyReplacement: true, keepBackup: options.ReplaceLocalLibrary);
             RequireCaptureFolder();
             warning = Join(checkedStorage.Warning, replication?.Prepare(generation.Snapshot));
             mount.Start(session, forRecording: true);
@@ -258,10 +259,14 @@ internal sealed class SessionCoordinator(
             return new LaunchOutcome(LaunchStatus.Waiting, finished.Message, session);
         }
         if (shutdown is null) medal.Launch();
-        string backup = restored.Changed ? $" This PC's previous library was backed up to {restored.BackupPath}." : "";
+        string backup = !restored.Changed ? ""
+            : options.ReplaceLocalLibrary ? $" This PC's previous library was backed up to {restored.BackupPath}. {KeptBackupNote}"
+            : $" This PC's previous library was backed up to {restored.BackupPath}.";
         return new LaunchOutcome(LaunchStatus.Started, "Medal started with the shared library." + backup + (warning is null ? "" : " " + warning), session,
             Warning: warning);
     }
+
+    internal const string KeptBackupNote = "That backup is never removed automatically; only a reviewed 'medal-sync retention' removes it.";
 
     private static string? Join(string? first, string? second) =>
         first is null ? second : second is null ? first : first + " " + second;
@@ -311,7 +316,7 @@ internal sealed class SessionCoordinator(
             "This PC's Medal library has changes that were never shared, usually because Medal was opened without medal-sync. "
             + (pruned ? "Older shared generations were removed by retention, so a library that matches one of them can no longer be recognized. " : "")
             + "Nothing was changed. Keep a copy with 'medal-sync snapshot export --out FILE', then run "
-            + "'medal-sync launch --replace-local-library' to replace it with the shared library (a backup is kept).");
+            + "'medal-sync launch --replace-local-library' to replace it with the shared library (a backup is kept until you remove it).");
     }
 
     private void RequireCaptureFolder()
