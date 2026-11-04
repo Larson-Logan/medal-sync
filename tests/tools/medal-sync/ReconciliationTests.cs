@@ -355,6 +355,38 @@ public sealed class ReconciliationTests : IDisposable
         Assert.Throws<UnsafeOperationException>(() => Recover(e, rollback, apply: true));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public void ARollbackStoppedBetweenItsTwoStepsCanStillFinishOrContinue(bool rollback)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var e = Prepare();
+        Assert.Equal(-1, EnrollmentCommands.Apply(e.Config, e.Install, e.State, e.Store, e.Device, e.Review, e.Candidate, e.Evidence,
+            new StringWriter(), stopAfter: "capture-configured"));
+        // As if a rollback put back the original rows, then stopped before the capture folder.
+        var original = LibrarySnapshot.FromCanonicalJson(File.ReadAllBytes(Path.Combine(e.Evidence, "local-before.json")));
+        LibraryRestorer.Restore(_incoming, original, new RestoreOptions(MedalFixture.AccountId, e.Evidence, AllowEmptyReplacement: true), DateTimeOffset.UtcNow);
+        Assert.Equal(e.BeforeDigest, Read(_incoming).Digest());
+        Assert.True(WindowsPath.Parse(ClipFolder()).Equals(e.Config.Capture));
+
+        Assert.Equal(0, Recover(e, rollback, apply: true));
+        Assert.Equal(OwnershipState.Clean, e.Store.ReadJournal().State);
+        if (rollback)
+        {
+            Assert.Equal(0, e.Store.ReadJournal().CommittedGeneration);
+            Assert.Equal(e.BeforeDigest, Read(_incoming).Digest());
+            Assert.True(WindowsPath.Parse(ClipFolder()).Equals(WindowsPath.Parse(e.Root)));
+        }
+        else
+        {
+            Assert.Equal(1, e.Store.ReadJournal().CommittedGeneration);
+            Assert.Equal(e.Candidate.Digest(), Read(_incoming).Digest());
+            Assert.True(WindowsPath.Parse(ClipFolder()).Equals(e.Config.Capture));
+        }
+    }
+
     [Fact]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public void ACaughtApplyFailureContinuesOnceItsCauseIsFixed()

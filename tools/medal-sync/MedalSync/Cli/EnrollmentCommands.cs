@@ -297,9 +297,11 @@ internal static class EnrollmentCommands
         if (!restored && digest != review.LocalDigest)
             throw new UnsafeOperationException("This PC's library is neither its original nor the reviewed union. Nothing was changed; keep the review folder and investigate.");
         bool captured = CaptureIs(install, config.Capture.Display);
-        if ((!captured && !CaptureIs(install, review.Source)) || (captured && !restored))
+        if (!captured && !CaptureIs(install, review.Source))
             throw new UnsafeOperationException("Medal's capture folder is neither the original nor the shared one. Nothing was changed.");
-        string where = captured ? "the union is restored and Medal records to the shared drive"
+        // The original library with the shared capture folder is a rollback stopped between its two steps; either way works from it.
+        string where = captured && restored ? "the union is restored and Medal records to the shared drive"
+            : captured ? "a rollback stopped part-way: this PC's original library is back, but Medal still records to the shared drive"
             : restored ? "the union is restored; Medal still records to the original folder"
             : "this PC's original library is unchanged; some files may already be copied";
         output.WriteLine($"Enrollment stopped at '{receipt.Stage}': {where}.");
