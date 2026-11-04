@@ -8,6 +8,15 @@
   `Backups/kept-library-TIME-ID/`, which the automatic prune never touches.
   Only a reviewed `retention` removes them, as a new kind it lists and warns
   about (#106).
+- Fix the portable updater refusing every configured install with
+  `Medal Sync check failed: status --json.` It now checks readiness with
+  `setup check`, as Windows setup does, before it takes the session lock, so
+  `-Apply`, `-Uninstall -Apply` and `-Install -Apply` over retained state work
+  again from any installed version. It still refuses while Medal or supervision
+  runs, a session login is retained, or the library is not Ready (#98).
+- Say to exit the status view, instead of to quit Medal, when the status view is
+  the only thing keeping setup, uninstall or the portable updater from running
+  (#109).
 - Fix the status panel saying **Recording / Active** whenever Medal was open.
   It now says **Recording** only while Medal writes its replay buffer for a
   game, and **Medal open** otherwise, with a purple tray dot instead of red.
