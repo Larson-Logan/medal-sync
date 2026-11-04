@@ -105,6 +105,31 @@ public sealed class WindowsSetupTests : IDisposable
         Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(_fixture.PathFor("absent"), app, supervisor));
     }
 
+    [Theory]
+    [InlineData("Other", false, SetupMaintenance.ApplicationRunningMessage)]       // Medal running.
+    [InlineData("None", true, SetupMaintenance.ApplicationRunningMessage)]         // Supervisor running.
+    [InlineData("StatusViewOnly", true, SetupMaintenance.ApplicationRunningMessage)]
+    [InlineData("StatusViewOnly", false, SetupMaintenance.StatusViewOpenMessage)]  // Status view only.
+    public void SetupNamesWhatIsStillRunning(string applications, bool supervisor, string expected)
+    {
+        var refusal = Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(_fixture.PathFor("absent"),
+            Enum.Parse<RunningApplications>(applications), supervisor));
+        Assert.Equal(expected, refusal.Message);
+    }
+
+    [Theory]
+    [InlineData(false, 0, false, "None")]
+    [InlineData(false, 0, true, "None")]
+    [InlineData(false, 1, true, "StatusViewOnly")]
+    [InlineData(false, 1, false, "Other")] // A launcher without the view is a supervisor or a starting launch.
+    [InlineData(false, 2, true, "Other")]  // The view plus a supervisor.
+    [InlineData(true, 1, true, "Other")]   // The view plus Medal or the CLI.
+    [InlineData(true, 0, false, "Other")]
+    public void OnlyALoneStatusViewIsReportedAsTheStatusView(bool other, int launchers, bool viewOpen, string expected)
+    {
+        Assert.Equal(Enum.Parse<RunningApplications>(expected), SetupMaintenance.Classify(other, launchers, () => viewOpen));
+    }
+
     [Fact]
     public void RetainedSessionAndPartialConfigurationBlockSetup()
     {

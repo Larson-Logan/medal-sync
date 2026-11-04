@@ -10,7 +10,7 @@ namespace MedalSync.Launch;
 /// <summary>A separate, disposable view. The supervisor never depends on this process.</summary>
 internal sealed class WindowsTrayStatus : ApplicationContext
 {
-    private const string MutexName = @"Local\LarsonServer.MedalSync.StatusView";
+    private const string MutexName = SetupMaintenance.StatusViewMutexName;
     private const string OpenEventName = @"Local\LarsonServer.MedalSync.OpenStatus";
     private static readonly TimeSpan VisibleReadInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan HiddenReadInterval = TimeSpan.FromSeconds(5);
