@@ -47,7 +47,8 @@ internal static class CommandRunner
 
         Changes state (most only preview until you add --apply):
           enroll --out DIRECTORY [--apply]       Preview/review a lossless union with this PC, then enroll it
-          enroll recover --out DIRECTORY [--apply]  Recover an exact native-backup rollback after enrollment
+          enroll recover --out DIRECTORY [--rollback] [--apply]  Continue or roll back an interrupted
+                                                 enroll --apply, or recover a native-backup rollback
           config create --account-id ID --cache-root DIR --remote PATH --out FILE
                         (--new-library | --library-id ID) [--spike] [--apply]
                         [--capture-folder M:\Clips] [--rclone-path FILE] [--sync-folder ID] [--sync-pattern PATTERN]

@@ -115,6 +115,8 @@ internal sealed class SessionCoordinator(
         }
         if (Platform.PersistentMediaRefresh.IsPending(journal))
             return new LaunchOutcome(LaunchStatus.Blocked, "A persistent media refresh retains ownership. Retry its exact refresh-media review before opening Medal.", journal.SessionId);
+        if (EnrollmentOwnership.IsPending(journal) && journal.Owner?.DeviceId == Me.DeviceId)
+            return new LaunchOutcome(LaunchStatus.Blocked, EnrollmentOwnership.Interrupted(options.EnrollmentFolder), journal.SessionId);
         if (medal.IsRunning())
         {
             if (journal.State == OwnershipState.Active && journal.Owner?.DeviceId == Me.DeviceId)
@@ -383,6 +385,8 @@ internal sealed class SessionCoordinator(
         var journal = store.ReadJournal();
         if (Platform.PersistentMediaRefresh.IsPending(journal))
             return new FinishOutcome(FinishStatus.Blocked, "Retry the exact refresh-media review; its ownership and previous media are retained.", journal.CommittedGeneration);
+        if (EnrollmentOwnership.IsPending(journal) && journal.Owner?.DeviceId == Me.DeviceId)
+            return new FinishOutcome(FinishStatus.Blocked, EnrollmentOwnership.Interrupted(options.EnrollmentFolder), journal.CommittedGeneration);
         if (!journal.IsOwnedBy(Me, session))
         {
             return new FinishOutcome(FinishStatus.Blocked, $"This PC does not own session {session}.", journal.CommittedGeneration);

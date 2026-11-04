@@ -106,7 +106,7 @@ library, for example a copy.
 | `storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]` | Allocates one pre-generated Google Drive journal ID for a new cloud library. Prints only the ID; creates no Drive file. Reuse it with `config create --storage-mode cloud --cloud-journal-id ID` on every PC. |
 | `init [--apply]` | Creates a new shared library from this PC as generation 0. Every clip must already be on primary storage; cloud mode instead uploads and verifies the persistent local copy first. Only for a new library; never run it against an existing journal. |
 | `enroll --out DIR [--apply]` | Adds this PC to an existing library. The preview writes a review of the merged library to `DIR`; apply uses that exact review. |
-| `enroll recover --out DIR [--apply]` | Restores the merged library and this PC's original device settings from an interrupted enrollment's review. Run `finish` afterwards. |
+| `enroll recover --out DIR [--rollback] [--apply]` | Handles two cases. See [enrollment recovery](#enrollment-recovery). |
 | `storage init-primary [--apply]` | Marks a new, empty primary folder or rclone remote for this library, so you can [switch primaries](storage.md#switch-primaries). Needs `replication.localCopyRoot` and a Ready library. |
 | `replicate retry [--target NAME] [--apply]` | Previews pending optional cloud copies of the committed generation while Ready. `--apply` copies and verifies from this PC's persistent copy, otherwise primary storage, without taking ownership. Launch, shutdown or a changed journal/configuration cancels unfinished work. Exit 3 means canceled or still pending. See [retry cloud copies](storage.md#retry-cloud-copies-while-ready). |
 | `replica verify [--target NAME] [--apply]` | Previews, then reads back every file of the committed generation at each cloud copy while Ready. Never copies, replaces or deletes. Exit 1 means missing or different files, 3 incomplete. See [check cloud copies](storage.md#check-cloud-copies-on-demand). |
@@ -146,6 +146,28 @@ Each option maps to a field in `config.json`; see the
 | --- | --- |
 | `launch [--wait-for-server SECONDS] [--medal-link URL] [--replace-local-library]` | Starts Medal through Medal Sync and supervises it until it exits, then hands off. `--wait-for-server` is 0 to 600 seconds. The desktop launcher normally runs this for you. |
 | `finish [--accept-library-changes]` | Finishes this PC's interrupted session: drains uploads, verifies storage, publishes and releases ownership. Exit 3 means storage is still unavailable. `--accept-library-changes` approves the clip removals that finish listed; review them first. |
+
+### Enrollment recovery
+
+`enroll recover --out DIR` previews; add `--apply` with Medal quit to act. It
+handles two cases, and refuses anything else without changing it:
+
+- **An interrupted `enroll --apply`.** The process was stopped (Ctrl+C, closed
+  window, crash or reboot) or failed while this PC held the library for the
+  enrollment. Launch and finish refuse to give that ownership back and name
+  `DIR`. `apply.json` there says where it stopped: `prepared`, `copying`,
+  `copied`, `restored` or `capture-configured`. Without `--rollback`, recovery
+  finishes the enrollment: copies already on the server with the same bytes
+  are reused, then the merged library is restored and published. With
+  `--rollback`, it puts back this PC's original library and capture folder and
+  gives the library back. Files already copied to the server stay there. An
+  apply that stopped at `prepared` never took the library; prepare a fresh
+  preview in a new folder instead. Never use `launch --replace-local-library`
+  for this; it would drop this PC's own clips from Medal.
+- **Medal's native backup put the pre-enrollment shared library back** after
+  enrollment published, while this PC still holds its draining session.
+  Recovery restores the merged library and this PC's original device settings.
+  Run `finish` afterwards.
 
 `launch --replace-local-library` is only for a PC whose Medal library has
 changes that were never shared, usually because Medal was opened without Medal

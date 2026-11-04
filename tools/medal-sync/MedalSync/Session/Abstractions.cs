@@ -143,4 +143,8 @@ internal sealed record SessionOptions(
     TimeSpan DrainTimeout,
     TimeSpan PollInterval,
     bool AcceptLibraryChanges = false,
-    bool ReplaceLocalLibrary = false);
+    bool ReplaceLocalLibrary = false)
+{
+    /// <summary>The review folder of this PC's interrupted <c>enroll --apply</c>, when one is recorded; named in its refusal.</summary>
+    public string? EnrollmentFolder { get; init; }
+}

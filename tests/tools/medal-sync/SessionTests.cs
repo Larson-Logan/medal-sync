@@ -207,13 +207,16 @@ public sealed class SessionTests : IDisposable
     private Pc Computer(DeviceIdentity device, string machine, bool acceptChanges = false, bool replaceLocal = false, string? database = null, Action? prepareNativeBackup = null,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null,
         ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null, SpacePressureMonitor? space = null,
-        Func<LaunchPreflight>? preflight = null)
+        Func<LaunchPreflight>? preflight = null, string? enrollmentFolder = null)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
         var mount = new FakeMount();
         var options = new SessionOptions(device, WindowsPath.Parse(@"M:\Clips"), Versions,
-            TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal);
+            TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal)
+        {
+            EnrollmentFolder = enrollmentFolder,
+        };
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
         return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space, preflight));
     }
@@ -236,6 +239,74 @@ public sealed class SessionTests : IDisposable
         var other = Computer(SecondPc, "second");
         Assert.Equal(LaunchStatus.Blocked, other.Coordinator.Launch().Status);
         Assert.Equal(before, _store.ReadJournal());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnInterruptedEnrollmentIsNeverGivenBackByLaunchOrFinish(bool caughtFailure)
+    {
+        // A local-only clip: giving the start back would lead to the --replace-local-library refusal.
+        string db = _fixture.CreateLibrary("first");
+        MedalFixture.AddContent(db, "local-only", video: @"C:\Recordings\local-only.mp4");
+        string folder = _fixture.PathFor("enrollment-review");
+        var pc = Computer(FirstPc, "first", database: db, enrollmentFolder: folder);
+        string session = SessionCoordinator.NewId();
+        // As enroll --apply takes ownership; a killed apply stays STARTING, a caught failure becomes RECOVERY_REQUIRED.
+        _store.Update(r => Ownership.Acquire(r, FirstPc, session, _clock.Now) with { Reason = EnrollmentOwnership.Reason(session) }, TimeSpan.FromSeconds(1));
+        if (caughtFailure)
+            _store.Update(r => Ownership.RequireRecovery(r, FirstPc, session, EnrollmentOwnership.Reason(session) + " stopped", _clock.Now), TimeSpan.FromSeconds(1));
+        var before = _store.ReadJournal();
+        string digest = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId).Digest();
+
+        var launched = pc.Coordinator.Launch();
+        var finished = pc.Coordinator.Finish(session);
+
+        foreach (string message in new[] { launched.Message, finished.Message })
+        {
+            Assert.Contains(folder, message, StringComparison.Ordinal);
+            Assert.Contains("apply.json", message, StringComparison.Ordinal);
+            Assert.Contains("enroll recover", message, StringComparison.Ordinal);
+            Assert.Contains("Do not use 'launch --replace-local-library'", message, StringComparison.Ordinal);
+        }
+        Assert.Equal(LaunchStatus.Blocked, launched.Status);
+        Assert.Equal(FinishStatus.Blocked, finished.Status);
+        Assert.Equal(before, _store.ReadJournal());
+        Assert.Empty(pc.Mount.RetainedAbortedStarts);
+        Assert.Empty(pc.Mount.Starts);
+        Assert.Equal(0, pc.Medal.Launches);
+        Assert.Equal(digest, LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId).Digest());
+
+        // Another PC only waits; it never takes over a half-finished enrollment.
+        var other = Computer(SecondPc, "second");
+        Assert.NotEqual(LaunchStatus.Started, other.Coordinator.Launch().Status);
+        Assert.Equal(before.Revision, _store.ReadJournal().Revision);
+    }
+
+    [Fact]
+    public void AnInterruptedEnrollmentRefusalStillExplainsWithoutARecordedFolder()
+    {
+        string session = SessionCoordinator.NewId();
+        _store.Update(r => Ownership.Acquire(r, FirstPc, session, _clock.Now) with { Reason = EnrollmentOwnership.Reason(session) }, TimeSpan.FromSeconds(1));
+        var outcome = Computer(FirstPc, "first").Coordinator.Launch();
+        Assert.Equal(LaunchStatus.Blocked, outcome.Status);
+        Assert.Contains("the folder you passed to 'enroll --out'", outcome.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PendingEnrollmentFolderIsReadOnlyForItsSession()
+    {
+        string root = _fixture.PathFor("state");
+        string session = SessionCoordinator.NewId();
+        Assert.Null(EnrollmentOwnership.PendingFolder(root));
+        EnrollmentOwnership.WritePending(root, session, @"C:\Private\enroll");
+        Assert.Equal(@"C:\Private\enroll", EnrollmentOwnership.PendingFolder(root));
+        Assert.Equal(@"C:\Private\enroll", EnrollmentOwnership.PendingFolder(root, session));
+        Assert.Null(EnrollmentOwnership.PendingFolder(root, SessionCoordinator.NewId()));
+        File.WriteAllText(Path.Combine(root, "enrollment-pending.json"), "{");
+        Assert.Null(EnrollmentOwnership.PendingFolder(root));
+        EnrollmentOwnership.ClearPending(root);
+        Assert.Null(EnrollmentOwnership.PendingFolder(root));
     }
 
     [Fact]

@@ -171,6 +171,7 @@
     "tools/medal-sync/MedalSync/Config/ReplicationConfig.cs": ["unit", "desktop", "storage"],
     "tools/medal-sync/MedalSync/Coordination/CloudCoordination.cs": ["unit", "desktop", "storage"],
     "tools/medal-sync/MedalSync/Coordination/CoordinationStore.cs": ["unit", "desktop", "storage"],
+    "tools/medal-sync/MedalSync/Coordination/EnrollmentOwnership.cs": ["unit", "desktop", "storage"],
     "tools/medal-sync/MedalSync/Coordination/GenerationHistory.cs": ["unit", "desktop", "storage"],
     "tools/medal-sync/MedalSync/Coordination/GenerationStore.cs": ["unit", "desktop", "storage"],
     "tools/medal-sync/MedalSync/Coordination/Ownership.cs": ["unit", "desktop", "storage"],

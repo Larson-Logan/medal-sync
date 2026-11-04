@@ -249,4 +249,145 @@ public sealed class ReconciliationTests : IDisposable
         Assert.NotEmpty(DatabaseBackup.List(evidence, MedalFixture.AccountId));
         Assert.True(File.Exists(Path.Combine(evidence, "apply.json")));
     }
+
+    private sealed record Enrollment(MedalSyncConfig Config, MedalInstall Install, LocalState State, CoordinationStore Store,
+        DeviceIdentity Device, EnrollmentReview Review, LibrarySnapshot Candidate, string Evidence, string Root, string Source,
+        string Target, string BeforeDigest, string SettingsBefore);
+
+    /// <summary>The same synthetic enrollment as above, with its preview files saved as 'enroll' writes them.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private Enrollment Prepare()
+    {
+        string captureDrive = Enumerable.Range('M', 14).Select(c => (char)c + @":\").First(d => !Directory.Exists(d));
+        string root = _fixture.PathFor("source");
+        Directory.CreateDirectory(root);
+        string source = Path.Combine(root, "unique.mp4");
+        File.WriteAllText(source, "synthetic recording");
+        using (var db = MedalFixture.Open(_incoming)) MedalFixture.SetSetting(db, "ClipFolder", System.Text.Json.JsonSerializer.Serialize(root));
+        MedalFixture.AddContent(_incoming, "unique", video: source, metadata: "{\"title\":\"Unique\",\"isFavorited\":true}");
+        var local = Read(_incoming);
+        var device = new DeviceIdentity(new string('b', 32), "synthetic second PC");
+        var config = new MedalSyncConfig(1, new string('a', 32), MedalFixture.AccountId, _fixture.PathFor("coordination"),
+            _fixture.PathFor("server"), captureDrive + "Clips", _fixture.PathFor("cache"), "unused.exe",
+            new MountConfig(5, 20, 20, 300, 30, 1000, 2, 53682), 4, []);
+        Directory.CreateDirectory(config.ServerCapture.Display);
+        File.WriteAllText(config.ServerCapture.Append(MedalSyncConfig.StorageMarker).Display, config.LibraryId);
+        var shared = Read(_shared);
+        var store = CoordinationStore.Create(config.LibraryCoordinationDirectory, config.LibraryId, shared,
+            new AssetManifest(1, [], []), device, new string('c', 32), new MedalVersions("test", "test"), DateTimeOffset.UtcNow);
+        var plan = LibraryReconciliation.Plan(shared, local, WindowsPath.Parse(root), config.Capture.Append("Devices", device.DeviceId));
+        var candidate = CountRebuilder.Rebuild(plan.Snapshot, _incoming);
+        var review = new EnrollmentReview(1, config.LibraryId, device.DeviceId, 0, shared.Digest(), local.Digest(), candidate.Digest(),
+            root, config.Capture.Append("Devices", device.DeviceId).Display, plan.Added, plan.Matched, plan.Identities, plan.Files, plan.Conflicts);
+        var install = new MedalInstall(_fixture.PathFor("fake-install"), _incoming, MedalFixture.AccountId,
+            _fixture.PathFor("fake-install", "Medal.exe"), new MedalVersions("test", "test"));
+        string evidence = _fixture.PathFor("enrollment-evidence");
+        Directory.CreateDirectory(evidence);
+        AtomicFile.CreateNew(Path.Combine(evidence, "review.json"), Json.Serialize(review));
+        AtomicFile.CreateNew(Path.Combine(evidence, "local-before.json"), local.ToCanonicalJson());
+        AtomicFile.CreateNew(Path.Combine(evidence, "candidate.json"), candidate.ToCanonicalJson());
+        string target = WindowsPath.Parse(Assert.Single(plan.Files).CapturePath).Rebase(config.Capture, config.ServerCapture).Display;
+        return new(config, install, new LocalState(_fixture.PathFor("state")), store, device, review, candidate, evidence, root, source,
+            target, local.Digest(), MedalFixture.Settings(_incoming));
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static int Recover(Enrollment e, bool rollback, bool apply) =>
+        EnrollmentCommands.RecoverInterrupted(e.Config, e.Install, e.State, e.Store, e.Device, e.Evidence, rollback, apply, new StringWriter());
+
+    private string ClipFolder()
+    {
+        using var db = LibraryDatabase.OpenReadOnly(_incoming);
+        return System.Text.Json.JsonSerializer.Deserialize<string>(LibraryDatabase.ReadSetting(db, null, "ClipFolder")!)!;
+    }
+
+    [Theory]
+    [InlineData("copying", false)]
+    [InlineData("copying", true)]
+    [InlineData("copied", false)]
+    [InlineData("copied", true)]
+    [InlineData("restored", false)]
+    [InlineData("restored", true)]
+    [InlineData("capture-configured", false)]
+    [InlineData("capture-configured", true)]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public void AnInterruptedApplyContinuesOrRollsBackFromEachStage(string stage, bool rollback)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var e = Prepare();
+        // As if the process were killed right after saving this stage.
+        Assert.Equal(-1, EnrollmentCommands.Apply(e.Config, e.Install, e.State, e.Store, e.Device, e.Review, e.Candidate, e.Evidence,
+            new StringWriter(), stopAfter: stage));
+        var interrupted = e.Store.ReadJournal();
+        Assert.Equal(OwnershipState.Starting, interrupted.State);
+        Assert.True(EnrollmentOwnership.IsPending(interrupted));
+        Assert.Equal(e.Evidence, EnrollmentOwnership.PendingFolder(e.State.Root, interrupted.SessionId));
+        string digest = Read(_incoming).Digest();
+
+        // A preview changes nothing.
+        Assert.Equal(0, Recover(e, rollback, apply: false));
+        Assert.Equal(interrupted, e.Store.ReadJournal());
+        Assert.Equal(digest, Read(_incoming).Digest());
+
+        Assert.Equal(0, Recover(e, rollback, apply: true));
+        var journal = e.Store.ReadJournal();
+        Assert.Equal(OwnershipState.Clean, journal.State);
+        Assert.Null(EnrollmentOwnership.PendingFolder(e.State.Root));
+        var receipt = Json.ReadFile<EnrollmentCommands.EnrollmentReceipt>(Path.Combine(e.Evidence, "apply.json"), "receipt");
+        if (rollback)
+        {
+            Assert.Equal(0, journal.CommittedGeneration);
+            Assert.Equal(e.BeforeDigest, Read(_incoming).Digest());
+            Assert.True(WindowsPath.Parse(ClipFolder()).Equals(WindowsPath.Parse(e.Root)));
+            Assert.Equal("rolled-back", receipt.Stage);
+        }
+        else
+        {
+            Assert.Equal(1, journal.CommittedGeneration);
+            Assert.Equal(e.Candidate.Digest(), Read(_incoming).Digest());
+            Assert.Equal(e.Candidate.Digest(), e.Store.Generations.Read(1).Snapshot.Digest());
+            Assert.True(WindowsPath.Parse(ClipFolder()).Equals(e.Config.Capture));
+            Assert.Equal("synthetic recording", File.ReadAllText(e.Target));
+            Assert.Equal("completed", receipt.Stage);
+        }
+        Assert.Contains("incoming-microphone", MedalFixture.Settings(_incoming), StringComparison.Ordinal);
+        Assert.Equal("synthetic recording", File.ReadAllText(e.Source));
+        Assert.Throws<UnsafeOperationException>(() => Recover(e, rollback, apply: true));
+    }
+
+    [Fact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public void ACaughtApplyFailureContinuesOnceItsCauseIsFixed()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var e = Prepare();
+        Directory.CreateDirectory(Path.GetDirectoryName(e.Target)!);
+        File.WriteAllText(e.Target, "different existing file");
+        Assert.Throws<UnsafeOperationException>(() => EnrollmentCommands.Apply(e.Config, e.Install, e.State, e.Store, e.Device, e.Review,
+            e.Candidate, e.Evidence, new StringWriter()));
+        var stopped = e.Store.ReadJournal();
+        Assert.Equal(OwnershipState.RecoveryRequired, stopped.State);
+        Assert.True(EnrollmentOwnership.IsPending(stopped));
+        Assert.DoesNotContain(e.Evidence, stopped.Reason, StringComparison.OrdinalIgnoreCase); // No private path in the shared journal.
+
+        File.Delete(e.Target);
+        Assert.Equal(0, Recover(e, rollback: false, apply: true));
+        Assert.Equal(OwnershipState.Clean, e.Store.ReadJournal().State);
+        Assert.Equal(1, e.Store.ReadJournal().CommittedGeneration);
+        Assert.Equal(e.Candidate.Digest(), Read(_incoming).Digest());
+    }
+
+    [Fact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public void AnApplyStoppedBeforeTakingTheLibraryNeedsOnlyAFreshPreview()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var e = Prepare();
+        Assert.Equal(-1, EnrollmentCommands.Apply(e.Config, e.Install, e.State, e.Store, e.Device, e.Review, e.Candidate, e.Evidence,
+            new StringWriter(), stopAfter: "prepared"));
+        Assert.Equal(OwnershipState.Clean, e.Store.ReadJournal().State);
+        var refusal = Assert.Throws<UnsafeOperationException>(() => Recover(e, rollback: true, apply: true));
+        Assert.Contains("fresh 'enroll' preview", refusal.Message, StringComparison.Ordinal);
+        Assert.Equal(e.BeforeDigest, Read(_incoming).Digest());
+    }
 }

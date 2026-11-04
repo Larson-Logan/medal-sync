@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix an interrupted `enroll --apply` (Ctrl+C, a closed window, a crash or a
+  reboot) being given back as an aborted launch at the next start, which then
+  suggested `launch --replace-local-library` and would have dropped this PC's
+  own clips from Medal. Enrollment now marks the ownership it holds; launch and
+  finish refuse to release it and name the review folder and `apply.json`.
+  `enroll recover --out DIR` continues the enrollment from where it stopped,
+  reusing verified copies, or with `--rollback` puts back this PC's original
+  library and capture folder and gives the library back (#105).
 - Fix the status panel saying **Recording / Active** whenever Medal was open.
   It now says **Recording** only while Medal writes its replay buffer for a
   game, and **Medal open** otherwise, with a purple tray dot instead of red.
