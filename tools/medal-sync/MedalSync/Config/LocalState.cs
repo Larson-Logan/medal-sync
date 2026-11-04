@@ -190,7 +190,10 @@ internal sealed class LocalState(string root)
         return saved;
     }
 
-    /// <summary>Removes a finished session's folder once its cache is gone: only its receipt and login.</summary>
+    /// <summary>
+    /// Removes a finished session's folder once its cache is gone: only its login and receipt. The receipt goes last and
+    /// only when nothing else is there, so a folder this cannot remove keeps the evidence a retry needs.
+    /// </summary>
     internal void ForgetFinished(string session)
     {
         if (!CoordinationStore.IsValidId(session)) return;
@@ -200,8 +203,19 @@ internal sealed class LocalState(string root)
         string login = Path.Combine(folder, "login.json");
         if (File.Exists(login)) File.Delete(login);
         string receipt = Path.Combine(folder, FinishedReceiptName);
+        if (Directory.EnumerateFileSystemEntries(folder).Any(entry => !string.Equals(entry, receipt, StringComparison.OrdinalIgnoreCase)))
+            throw new IOException($"{folder} holds files that are not Medal Sync's, so it was kept. Move them out and it is removed on the next retry.");
         if (File.Exists(receipt)) File.Delete(receipt);
-        Directory.Delete(folder); // Not recursive: anything else here is not ours, so it is kept.
+        Directory.Delete(folder);
+    }
+
+    /// <summary>A finished-session folder left empty when only removing the folder itself failed.</summary>
+    internal bool IsEmptyFinished(string session)
+    {
+        if (!CoordinationStore.IsValidId(session)) return false;
+        string folder = Path.Combine(FinishedDirectory, session);
+        RequireOrdinary(folder);
+        return Directory.Exists(folder) && !Directory.EnumerateFileSystemEntries(folder).Any();
     }
 
     /// <summary>Only after a verified stop; the cache is deliberately left at its original location.</summary>

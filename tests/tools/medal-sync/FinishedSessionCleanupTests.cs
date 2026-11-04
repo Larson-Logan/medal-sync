@@ -123,4 +123,32 @@ public sealed class FinishedSessionCleanupTests : IDisposable
         Assert.True(Directory.Exists(Cache(session)));
         Assert.True(File.Exists(Path.Combine(Finished(session), "login.json")));
     }
+
+    [Fact]
+    public void AnUnexpectedFileKeepsTheReceiptSoALaterRetryStillWorks()
+    {
+        string session = Session();
+        Assert.Throws<IOException>(() => FinishedSessionCleanup.Forget(_state, Library, session, Cache(session), 8, Now, Locked));
+        string stray = Path.Combine(Finished(session), "notes.txt");
+        File.WriteAllText(stray, "not Medal Sync's");
+
+        Assert.Contains(session, Assert.Single(FinishedSessionCleanup.Retry(_state, Library, Cache)), StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(Finished(session), LocalState.FinishedReceiptName)));
+        Assert.Equal(8, _state.ReadFinished(session).Generation);
+        Assert.True(File.Exists(stray));
+
+        File.Delete(stray);
+        Assert.Empty(FinishedSessionCleanup.Retry(_state, Library, Cache));
+        Assert.False(Directory.Exists(Finished(session)));
+    }
+
+    [Fact]
+    public void AnEmptyFolderLeftByAFailedFolderRemovalIsRemovedOnRetry()
+    {
+        string session = SessionCoordinator.NewId();
+        Directory.CreateDirectory(Finished(session));
+        Assert.Empty(FinishedSessionCleanup.Retry(_state, Library, Cache));
+        Assert.False(Directory.Exists(Finished(session)));
+        Assert.Empty(_state.FinishedSessionIds());
+    }
 }

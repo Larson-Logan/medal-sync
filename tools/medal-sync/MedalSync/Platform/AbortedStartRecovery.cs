@@ -39,6 +39,12 @@ internal sealed class AbortedStartRecovery(MedalSyncConfig config, LocalState st
     private string Finished(string session, bool apply)
     {
         requireIdle();
+        if (state.IsEmptyFinished(session))
+        {
+            if (!apply) return $"Preview only: only an empty folder is left of finished session {session}. Add --apply to remove it.";
+            state.ForgetFinished(session);
+            return $"Removed the empty folder left by finished session {session}.";
+        }
         var receipt = state.ReadFinished(session);
         if (receipt.LibraryId != config.LibraryId)
             throw new UnsafeOperationException("That finished session belongs to another library's configuration; it was kept.");

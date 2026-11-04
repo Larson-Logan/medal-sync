@@ -34,6 +34,11 @@ internal static class FinishedSessionCleanup
             if (session == except) continue;
             try
             {
+                if (state.IsEmptyFinished(session))
+                {
+                    state.ForgetFinished(session); // Its cache and evidence are already gone; only the folder was left.
+                    continue;
+                }
                 var receipt = state.ReadFinished(session);
                 if (receipt.LibraryId != libraryId) continue; // Another library's; its configuration names its cache.
                 string cache = cacheFor(session);
