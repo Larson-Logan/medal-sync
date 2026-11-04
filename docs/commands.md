@@ -158,7 +158,7 @@ Read [recovery rules](getting-started.md#recovery-rules) before using these.
 
 | Command | What it does |
 | --- | --- |
-| `recover-start --session ID [--apply]` | Keeps the login of an orphaned older session when its cache is empty. |
+| `recover-start --session ID [--apply]` | Keeps the login of an orphaned older session when its cache is empty, or removes the leftover cache and login of a finished session whose cleanup failed. |
 | `refresh-media --out FILE` | Reviews differences between the persistent local copy and primary storage. See [review and refresh persistent local media](storage.md#review-and-refresh-persistent-local-media). |
 | `refresh-media --in FILE --apply [--accept-unknown-media]` | Applies that exact review, keeping a backup of every replaced file. |
 | `repair --checkpoint FILE [--db DB] [--apply]` | Puts back clips Medal dropped since a snapshot, when their files still exist. Takes a database backup first. |

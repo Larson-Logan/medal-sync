@@ -115,6 +115,8 @@ internal sealed class SessionCoordinator(
         }
         if (Platform.PersistentMediaRefresh.IsPending(journal))
             return new LaunchOutcome(LaunchStatus.Blocked, "A persistent media refresh retains ownership. Retry its exact refresh-media review before opening Medal.", journal.SessionId);
+        // Leftovers of published sessions only; anything still left is reported by the next finish.
+        _ = RetryFinishedCleanup();
         if (medal.IsRunning())
         {
             if (journal.State == OwnershipState.Active && journal.Owner?.DeviceId == Me.DeviceId)
@@ -486,7 +488,7 @@ internal sealed class SessionCoordinator(
                 shutdown?.RequireTime();
                 return Ownership.CompleteUnchanged(r, Me, session, clock.Now);
             }, options.LockTimeout);
-            return new FinishOutcome(FinishStatus.Unchanged, "Ready to switch: the library did not change." + Deferred(replicated) + Forget(session), journal.CommittedGeneration);
+            return new FinishOutcome(FinishStatus.Unchanged, "Ready to switch: the library did not change." + Deferred(replicated) + Forget(session, journal.CommittedGeneration), journal.CommittedGeneration);
         }
         var published = Publish(journal, session, snapshot, onServer, publishVersions);
         return published with { Message = published.Message + Deferred(replicated) };
@@ -533,7 +535,7 @@ internal sealed class SessionCoordinator(
             shutdown?.RequireTime();
             return Ownership.CompletePublish(r, Me, session, generation, clock.Now);
         }, options.LockTimeout);
-        return new FinishOutcome(FinishStatus.Published, $"Ready to switch: generation {generation} published." + Forget(session), generation);
+        return new FinishOutcome(FinishStatus.Published, $"Ready to switch: generation {generation} published." + Forget(session, generation), generation);
     }
 
     private bool IsThisAttempt(long generation, long parent, string session, string digest, MedalVersions versions)
@@ -552,18 +554,29 @@ internal sealed class SessionCoordinator(
     private static string Deferred(ReplicationResult result) => result.Summary + (result.Deferred.Count == 0 ? ""
         : $" Cloud copy {string.Join(", ", result.Deferred.Select(n => $"'{n}'"))} is offline or failing; primary storage is verified and the copy retries on the next finish.");
 
-    /// <summary>Removes the finished session's cache and login; a failure only leaves files behind.</summary>
-    private string Forget(string session)
+    /// <summary>
+    /// Removes the finished session's cache and login, and retries any an earlier finish left behind. A failure only
+    /// leaves files behind: they are recorded as published, so they block nothing and the next launch or finish retries.
+    /// </summary>
+    private string Forget(string session, long generation)
     {
+        string result = "";
         try
         {
-            mount.Forget(session);
-            return "";
+            mount.Forget(session, generation);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            return $" The finished session's SSD cache could not be removed yet ({ex.Message}).";
+            result = $" The finished session's SSD cache could not be removed yet ({ex.Message}). It is retried automatically and does not block setup.";
         }
+        var left = RetryFinishedCleanup();
+        return left.Count == 0 ? result : result + $" {left.Count} earlier finished session cache(s) could not be removed yet: {left[0]}";
+    }
+
+    private IReadOnlyList<string> RetryFinishedCleanup()
+    {
+        try { return mount.CleanupFinished(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { return [ex.Message]; }
     }
 
     /// <summary>Null when drained; otherwise the reason to stop for now.</summary>

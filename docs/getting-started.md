@@ -366,6 +366,14 @@ still refuse an active process, unfinished login or non-Ready journal. Run
 `finish` on the owning PC to recover an interrupted STARTING session without
 launching Medal; a failed stop or evidence write keeps ownership for retry.
 
+When a session finishes, its uploads are verified and its generation committed
+before its SSD cache and login are removed. The login first moves to
+`finished-sessions/SESSION/` beside a receipt naming that generation. If a
+program such as antivirus, the search indexer or a backup client holds a cached
+clip, the delete fails, but what is left does not block setup, the
+configuration wizard or the portable updater. The next launch or finish
+retries it, and `recover-start --session SESSION --apply` retries it on demand.
+
 An older build may have left an orphan `sessions/SESSION.json` after returning
 to Ready. With Medal quit and its clip drive stopped, preview
 `recover-start --session SESSION`, then add `--apply` to retain that exact login.

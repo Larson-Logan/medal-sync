@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix one failed SSD cache delete after a successful handoff leaving a session
+  login that blocked Windows setup, the configuration wizard and the portable
+  updater for good. A finished session's login now moves to
+  `finished-sessions/SESSION/` beside a receipt naming the committed generation
+  before anything is deleted, so a leftover blocks nothing. The next launch or
+  finish retries the cleanup, and so does `recover-start --session SESSION
+  --apply`. A login without that receipt still blocks setup (#104).
 - Fix the status panel saying **Recording / Active** whenever Medal was open.
   It now says **Recording** only while Medal writes its replay buffer for a
   game, and **Medal open** otherwise, with a purple tray dot instead of red.

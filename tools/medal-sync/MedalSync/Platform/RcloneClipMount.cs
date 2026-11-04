@@ -143,18 +143,21 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
     /// after its uploads drained and the drive stopped, so the folder holds
     /// nothing the server lacks.
     /// </summary>
-    public void Forget(string session)
+    public void Forget(string session, long generation)
     {
         if (!CoordinationStore.IsValidId(session)) throw new ArgumentException("Invalid session ID.", nameof(session));
         if (IsRunning) throw new IOException($"{DriveRoot} is still mounted; the session's cache is kept.");
-        string cache = config.SessionCacheDirectory(session);
-        if (Directory.Exists(cache)) Directory.Delete(cache, recursive: true);
-        state.ForgetSession(session);
-        if (_session != session) return;
-        _control?.Dispose();
-        _control = null;
-        _session = null;
+        if (_session == session)
+        {
+            _control?.Dispose();
+            _control = null;
+            _session = null;
+        }
+        FinishedSessionCleanup.Forget(state, config.LibraryId, session, config.SessionCacheDirectory(session), generation, clock.Now);
     }
+
+    public IReadOnlyList<string> CleanupFinished() =>
+        FinishedSessionCleanup.Retry(state, config.LibraryId, config.SessionCacheDirectory, except: _session);
 
     public void RetainAbortedStart(string session)
     {

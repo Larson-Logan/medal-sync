@@ -365,7 +365,7 @@ public sealed class CloudHandoffTests : IDisposable
         public MountHealth Health() => new(true, "synthetic");
         public DrainVerdict Drain() => new(DrainState.Drained, [], 0, 0);
         public bool Stop() { IsRunning = false; return true; }
-        public void Forget(string session) { }
+        public void Forget(string session, long generation) { }
         public void RetainAbortedStart(string session) { }
     }
     private sealed class Assets : IAssetChecker

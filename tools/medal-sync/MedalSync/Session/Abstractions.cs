@@ -70,8 +70,14 @@ internal interface IClipMount
     /// <summary>Stops gracefully. False when it is still running afterwards.</summary>
     bool Stop();
 
-    /// <summary>Removes a finished, fully uploaded session's cache folder and control login.</summary>
-    void Forget(string session);
+    /// <summary>
+    /// Removes a finished, fully uploaded session's cache folder and control login, after recording that
+    /// <paramref name="generation"/> is committed so a failed delete leaves a recognizably safe leftover.
+    /// </summary>
+    void Forget(string session, long generation);
+
+    /// <summary>Retries removal left by an earlier failed <see cref="Forget"/>. Returns what is still left; never blocks.</summary>
+    IReadOnlyList<string> CleanupFinished() => [];
 
     /// <summary>Retains a verified stopped pre-launch session's login and cache as recovery evidence, without deleting bytes.</summary>
     void RetainAbortedStart(string session);

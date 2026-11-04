@@ -56,6 +56,26 @@ public sealed class AbortedStartRecoveryTests : IDisposable
     }
 
     [Fact]
+    public void RecoverStartRemovesAPublishedSessionsLeftoversOnlyWithApply()
+    {
+        string cache = _config.SessionCacheDirectory(_session);
+        Directory.CreateDirectory(cache);
+        File.WriteAllText(Path.Combine(cache, "uploaded.mp4"), "already on the server");
+        Assert.Throws<IOException>(() => FinishedSessionCleanup.Forget(_state, _config.LibraryId, _session, cache, 0, DateTimeOffset.UtcNow,
+            path => throw new IOException("Synthetic: held.")));
+        SetupMaintenance.RequireReady(_state.Root, false, false);
+
+        Assert.Contains("Preview only", Recovery().Run(_session, false), StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(cache, "uploaded.mp4")));
+        _idle = false;
+        Assert.Throws<UnsafeOperationException>(() => Recovery().Run(_session, true));
+        _idle = true;
+        Assert.Contains("Removed the leftover", Recovery().Run(_session, true), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(cache));
+        Assert.Empty(_state.FinishedSessionIds());
+    }
+
+    [Fact]
     public void NonemptyUnknownLegacyCacheRefusesPreviewAndApply()
     {
         string cache = _config.SessionCacheDirectory(_session);

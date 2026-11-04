@@ -71,6 +71,12 @@ internal sealed class LocalState(string root)
     private string SessionsDirectory => Path.Combine(Root, "sessions");
 
     /// <summary>
+    /// Published sessions whose cache or login is still being removed. Outside <c>sessions</c>, so setup,
+    /// the configuration wizard and every updater version do not mistake them for unfinished sessions.
+    /// </summary>
+    private string FinishedDirectory => Path.Combine(Root, "finished-sessions");
+
+    /// <summary>
     /// This PC's identity, created once. The random ID is what ownership
     /// compares; the computer and user name it was made for must still match, so
     /// a profile copied to another PC cannot pass for the original owner.
@@ -130,11 +136,72 @@ internal sealed class LocalState(string root)
         return secret;
     }
 
-    public void ForgetSession(string session)
+    /// <summary>
+    /// Only after the session's generation is committed and its drive stopped: records that, then moves the login out of
+    /// <c>sessions</c>. Safe to repeat, including after a crash between the two steps.
+    /// </summary>
+    internal string RetireSession(string session, string libraryId, string cache, long generation, DateTimeOffset now)
+    {
+        if (!CoordinationStore.IsValidId(session) || !CoordinationStore.IsValidId(libraryId) || generation < 0)
+            throw new InvalidDataException("Invalid finished-session identity.");
+        string folder = Path.Combine(FinishedDirectory, session);
+        RequireOrdinary(folder);
+        string source = Path.Combine(SessionsDirectory, session + ".json");
+        RequireOrdinary(source);
+        Directory.CreateDirectory(folder);
+        string receipt = Path.Combine(folder, FinishedReceiptName);
+        RequireOrdinary(receipt);
+        if (File.Exists(receipt))
+        {
+            var saved = ReadFinished(session);
+            if (saved.LibraryId != libraryId || saved.Cache != cache || saved.Generation != generation)
+                throw new InvalidDataException("The finished-session receipt differs from this session; keep it and investigate.");
+        }
+        else AtomicFile.CreateNew(receipt, Json.Serialize(new FinishedSession(1, libraryId, session, cache, generation, now,
+            $"Uploads drained and verified, and generation {generation} committed, before cleanup. The cache holds nothing the server lacks.")));
+        string target = Path.Combine(folder, "login.json");
+        RequireOrdinary(target);
+        if (File.Exists(source))
+        {
+            _ = ReadLogin(source, session);
+            File.Move(source, target, overwrite: false);
+        }
+        return folder;
+    }
+
+    internal const string FinishedReceiptName = "finished.json";
+
+    /// <summary>Sessions with a finished-session folder, named by valid session IDs only.</summary>
+    internal IReadOnlyList<string> FinishedSessionIds() =>
+        Directory.Exists(FinishedDirectory)
+            ? Directory.EnumerateDirectories(FinishedDirectory).Select(Path.GetFileName).OfType<string>()
+                .Where(CoordinationStore.IsValidId).Order(StringComparer.Ordinal).ToArray()
+            : [];
+
+    internal FinishedSession ReadFinished(string session)
+    {
+        if (!CoordinationStore.IsValidId(session)) throw new InvalidDataException("Invalid finished-session identity.");
+        string receipt = Path.Combine(FinishedDirectory, session, FinishedReceiptName);
+        RequireOrdinary(receipt);
+        var saved = Json.ReadFile<FinishedSession>(receipt, "Finished-session receipt");
+        if (saved.Format != 1 || saved.Session != session || !CoordinationStore.IsValidId(saved.LibraryId)
+            || string.IsNullOrEmpty(saved.Cache) || saved.Generation < 0)
+            throw new InvalidDataException("The finished-session receipt is invalid; it was kept.");
+        return saved;
+    }
+
+    /// <summary>Removes a finished session's folder once its cache is gone: only its receipt and login.</summary>
+    internal void ForgetFinished(string session)
     {
         if (!CoordinationStore.IsValidId(session)) return;
-        string path = Path.Combine(SessionsDirectory, session + ".json");
-        if (File.Exists(path)) File.Delete(path);
+        string folder = Path.Combine(FinishedDirectory, session);
+        RequireOrdinary(folder);
+        if (!Directory.Exists(folder)) return;
+        string login = Path.Combine(folder, "login.json");
+        if (File.Exists(login)) File.Delete(login);
+        string receipt = Path.Combine(folder, FinishedReceiptName);
+        if (File.Exists(receipt)) File.Delete(receipt);
+        Directory.Delete(folder); // Not recursive: anything else here is not ours, so it is kept.
     }
 
     /// <summary>Only after a verified stop; the cache is deliberately left at its original location.</summary>
@@ -167,6 +234,9 @@ internal sealed class LocalState(string root)
         }
         return folder;
     }
+
+    internal sealed record FinishedSession(int Format, string LibraryId, string Session, string Cache, long Generation,
+        DateTimeOffset FinishedAt, string Detail);
 
     private sealed record AbortedStartEvidence(int Format, string LibraryId, string Session, string Cache, DateTimeOffset StoppedAt, string Detail);
 
