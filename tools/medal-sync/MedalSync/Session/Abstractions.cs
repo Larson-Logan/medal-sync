@@ -36,8 +36,11 @@ internal interface ILocalLibrary
 
     LibrarySnapshot Read();
 
-    /// <summary>Empty replacement requires a checked committed history or explicit replacement review.</summary>
-    RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false);
+    /// <summary>
+    /// Empty replacement requires a checked committed history or explicit replacement review.
+    /// <paramref name="keepBackup"/> keeps the backup out of the automatic prune; see <see cref="RestoreOptions.KeepBackup"/>.
+    /// </summary>
+    RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false, bool keepBackup = false);
 
     /// <summary>Medal's configured capture root (<c>ClipFolder</c>), or null when unset.</summary>
     string? CaptureFolder();

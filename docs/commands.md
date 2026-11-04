@@ -150,7 +150,11 @@ Each option maps to a field in `config.json`; see the
 `launch --replace-local-library` is only for a PC whose Medal library has
 changes that were never shared, usually because Medal was opened without Medal
 Sync. Launch refuses such a library and names this option. Keep a copy first
-with `snapshot export`; the replacement also keeps a backup.
+with `snapshot export`; the replacement also keeps a backup of the whole
+database in `Backups/kept-library-TIME-ID/` under this PC's state root, and
+prints its path. Ordinary launch backups are pruned to the newest 10; kept
+backups, from this option, `repair` and `relocate`, are never removed
+automatically. Only a reviewed [retention](storage.md#retention) removes them.
 
 ## Recover
 
@@ -161,7 +165,7 @@ Read [recovery rules](getting-started.md#recovery-rules) before using these.
 | `recover-start --session ID [--apply]` | Keeps the login of an orphaned older session when its cache is empty, or removes the leftover cache and login of a finished session whose cleanup failed. |
 | `refresh-media --out FILE` | Reviews differences between the persistent local copy and primary storage. See [review and refresh persistent local media](storage.md#review-and-refresh-persistent-local-media). |
 | `refresh-media --in FILE --apply [--accept-unknown-media]` | Applies that exact review, keeping a backup of every replaced file. |
-| `repair --checkpoint FILE [--db DB] [--apply]` | Puts back clips Medal dropped since a snapshot, when their files still exist. Takes a database backup first. |
+| `repair --checkpoint FILE [--db DB] [--apply]` | Puts back clips Medal dropped since a snapshot, when their files still exist. Takes a database backup first and keeps it until a reviewed retention removes it. |
 | `relocate --from DIR [--config FILE] [--apply]` | Copies library files left outside the capture folder to the server's clip folder, verifies them and repoints the library. The originals stay. SMB primary only. |
 | `abandon --session ID --reason TEXT [--apply]` | Gives up a session whose PC is lost and returns the library to the last published generation. Unpublished clips stay on that PC and must be reconciled by hand. |
 

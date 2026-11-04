@@ -17,7 +17,7 @@ internal static class SetupCommands
         int result;
         try
         {
-            SetupMaintenance.RequireReady(root, SetupMaintenance.ApplicationRunning(), SessionCommands.AnotherInstanceRunning());
+            SetupMaintenance.RequireReady(root, SetupMaintenance.RunningApplication(), SessionCommands.AnotherInstanceRunning());
             message = "Ready for program installation. Existing user settings and library data will be preserved.";
             result = 0;
         }

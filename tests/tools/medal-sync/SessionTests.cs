@@ -1627,6 +1627,14 @@ public sealed class SessionTests : IDisposable
         var started = replacing.Coordinator.Launch();
         AssertStarted(started);
         Assert.Contains("backed up to", started.Message, StringComparison.Ordinal);
+        Assert.Contains(SessionCoordinator.KeptBackupNote, started.Message, StringComparison.Ordinal);
+        // The backup holds the only copy of the unshared entry, so it is kept apart from the pruned backups.
+        string kept = Assert.Single(Directory.EnumerateFiles(_fixture.PathFor("second", "backups"), "*.db", SearchOption.AllDirectories));
+        Assert.Contains(kept, started.Message, StringComparison.Ordinal);
+        Assert.StartsWith(DatabaseBackup.KeptPrefix, Path.GetFileName(Path.GetDirectoryName(kept)), StringComparison.Ordinal);
+        Assert.Empty(DatabaseBackup.List(_fixture.PathFor("second", "backups"), MedalFixture.AccountId));
+        Assert.Contains(LibraryDatabase.ReadSnapshot(kept, MedalFixture.AccountId).Table("contents").Rows,
+            r => r.Any(c => c is TextCell { Value: "recorded-without-medal-sync" }));
     }
 
     [Fact]

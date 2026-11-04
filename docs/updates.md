@@ -165,5 +165,20 @@ Applying a portable change also blocks native setup and new library operations
 for the duration of the transaction. Bare release versions such as `1.3.0.01` and
 full tags such as `v1.3.0.01` both resolve to the exact stable release tag.
 
+Before it changes programs, the updater asks the installed `medal-sync.exe` the
+same question Windows setup does (`setup check --state-root`): Medal and
+supervision must be stopped, no session login may be retained, and the library
+must be Ready with no owner or session. Every release answers this, so older
+installs update the same way. Quit Medal normally, wait for Ready, then choose
+**Exit Medal Sync** in the status panel or tray menu first. If only the status
+view is still open, the updater and setup say so.
+
+Earlier copies of the updater stopped with
+`Medal Sync check failed: status --json.` for every configured install,
+including `-Uninstall -Apply` and `-Install -Apply` over retained state, and
+changed nothing. The fix is in the updater script, not the installed programs:
+copy `update-medal-sync.ps1`, `MedalSync.Update.psm1` and `set-medal-startup.ps1`
+from the new release's ZIP and run that copy.
+
 Use the native setup and Windows uninstaller for Program Files installations;
 the portable script refuses a native installation layout.
