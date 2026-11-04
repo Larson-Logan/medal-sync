@@ -159,7 +159,26 @@ public sealed class SessionTests : IDisposable
             return StopResult;
         }
 
-        public void Forget(string session) => Forgotten.Add(session);
+        public List<long> ForgottenGenerations { get; } = [];
+
+        public Exception? ForgetFailure { get; set; }
+
+        public int FinishedCleanups { get; private set; }
+
+        public List<string> FinishedLeft { get; } = [];
+
+        public void Forget(string session, long generation)
+        {
+            Forgotten.Add(session);
+            ForgottenGenerations.Add(generation);
+            if (ForgetFailure is not null) throw ForgetFailure;
+        }
+
+        public IReadOnlyList<string> CleanupFinished()
+        {
+            FinishedCleanups++;
+            return FinishedLeft;
+        }
 
         public void RetainAbortedStart(string session)
         {
@@ -1679,6 +1698,41 @@ public sealed class SessionTests : IDisposable
         var started = replacing.Coordinator.Launch();
         AssertStarted(started);
         Assert.Contains("backed up to", started.Message, StringComparison.Ordinal);
+        Assert.Contains(SessionCoordinator.KeptBackupNote, started.Message, StringComparison.Ordinal);
+        // The backup holds the only copy of the unshared entry, so it is kept apart from the pruned backups.
+        string kept = Assert.Single(Directory.EnumerateFiles(_fixture.PathFor("second", "backups"), "*.db", SearchOption.AllDirectories));
+        Assert.Contains(kept, started.Message, StringComparison.Ordinal);
+        Assert.StartsWith(DatabaseBackup.KeptPrefix, Path.GetFileName(Path.GetDirectoryName(kept)), StringComparison.Ordinal);
+        Assert.Empty(DatabaseBackup.List(_fixture.PathFor("second", "backups"), MedalFixture.AccountId));
+        Assert.Contains(LibraryDatabase.ReadSnapshot(kept, MedalFixture.AccountId).Table("contents").Rows,
+            r => r.Any(c => c is TextCell { Value: "recorded-without-medal-sync" }));
+    }
+
+    [Fact]
+    public void Finish_PublishesWhenTheCacheCannotBeRemovedAndLaterRunsRetryIt()
+    {
+        var pc = Computer(FirstPc, "first");
+        AssertStarted(pc.Coordinator.Launch());
+        Assert.Equal(1, pc.Mount.FinishedCleanups);
+        string session = _store.ReadJournal().SessionId!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        pc.Mount.ForgetFailure = new IOException("Synthetic: a backup client holds a cached clip.");
+        pc.Mount.FinishedLeft.Add("Finished session x: still held.");
+
+        var finished = pc.Coordinator.Finish(session);
+
+        Assert.Equal(FinishStatus.Published, finished.Status);
+        Assert.Equal(new[] { finished.Generation }, pc.Mount.ForgottenGenerations);
+        Assert.Contains("could not be removed yet", finished.Message, StringComparison.Ordinal);
+        Assert.Contains("does not block setup", finished.Message, StringComparison.Ordinal);
+        Assert.Contains("still held", finished.Message, StringComparison.Ordinal);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal(2, pc.Mount.FinishedCleanups);
+
+        pc.Mount.ForgetFailure = null;
+        AssertStarted(pc.Coordinator.Launch());
+        Assert.Equal(3, pc.Mount.FinishedCleanups);
     }
 
     [Fact]

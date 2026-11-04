@@ -48,6 +48,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
     public const string AcceptedChanges = "accepted-changes";
     public const string MediaRefresh = "media-refresh";
     public const string AbortedStart = "aborted-start";
+    public const string KeptLibrary = "kept-library";
     public const string LocalTrash = "local-trash";
     private const string LocalTrashFolder = "retention-trash";
     private static readonly Version FirstAwareVersion = new(1, 3, 0);
@@ -132,6 +133,8 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
         Kind(MediaRefresh, state.BackupDirectory, "media-refresh-*",
             f => journal.SessionId is { } session && Path.GetFileName(f) == "media-refresh-" + session);
         Kind(AbortedStart, Path.Combine(state.Root, "aborted-starts"), "*", f => Path.GetFileName(f) == journal.SessionId || CacheInUse(f));
+        // Backups that may hold the only copy of entries that were never shared. The automatic prune never removes them.
+        Kind(KeptLibrary, state.BackupDirectory, Library.DatabaseBackup.KeptPrefix + "*", _ => false);
         string trash = Path.Combine(state.Root, LocalTrashFolder);
         if (Directory.Exists(trash))
             foreach (string folder in Directory.EnumerateDirectories(trash))
@@ -242,7 +245,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
 
     private static string IntegrityOf(RetentionPlan plan) => Hashing.Sha256Hex(Json.Serialize(plan with { Integrity = "" }));
 
-    private static readonly HashSet<string> Kinds = [Generation, Abandoned, Staging, ServerTrash, AcceptedChanges, MediaRefresh, AbortedStart, LocalTrash];
+    private static readonly HashSet<string> Kinds = [Generation, Abandoned, Staging, ServerTrash, AcceptedChanges, MediaRefresh, AbortedStart, KeptLibrary, LocalTrash];
 
     private static void Validate(RetentionPlan plan)
     {
@@ -276,6 +279,8 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
         if (plan.Items.Any(i => i.Kind == Generation))
             text.AppendLine("A PC whose library matches only a removed generation will need 'medal-sync launch --replace-local-library' (a backup is kept). "
                 + "Removed generations no longer appear in history list or history diff.");
+        if (plan.Items.Any(i => i.Kind == KeptLibrary))
+            text.AppendLine("A kept library backup can hold library entries that were never shared. Open or copy any you still need before applying.");
         foreach (string warning in plan.Warnings) text.AppendLine("Warning: " + warning);
         return text.ToString().TrimEnd();
     }
@@ -289,6 +294,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
         AcceptedChanges => "accepted-change reviews on this PC",
         MediaRefresh => "media refresh backups on this PC",
         AbortedStart => "aborted-start evidence on this PC",
+        KeptLibrary => "library backups kept by --replace-local-library, repair or relocate on this PC",
         _ => kind,
     };
 

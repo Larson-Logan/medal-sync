@@ -117,6 +117,8 @@ internal sealed class SessionCoordinator(
             return new LaunchOutcome(LaunchStatus.Blocked, "A persistent media refresh retains ownership. Retry its exact refresh-media review before opening Medal.", journal.SessionId);
         if (EnrollmentOwnership.IsPending(journal) && journal.Owner?.DeviceId == Me.DeviceId)
             return new LaunchOutcome(LaunchStatus.Blocked, EnrollmentOwnership.Interrupted(options.EnrollmentFolder), journal.SessionId);
+        // Leftovers of published sessions only; anything still left is reported by the next finish.
+        _ = RetryFinishedCleanup();
         if (medal.IsRunning())
         {
             if (journal.State == OwnershipState.Active && journal.Owner?.DeviceId == Me.DeviceId)
@@ -221,7 +223,8 @@ internal sealed class SessionCoordinator(
             // The verified committed generation may intentionally contain no
             // clips. The history check above (or explicit replacement review)
             // authorizes replacing this PC's old entries, with a backup.
-            restored = library.Restore(generation.Snapshot, allowEmptyReplacement: true);
+            // --replace-local-library skipped the history check, so this backup may hold the only copy of unshared entries.
+            restored = library.Restore(generation.Snapshot, allowEmptyReplacement: true, keepBackup: options.ReplaceLocalLibrary);
             RequireCaptureFolder();
             warning = Join(checkedStorage.Warning, replication?.Prepare(generation.Snapshot));
             mount.Start(session, forRecording: true);
@@ -260,10 +263,14 @@ internal sealed class SessionCoordinator(
             return new LaunchOutcome(LaunchStatus.Waiting, finished.Message, session);
         }
         if (shutdown is null) medal.Launch();
-        string backup = restored.Changed ? $" This PC's previous library was backed up to {restored.BackupPath}." : "";
+        string backup = !restored.Changed ? ""
+            : options.ReplaceLocalLibrary ? $" This PC's previous library was backed up to {restored.BackupPath}. {KeptBackupNote}"
+            : $" This PC's previous library was backed up to {restored.BackupPath}.";
         return new LaunchOutcome(LaunchStatus.Started, "Medal started with the shared library." + backup + (warning is null ? "" : " " + warning), session,
             Warning: warning);
     }
+
+    internal const string KeptBackupNote = "That backup is never removed automatically; only a reviewed 'medal-sync retention' removes it.";
 
     private static string? Join(string? first, string? second) =>
         first is null ? second : second is null ? first : first + " " + second;
@@ -313,7 +320,7 @@ internal sealed class SessionCoordinator(
             "This PC's Medal library has changes that were never shared, usually because Medal was opened without medal-sync. "
             + (pruned ? "Older shared generations were removed by retention, so a library that matches one of them can no longer be recognized. " : "")
             + "Nothing was changed. Keep a copy with 'medal-sync snapshot export --out FILE', then run "
-            + "'medal-sync launch --replace-local-library' to replace it with the shared library (a backup is kept).");
+            + "'medal-sync launch --replace-local-library' to replace it with the shared library (a backup is kept until you remove it).");
     }
 
     private void RequireCaptureFolder()
@@ -490,7 +497,7 @@ internal sealed class SessionCoordinator(
                 shutdown?.RequireTime();
                 return Ownership.CompleteUnchanged(r, Me, session, clock.Now);
             }, options.LockTimeout);
-            return new FinishOutcome(FinishStatus.Unchanged, "Ready to switch: the library did not change." + Deferred(replicated) + Forget(session), journal.CommittedGeneration);
+            return new FinishOutcome(FinishStatus.Unchanged, "Ready to switch: the library did not change." + Deferred(replicated) + Forget(session, journal.CommittedGeneration), journal.CommittedGeneration);
         }
         var published = Publish(journal, session, snapshot, onServer, publishVersions);
         return published with { Message = published.Message + Deferred(replicated) };
@@ -537,7 +544,7 @@ internal sealed class SessionCoordinator(
             shutdown?.RequireTime();
             return Ownership.CompletePublish(r, Me, session, generation, clock.Now);
         }, options.LockTimeout);
-        return new FinishOutcome(FinishStatus.Published, $"Ready to switch: generation {generation} published." + Forget(session), generation);
+        return new FinishOutcome(FinishStatus.Published, $"Ready to switch: generation {generation} published." + Forget(session, generation), generation);
     }
 
     private bool IsThisAttempt(long generation, long parent, string session, string digest, MedalVersions versions)
@@ -556,18 +563,29 @@ internal sealed class SessionCoordinator(
     private static string Deferred(ReplicationResult result) => result.Summary + (result.Deferred.Count == 0 ? ""
         : $" Cloud copy {string.Join(", ", result.Deferred.Select(n => $"'{n}'"))} is offline or failing; primary storage is verified and the copy retries on the next finish.");
 
-    /// <summary>Removes the finished session's cache and login; a failure only leaves files behind.</summary>
-    private string Forget(string session)
+    /// <summary>
+    /// Removes the finished session's cache and login, and retries any an earlier finish left behind. A failure only
+    /// leaves files behind: they are recorded as published, so they block nothing and the next launch or finish retries.
+    /// </summary>
+    private string Forget(string session, long generation)
     {
+        string result = "";
         try
         {
-            mount.Forget(session);
-            return "";
+            mount.Forget(session, generation);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            return $" The finished session's SSD cache could not be removed yet ({ex.Message}).";
+            result = $" The finished session's SSD cache could not be removed yet ({ex.Message}). It is retried automatically and does not block setup.";
         }
+        var left = RetryFinishedCleanup();
+        return left.Count == 0 ? result : result + $" {left.Count} earlier finished session cache(s) could not be removed yet: {left[0]}";
+    }
+
+    private IReadOnlyList<string> RetryFinishedCleanup()
+    {
+        try { return mount.CleanupFinished(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { return [ex.Message]; }
     }
 
     /// <summary>Null when drained; otherwise the reason to stop for now.</summary>

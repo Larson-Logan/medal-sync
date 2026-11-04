@@ -446,7 +446,8 @@ public sealed class CliAndConfigTests : IDisposable
         var secret = state.SessionSecret(session, DateTimeOffset.UnixEpoch);
         Assert.Equal(secret, state.SessionSecret(session, DateTimeOffset.UnixEpoch.AddDays(1)));
         Assert.Equal(48, secret.Password.Length);
-        state.ForgetSession(session);
+        state.RetireSession(session, new string('a', 32), _fixture.PathFor("cache", session), 1, DateTimeOffset.UnixEpoch);
+        state.ForgetFinished(session);
         Assert.NotEqual(secret.Password, state.SessionSecret(session, DateTimeOffset.UnixEpoch).Password);
         Assert.Throws<ArgumentException>(() => state.SessionSecret(@"..\escape", DateTimeOffset.UnixEpoch));
     }

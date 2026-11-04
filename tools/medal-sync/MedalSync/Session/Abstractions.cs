@@ -36,8 +36,11 @@ internal interface ILocalLibrary
 
     LibrarySnapshot Read();
 
-    /// <summary>Empty replacement requires a checked committed history or explicit replacement review.</summary>
-    RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false);
+    /// <summary>
+    /// Empty replacement requires a checked committed history or explicit replacement review.
+    /// <paramref name="keepBackup"/> keeps the backup out of the automatic prune; see <see cref="RestoreOptions.KeepBackup"/>.
+    /// </summary>
+    RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false, bool keepBackup = false);
 
     /// <summary>Medal's configured capture root (<c>ClipFolder</c>), or null when unset.</summary>
     string? CaptureFolder();
@@ -70,8 +73,14 @@ internal interface IClipMount
     /// <summary>Stops gracefully. False when it is still running afterwards.</summary>
     bool Stop();
 
-    /// <summary>Removes a finished, fully uploaded session's cache folder and control login.</summary>
-    void Forget(string session);
+    /// <summary>
+    /// Removes a finished, fully uploaded session's cache folder and control login, after recording that
+    /// <paramref name="generation"/> is committed so a failed delete leaves a recognizably safe leftover.
+    /// </summary>
+    void Forget(string session, long generation);
+
+    /// <summary>Retries removal left by an earlier failed <see cref="Forget"/>. Returns what is still left; never blocks.</summary>
+    IReadOnlyList<string> CleanupFinished() => [];
 
     /// <summary>Retains a verified stopped pre-launch session's login and cache as recovery evidence, without deleting bytes.</summary>
     void RetainAbortedStart(string session);

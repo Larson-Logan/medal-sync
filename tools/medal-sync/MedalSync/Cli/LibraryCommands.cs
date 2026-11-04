@@ -156,8 +156,8 @@ internal static class LibraryCommands
         string backups = live
             ? Config.LocalState.ForCurrentUser().BackupDirectory
             : Path.Combine(Path.GetDirectoryName(path)!, "medal-sync-backups");
-        var result = LibraryRestorer.Restore(path, withCounts, new RestoreOptions(account, backups), DateTimeOffset.UtcNow);
-        output.WriteLine($"Repaired {applied.Count} change(s); backup {result.BackupPath}.");
+        var result = LibraryRestorer.Restore(path, withCounts, new RestoreOptions(account, backups, KeepBackup: true), DateTimeOffset.UtcNow);
+        output.WriteLine($"Repaired {applied.Count} change(s); backup {result.BackupPath}. {Session.SessionCoordinator.KeptBackupNote}");
         return 0;
     }
 
@@ -217,9 +217,9 @@ internal static class LibraryCommands
         foreach (var (local, server) in copies) CopyVerified(local, server);
         var relocated = ReferenceRelocation.Apply(snapshot, moves);
         var withCounts = CountRebuilder.Rebuild(relocated, install.DatabasePath);
-        var result = LibraryRestorer.Restore(install.DatabasePath, withCounts, new RestoreOptions(install.AccountId, state.BackupDirectory), DateTimeOffset.UtcNow);
+        var result = LibraryRestorer.Restore(install.DatabasePath, withCounts, new RestoreOptions(install.AccountId, state.BackupDirectory, KeepBackup: true), DateTimeOffset.UtcNow);
         output.WriteLine($"Copied {copies.Count} file(s) and repointed {moves.Count} library path(s); backup {result.BackupPath}. "
-            + $"The originals under {from.Display} are unchanged.");
+            + $"{Session.SessionCoordinator.KeptBackupNote} The originals under {from.Display} are unchanged.");
         return 0;
     }
 

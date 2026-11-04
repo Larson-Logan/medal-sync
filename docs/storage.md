@@ -696,10 +696,12 @@ It always keeps the committed head, its `--keep` newest committed ancestors,
 anything from the last `--keep-days` days, the newest committed generation each
 PC published and the highest-numbered generation folder. Uncommitted attempts
 and interrupted `.staging-*` folders are kept for `--grace-days`. On this PC it
-keeps the newest `--keep` accepted-change reviews, media refresh backups and
-aborted-start folders plus any from the last `--keep-days` days; aborted-start
-evidence is kept while its cache still holds files. Clip media and the library
-database are never touched.
+keeps the newest `--keep` accepted-change reviews, media refresh backups,
+aborted-start folders and kept library backups (`Backups/kept-library-*`, from
+`launch --replace-local-library`, `repair` and `relocate`) plus any from the
+last `--keep-days` days; aborted-start evidence is kept while its cache still
+holds files. A kept library backup can hold entries that were never shared, and
+the review says so. Clip media and the live library database are never touched.
 
 Apply refuses unless the library is exactly as reviewed. It holds the journal
 writer lock and the single-instance lock, so no PC can start meanwhile. It first
