@@ -116,6 +116,9 @@
   `"betaUpdates": true` in its configuration. A PC running a beta is offered
   the release it leads up to once it is published, and setup installs that
   release over the beta.
+
+## 1.3.1.05 — 2026-11-01
+
 - Add **Start Medal at sign-in** to the Medal Sync tray menu, and
   `medal-sync startup [--apply | --restore]`, so an installed copy can start
   Medal through Medal Sync whenever you sign in. Before this, only the
@@ -124,21 +127,33 @@
   saves Medal's original entries in the same file the script uses, so either
   one can turn it off again. It needs a configuration first, and it reports,
   without changing, Windows' own Startup apps switch.
+
+## 1.3.1.04 — 2026-11-01
+
 - Fix an older portable copy starting at sign-in after installing with setup,
   so the status panel showed the old version after a restart. An installed
   copy now always owns Medal's startup entry, `medal://` handler and Medal
   shortcuts, and repoints any left on another launcher. This happens as soon
   as the installed launcher or status panel runs, not only after the next
   supervised session.
+
+## 1.3.1.03 — 2026-11-01
+
 - Fix **Check for updates** closing without a message as soon as the setup
   download began. The download progress window was updated from background
   threads, which Windows refused, and the update process crashed. Only the
   update window's own thread now touches it.
+
+## 1.3.1.02 — 2026-11-01
+
 - The configuration wizard shows only the fields the chosen storage mode uses,
   with a short explanation and example under each, and ignores values left in
   hidden fields. A new setup fills in the signed-in Medal account ID (with a
   **Detect** button to retry), and folder and file fields have **Browse...**
   buttons. Review, confirmation and save checks are unchanged.
+
+## 1.3.1.01 — 2026-11-01
+
 - Add Google Drive cloud mode for cross-PC library handoff without an SMB
   server. Each PC records to a persistent local copy; media and immutable
   library generations verify in Drive before ownership is released through
