@@ -144,7 +144,7 @@ Each option maps to a field in `config.json`; see the
 
 | Command | What it does |
 | --- | --- |
-| `launch [--wait-for-server SECONDS] [--medal-link URL] [--replace-local-library]` | Starts Medal through Medal Sync and supervises it until it exits, then hands off. `--wait-for-server` is 0 to 600 seconds. The desktop launcher normally runs this for you. |
+| `launch [--wait-for-server SECONDS] [--wait-for-handoff SECONDS] [--medal-link URL] [--replace-local-library]` | Starts Medal through Medal Sync and supervises it until it exits, then hands off. `--wait-for-server` is 0 to 600 seconds. Without `--wait-for-handoff`, launch returns at once (exit 3) when another PC owns the library. With it (1 to 3600 seconds), launch keeps one switch request and checks back until that PC releases the library, then starts normally; timeout, Ctrl+C or Windows shutdown withdraws only that request and starts nothing. The desktop launcher normally runs this for you. |
 | `finish [--accept-library-changes]` | Finishes this PC's interrupted session: drains uploads, verifies storage, publishes and releases ownership. Exit 3 means storage is still unavailable. `--accept-library-changes` approves the clip removals that finish listed; review them first. |
 
 ### Enrollment recovery

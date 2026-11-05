@@ -248,6 +248,17 @@ internal sealed partial class CoordinationStore
     {
         // Cloud requests are pruned under CAS whenever requests change; never remove a newer request by name.
         if (cloud is not null) return false;
+        return RemoveExactRequest(stale);
+    }
+
+    /// <summary>
+    /// Withdraws this PC's own <paramref name="request"/> when a wait for a handoff stops without starting Medal.
+    /// Only that exact request is removed; a newer request from the same PC stays. True when it was removed.
+    /// </summary>
+    public bool WithdrawRequest(HandoffRequest request) => cloud is not null ? cloud.Withdraw(request) : RemoveExactRequest(request);
+
+    private bool RemoveExactRequest(HandoffRequest stale)
+    {
         if (!IsValidId(stale.Device.DeviceId)) return false;
         string path = Path.Combine(RequestsPath, stale.Device.DeviceId + ".json");
         string aside = Path.Combine(RequestsPath, $"{stale.Device.DeviceId}.{Guid.NewGuid():N}.removing");

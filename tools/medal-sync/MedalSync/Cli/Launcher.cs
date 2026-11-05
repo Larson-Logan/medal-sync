@@ -24,6 +24,26 @@ internal interface ILauncherUi
 
     /// <summary>Offer the native configuration flow on an explicit, unconfigured launch.</summary>
     bool OfferConfiguration(string message) { Show(message); return false; }
+
+    /// <summary>
+    /// Another PC owns the library: offer to wait and open Medal when it hands off. Null when declined;
+    /// otherwise a view with a Cancel choice that stays open until it is disposed.
+    /// </summary>
+    IHandoffWaitView? OfferHandoffWait(HandoffWaitOffer offer) { Show(offer.Message); return null; }
+}
+
+/// <summary>An explicit offer to wait for another PC, with the bounded time the wait would last.</summary>
+internal sealed record HandoffWaitOffer(string Message, TimeSpan Timeout);
+
+/// <summary>
+/// A cancellable view of an explicit handoff wait. Every member is called on the waiting thread. A view that
+/// can no longer be shown reports <see cref="Cancelled"/> and tells the user itself.
+/// </summary>
+internal interface IHandoffWaitView : IDisposable
+{
+    void Update(HandoffWaitUpdate update);
+
+    bool Cancelled { get; }
 }
 
 internal sealed record LauncherRequest(bool AtSignIn, string? Link);
@@ -52,7 +72,8 @@ internal static partial class Launcher
     public const int ManualWaitSeconds = 20;
 
     public const string BusyMessage =
-        "Medal Sync is still uploading or verifying the last session. Wait for Ready before reopening Medal or switching PCs.";
+        "Medal Sync is still uploading or verifying the last session, or is already waiting for another PC to hand off the library. "
+        + "Wait for Ready, or for Medal to open, before reopening Medal or switching PCs.";
 
     public static LauncherRequest Parse(IReadOnlyList<string> args) => args switch
     {
@@ -156,18 +177,59 @@ internal static partial class Launcher
         var output = new StringWriter(CultureInfo.InvariantCulture);
         var error = new StringWriter(CultureInfo.InvariantCulture);
         bool reviewDeclined = false;
+        var handoff = new HandoffOfferTracker(ui);
         int code = CommandRunner.Run(LaunchArguments(request), output, error, message => { if (!shutdown.SuppressUi) ui.Notify(message); }, review =>
         {
             if (shutdown.SuppressUi) return false;
             bool accepted = ui.ConfirmLibraryChanges(review) && !shutdown.SuppressUi;
             reviewDeclined = !accepted;
             return accepted;
-        }, shutdown);
+        }, shutdown, request.AtSignIn ? null : handoff.Offer);
         // Declining is a deliberate cancellation, not another error dialog.
         if (shutdown.SuppressUi) return code;
-        if (reviewDeclined) return 3;
+        if (reviewDeclined || handoff.Settled) return 3;
         if (Outcome(code, output.ToString(), error.ToString()) is { } message) ShowOutcome(ui, message, () => medal.IsRunning());
         return code;
+    }
+
+    /// <summary>
+    /// Remembers how the user answered the wait offer. Declining or cancelling already told the user what happened,
+    /// so neither is followed by another dialog; a timeout or a refusal after waiting is still shown.
+    /// </summary>
+    internal sealed class HandoffOfferTracker(ILauncherUi ui)
+    {
+        private bool _declined;
+        private bool _stopped;
+
+        /// <summary>
+        /// The offer was declined, or the wait reported Cancel, which always stops it before Medal opens. Cancellation is
+        /// only read while waiting, so a click after Medal started never hides the end-of-session result.
+        /// </summary>
+        public bool Settled => _declined || _stopped;
+
+        public IHandoffWaitView? Offer(HandoffWaitOffer offer)
+        {
+            var view = ui.OfferHandoffWait(offer);
+            _declined = view is null;
+            return view is null ? null : new Watched(view, this);
+        }
+
+        private sealed class Watched(IHandoffWaitView inner, HandoffOfferTracker owner) : IHandoffWaitView
+        {
+            public bool Cancelled
+            {
+                get
+                {
+                    bool cancelled = inner.Cancelled;
+                    if (cancelled) owner._stopped = true;
+                    return cancelled;
+                }
+            }
+
+            public void Update(HandoffWaitUpdate update) => inner.Update(update);
+
+            public void Dispose() => inner.Dispose();
+        }
     }
 
     /// <summary>

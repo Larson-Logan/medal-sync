@@ -292,10 +292,12 @@ internal static class SessionCommands
     /// windowless launcher shows them).
     /// </summary>
     public static int Launch(Arguments args, TextWriter output, Action<string>? notify = null,
-        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null)
+        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
+        Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait = null)
     {
         bool replaceLocal = args.Flag("--replace-local-library");
         var wait = WaitSeconds(args.Value("--wait-for-server"));
+        var handoff = HandoffWait.ParseSeconds(args.Value("--wait-for-handoff"));
         string? link = args.Value("--medal-link");
         if (link is not null) link = MedalLink.Require(link);
         args.RequireAllUsed();
@@ -330,7 +332,7 @@ internal static class SessionCommands
             return WaitForStorage(context, output, status);
         }
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
-        var outcome = coordinator.Launch();
+        var outcome = LaunchOrWait(context, output, coordinator, handoff, shutdown, offerHandoffWait);
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
         // Recording can go ahead, but the user should learn now, not after the session, that the handoff will need them.
         if (outcome.Warning is { } warning && !shutdown.SuppressUi) Notify(notify, warning);
@@ -358,6 +360,67 @@ internal static class SessionCommands
         if (!shutdown.Ending) GuardStartup(context);
         Report(context, output, $"finish: {finished.Status}: {finished.Message}");
         return finished.Status is FinishStatus.Published or FinishStatus.Unchanged ? 0 : finished.Status == FinishStatus.Pending ? 3 : 1;
+    }
+
+    /// <summary>How long the desktop launcher's "wait and open when ready" choice keeps checking.</summary>
+    internal static readonly TimeSpan OfferedHandoffWait = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Waits for another PC only when asked: <c>--wait-for-handoff</c>, or the launcher's offer after a plain launch
+    /// found the library owned elsewhere. Otherwise this is the unchanged immediate launch. Ctrl+C stops a wait.
+    /// </summary>
+    private static LaunchOutcome LaunchOrWait(Context context, TextWriter output, SessionCoordinator coordinator, TimeSpan? handoff,
+        SessionShutdown shutdown, Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait)
+    {
+        if (handoff is { } timeout)
+        {
+            object? last = null;
+            return WaitWithCtrlC(cancelled => coordinator.LaunchWhenReleased(new HandoffWait(timeout, cancelled, update =>
+            {
+                // One line per change, not per check.
+                var key = (update.Owner, update.State, update.Fresh);
+                if (key.Equals(last)) return;
+                last = key;
+                Report(context, output, "launch: waiting: " + update.Describe());
+            })));
+        }
+        var outcome = coordinator.Launch();
+        if (outcome.Wait != LaunchWait.OwnedElsewhere || offerHandoffWait is null || shutdown.SuppressUi) return outcome;
+        var view = offerHandoffWait(new HandoffWaitOffer(outcome.Message, OfferedHandoffWait));
+        if (view is null || shutdown.SuppressUi)
+        {
+            view?.Dispose();
+            return outcome;
+        }
+        using (view)
+        {
+            context.Log.Write($"launch: waiting up to {HandoffWaitUpdate.Duration(OfferedHandoffWait)} for the other PC to hand off");
+            return WaitWithCtrlC(cancelled => coordinator.LaunchWhenReleased(
+                new HandoffWait(OfferedHandoffWait, () => view.Cancelled || cancelled(), view.Update)));
+        }
+    }
+
+    private static LaunchOutcome WaitWithCtrlC(Func<Func<bool>, LaunchOutcome> wait)
+    {
+        using var cancel = new CancellationTokenSource();
+        ConsoleCancelEventHandler stop = (_, e) =>
+        {
+            e.Cancel = true;
+            cancel.Cancel();
+        };
+        // The windowless launcher may have no console to register with; its waiting window has Cancel instead.
+        bool registered;
+        try
+        {
+            Console.CancelKeyPress += stop;
+            registered = true;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or PlatformNotSupportedException)
+        {
+            registered = false;
+        }
+        try { return wait(() => cancel.IsCancellationRequested); }
+        finally { if (registered) Console.CancelKeyPress -= stop; }
     }
 
     private static TimeSpan WaitSeconds(string? value)

@@ -187,6 +187,23 @@ public sealed class CloudHandoffTests : IDisposable
     }
 
     [Fact]
+    public void WithdrawingAWaitRemovesOnlyThatExactRequest()
+    {
+        using var drive = new Drive();
+        var first = Seed(drive, Config("first"), Snapshot("seed", "one"));
+        var second = CoordinationStore.OpenCloud(Config("second"), new(Config("second"), Api(drive), Run));
+        var waited = new HandoffRequest(1, Second, new string('3', 32), Now);
+        var newer = waited with { RequestId = new string('4', 32) };
+        second.WriteRequest(waited);
+        second.WriteRequest(newer);
+
+        Assert.False(second.WithdrawRequest(waited));
+        Assert.Equal(newer, Assert.Single(first.PendingRequests(Now)));
+        Assert.True(second.WithdrawRequest(newer));
+        Assert.Empty(first.PendingRequests(Now));
+    }
+
+    [Fact]
     public async Task SimultaneousStartsGrantExactlyOnePcAndPreserveTheLosersRequest()
     {
         using var drive = new Drive();
