@@ -96,6 +96,7 @@ internal sealed class SessionCoordinator(
     private HandoffRequest? _waitRequest;
     private bool _waitRequestSent;
     private Func<bool>? _waitCancelled;
+    private DateTimeOffset? _waitDeadline;
 
     private DeviceIdentity Me => options.Device;
 
@@ -133,7 +134,7 @@ internal sealed class SessionCoordinator(
         finally
         {
             sent = _waitRequestSent;
-            (_waitRequest, _waitRequestSent, _waitCancelled) = (null, false, null);
+            (_waitRequest, _waitRequestSent, _waitCancelled, _waitDeadline) = (null, false, null, null);
         }
         if (sent && outcome.Status is not (LaunchStatus.Started or LaunchStatus.AlreadyRunning)) WithdrawWaitRequest(request);
         ReportLaunch(outcome);
@@ -147,9 +148,14 @@ internal sealed class SessionCoordinator(
         DeviceIdentity? owner = null;
         OwnershipState? state = null;
         DateTimeOffset? seenAt = null;
+        HandoffWaitUpdate? last = null;
+        _waitDeadline = deadline;
         while (!WaitStopped())
         {
+            // The wait is bounded: no check, and so no launch, begins once the deadline has passed.
+            if (last is not null && clock.Now >= deadline) return WaitTimedOut(wait, last);
             var outcome = LaunchCore();
+            if (outcome.Wait == LaunchWait.Expired) return ReleasedTooLate(wait);
             if (outcome.Wait == LaunchWait.None) return outcome;
             bool fresh = outcome.Wait == LaunchWait.OwnedElsewhere;
             if (outcome.Journal is { } journal)
@@ -164,6 +170,7 @@ internal sealed class SessionCoordinator(
                 (owner, state, seenAt, interval) = (null, null, clock.Now, wait.FirstPoll);
             }
             var update = new HandoffWaitUpdate(owner, state, seenAt, fresh, deadline - clock.Now);
+            last = update;
             if (clock.Now >= deadline) return WaitTimedOut(wait, update);
             Report(fresh ? SessionPhase.Waiting : SessionPhase.WaitingForStorage, update.Describe());
             try { wait.Update?.Invoke(update); }
@@ -174,6 +181,11 @@ internal sealed class SessionCoordinator(
         }
         return new LaunchOutcome(LaunchStatus.Waiting, shutdown?.SuppressUi == true ? ShutdownMessage : WaitCancelledMessage);
     }
+
+    /// <summary>The library became free, but a slow check finished after the deadline; nothing was acquired.</summary>
+    private static LaunchOutcome ReleasedTooLate(HandoffWait wait) => new(LaunchStatus.Waiting,
+        $"Stopped waiting after {HandoffWaitUpdate.Duration(wait.Timeout)}: the other PC handed off the library just as the wait ended, "
+        + "so Medal was not started. Open Medal again to start it.");
 
     private static LaunchOutcome WaitTimedOut(HandoffWait wait, HandoffWaitUpdate update)
     {
@@ -351,6 +363,8 @@ internal sealed class SessionCoordinator(
         var checkedStorage = preflight?.Invoke() ?? LaunchPreflight.Proceed;
         if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, ShutdownMessage);
         if (WaitCancelled()) return new LaunchOutcome(LaunchStatus.Waiting, WaitCancelledMessage);
+        // The Clean read or the provider check may have outlasted an explicit wait; never acquire after its deadline.
+        if (_waitDeadline is { } deadline && clock.Now >= deadline) return new LaunchOutcome(LaunchStatus.Waiting, "", Wait: LaunchWait.Expired);
         if (checkedStorage.Refusal is { } refusal) return new LaunchOutcome(LaunchStatus.Blocked, refusal);
         string session = NewId();
         OwnershipRecord journal;
@@ -421,10 +435,13 @@ internal sealed class SessionCoordinator(
         }
         store.Update(r => Ownership.MarkActive(r, Me, session, clock.Now), options.LockTimeout);
         store.RemoveRequest(Me);
-        if (shutdown is not null && !shutdown.TryLaunch(medal.Launch))
+        // Both updates above can take a storage round trip, so a cancelled wait is checked again at the final decision.
+        // Medal never ran: the normal finish releases the library, or keeps it here if storage is unavailable.
+        bool cancelled = WaitCancelled();
+        if (cancelled || (shutdown is not null && !shutdown.TryLaunch(medal.Launch)))
         {
             var finished = Finish(session);
-            return new LaunchOutcome(LaunchStatus.Waiting, finished.Message, session);
+            return new LaunchOutcome(LaunchStatus.Waiting, cancelled ? WaitCancelledMessage + " " + finished.Message : finished.Message, session);
         }
         if (shutdown is null) medal.Launch();
         string backup = !restored.Changed ? ""

@@ -150,6 +150,71 @@ public sealed partial class SessionTests
     }
 
     [Fact]
+    public void AReleaseExactlyAtTheDeadlineDoesNotStartMedal()
+    {
+        var (first, session) = FirstPcHoldsTheLibrary();
+        var second = Computer(SecondPc, "second");
+        var updates = new List<HandoffWaitUpdate>();
+        var deadline = _clock.Now + TimeSpan.FromMinutes(1);
+        bool released = false;
+        _clock.OnSleep = () =>
+        {
+            if (released || _clock.Now < deadline) return;
+            released = true;
+            Release(first, session);
+        };
+
+        var outcome = second.Coordinator.LaunchWhenReleased(WaitFor(TimeSpan.FromMinutes(1), updates));
+        _clock.OnSleep = null;
+
+        Assert.True(released);
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.StartsWith("Stopped waiting after 60 seconds", outcome.Message, StringComparison.Ordinal);
+        Assert.Empty(second.Mount.Starts);
+        Assert.Equal(0, second.Medal.Launches);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Empty(_store.PendingRequests(_clock.Now));
+    }
+
+    [Fact]
+    public void ACheckThatOutlastsTheDeadlineNeverAcquires()
+    {
+        var second = Computer(SecondPc, "second", preflight: () =>
+        {
+            // A slow provider check after a Clean read.
+            _clock.Sleep(TimeSpan.FromSeconds(45));
+            return LaunchPreflight.Proceed;
+        });
+
+        var outcome = second.Coordinator.LaunchWhenReleased(new HandoffWait(TimeSpan.FromSeconds(30)));
+
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.Contains("handed off the library just as the wait ended", outcome.Message, StringComparison.Ordinal);
+        Assert.Empty(second.Mount.Starts);
+        Assert.Equal(0, second.Medal.Launches);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void CancellingDuringTheFinalOwnershipUpdatesReleasesInsteadOfOpeningMedal()
+    {
+        int checks = 0, atBackup = 0;
+        var second = Computer(SecondPc, "second", prepareNativeBackup: () => atBackup = checks);
+        // Not yet cancelled at the check right after the native backup; cancelled by the final launch decision.
+        bool Cancelled() => ++checks > 0 && atBackup > 0 && checks > atBackup + 1;
+
+        var outcome = second.Coordinator.LaunchWhenReleased(new HandoffWait(TimeSpan.FromMinutes(5), Cancelled));
+
+        Assert.True(atBackup > 0);
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.StartsWith("Stopped waiting for the other PC", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal(0, second.Medal.Launches);
+        Assert.False(second.Mount.IsRunning);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Empty(_store.PendingRequests(_clock.Now));
+    }
+
+    [Fact]
     public void WithTwoWaitingPcsOnlyOneAcquiresAndTheOtherKeepsWaiting()
     {
         var (first, session) = FirstPcHoldsTheLibrary();

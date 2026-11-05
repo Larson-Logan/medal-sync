@@ -15,6 +15,9 @@ internal enum LaunchWait
 
     /// <summary>The journal could not be read, or the switch request written, before anything was acquired.</summary>
     ServerUnreachable,
+
+    /// <summary>The library was free, but the wait's deadline passed before acquisition. Nothing was acquired.</summary>
+    Expired,
 }
 
 /// <summary>
