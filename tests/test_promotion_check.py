@@ -16,7 +16,10 @@ spec.loader.exec_module(promotion)
 PROPS = '<Project>\n  <PropertyGroup>\n    <VersionPrefix>{}</VersionPrefix>\n  </PropertyGroup>\n</Project>\n'
 SHIPPED = '## 1.3.1.05 — 2026-11-01\n\n- Shipped change.\n'
 RELEASED = '# Changelog\n\n## Unreleased\n\n' + SHIPPED
-ENV = {**os.environ, 'GIT_AUTHOR_NAME': 'Test', 'GIT_AUTHOR_EMAIL': 'test@example.invalid',
+# Without the runner's own Actions variables, so tests choose the output format
+# and never write to the real job summary.
+ENV = {**{k: v for k, v in os.environ.items() if k not in ('GITHUB_ACTIONS', 'GITHUB_STEP_SUMMARY')},
+       'GIT_AUTHOR_NAME': 'Test', 'GIT_AUTHOR_EMAIL': 'test@example.invalid',
        'GIT_COMMITTER_NAME': 'Test', 'GIT_COMMITTER_EMAIL': 'test@example.invalid',
        'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
 
