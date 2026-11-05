@@ -7,8 +7,8 @@
 <meta name="description" content="Free, open-source Windows app that syncs your Medal.tv clip library between gaming PCs and backs it up to a NAS, OneDrive, Dropbox or Google Drive.">
 <link rel="canonical" href="https://larson-logan.github.io/medal-sync/">
 <link rel="icon" href="favicon.ico">
-<meta name="theme-color" content="#EEF0F4" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#17162E" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#EFEFF1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141416" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Medal Sync">
 <meta property="og:title" content="Medal Sync – Free Medal.tv clip sync and backup">
@@ -71,15 +71,15 @@
 <style>
 :root {
   color-scheme: light dark;
-  --paper: #EEF0F4;
+  --paper: #EFEFF1;
   --panel: #FFFFFF;
-  --ink: #1C1A3A;
-  --muted: #565573;
-  --line: #D3D6E0;
-  --action: #1C1A3A;
+  --ink: #18181B;
+  --muted: #56565E;
+  --line: #D6D6DB;
+  --action: #18181B;
   --action-ink: #FFFFFF;
-  --focus: #4338CA;
-  --shadow: 0 1px 2px rgb(28 26 58 / 0.06), 0 12px 32px -12px rgb(28 26 58 / 0.22);
+  --focus: #18181B;
+  --shadow: 0 1px 2px rgb(24 24 27 / 0.06), 0 12px 32px -12px rgb(24 24 27 / 0.22);
   /* The tray icon's status colors, used with the same meanings as in the app. */
   --ready: #22C55E;
   --working: #38BDF8;
@@ -100,14 +100,14 @@
 @media (min-width: 720px) { :root { --gutter: 40px; } }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #17162E; --panel: #211F3D; --ink: #ECEBF7; --muted: #A9A7C4; --line: #34325A;
-    --action: #ECEBF7; --action-ink: #17162E; --focus: #A5B4FC;
+    --paper: #141416; --panel: #1F1F22; --ink: #EDEDEF; --muted: #A6A6AE; --line: #313136;
+    --action: #EDEDEF; --action-ink: #141416; --focus: #EDEDEF;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -16px rgb(0 0 0 / 0.7);
   }
 }
 :root[data-theme="dark"] {
-  --paper: #17162E; --panel: #211F3D; --ink: #ECEBF7; --muted: #A9A7C4; --line: #34325A;
-  --action: #ECEBF7; --action-ink: #17162E; --focus: #A5B4FC;
+  --paper: #141416; --panel: #1F1F22; --ink: #EDEDEF; --muted: #A6A6AE; --line: #313136;
+  --action: #EDEDEF; --action-ink: #141416; --focus: #EDEDEF;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -16px rgb(0 0 0 / 0.7);
 }
 
@@ -241,8 +241,8 @@ footer p { margin: 0; }
 <header class="wrap masthead">
 <a class="brand display" href="./">
 <svg viewBox="0 0 32 32" aria-hidden="true">
-<defs><linearGradient id="mark" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7C3AED"/><stop offset="1" stop-color="#4338CA"/></linearGradient></defs>
-<rect width="32" height="32" rx="7" fill="url(#mark)"/>
+<defs><linearGradient id="mark" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#343438"/><stop offset="1" stop-color="#161618"/></linearGradient></defs>
+<rect x=".4" y=".4" width="31.2" height="31.2" rx="6.8" fill="url(#mark)" stroke="#58585E" stroke-width=".8"/>
 <g fill="none" stroke="#fff" stroke-width="2.4"><path d="M6.3 11.47A10.7 10.7 0 0 1 23.57 8.43"/><path d="M25.7 20.52A10.7 10.7 0 0 1 8.43 23.57"/></g>
 <g fill="#fff"><path d="M26.04 10.9 25.69 5.61 20.75 10.55Z"/><path d="M5.96 21.1 6.31 26.39 11.25 21.45Z"/><path d="M13.45 11.52v8.96L21.07 16Z"/></g>
 </svg>
@@ -267,7 +267,7 @@ Each PC keeps its own Medal login and recording settings.</p>
 <figure class="handoff">
 <div class="windows" aria-hidden="true">
 <div class="window" id="desktop" data-state="ready">
-<div class="titlebar"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#4338CA"/><path d="M13.45 11.52v8.96L21.07 16Z" fill="#fff"/></svg>Medal Sync Status</div>
+<div class="titlebar"><svg viewBox="0 0 32 32"><rect x="1" y="1" width="30" height="30" rx="6.5" fill="#232326" stroke="#58585E" stroke-width="2"/><path d="M13.45 11.52v8.96L21.07 16Z" fill="#fff"/></svg>Medal Sync Status</div>
 <div class="window-body">
 <div class="row"><p class="device display">Desktop</p><span class="state"><span class="dot"></span><span class="label">Ready</span></span></div>
 <p class="next">Every copy is verified. Safe to switch PCs.</p>
@@ -275,7 +275,7 @@ Each PC keeps its own Medal login and recording settings.</p>
 </div>
 </div>
 <div class="window" id="laptop" data-state="open">
-<div class="titlebar"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#4338CA"/><path d="M13.45 11.52v8.96L21.07 16Z" fill="#fff"/></svg>Medal Sync Status</div>
+<div class="titlebar"><svg viewBox="0 0 32 32"><rect x="1" y="1" width="30" height="30" rx="6.5" fill="#232326" stroke="#58585E" stroke-width="2"/><path d="M13.45 11.52v8.96L21.07 16Z" fill="#fff"/></svg>Medal Sync Status</div>
 <div class="window-body">
 <div class="row"><p class="device display">Laptop</p><span class="state"><span class="dot"></span><span class="label">Medal open</span></span></div>
 <p class="next">Same clips as the desktop, with this PC's login and settings.</p>

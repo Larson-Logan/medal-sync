@@ -15,14 +15,15 @@ from PIL import Image, ImageDraw
 
 SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 SCALE = 8
-TOP = (124, 58, 237)  # violet
-BOTTOM = (67, 56, 202)  # indigo
+TOP = (52, 52, 56)  # charcoal, like Medal's own icon
+BOTTOM = (22, 22, 24)  # near black
+RIM = (88, 88, 94, 255)  # keeps the edge visible on dark taskbars
 WHITE = (255, 255, 255, 255)
 OUTPUT = Path(__file__).resolve().parent.parent / "tools" / "medal-sync" / "MedalSync.Launch" / "medal-sync.ico"
 
 
 def background(size: int) -> Image.Image:
-    """A rounded square with a vertical violet-to-indigo gradient."""
+    """A rounded square with a vertical charcoal-to-near-black gradient and a thin lighter rim."""
     gradient = Image.new("RGBA", (size, size))
     pixels = gradient.load()
     for y in range(size):
@@ -33,6 +34,8 @@ def background(size: int) -> Image.Image:
     mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, size - 1, size - 1), radius=round(size * 0.22), fill=255)
     gradient.putalpha(mask)
+    ImageDraw.Draw(gradient).rounded_rectangle((0, 0, size - 1, size - 1), radius=round(size * 0.22),
+                                                outline=RIM, width=max(1, round(size * 0.02)))
     return gradient
 
 

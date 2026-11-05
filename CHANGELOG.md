@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Change the Medal Sync icon from violet to charcoal and white to match Medal,
+  with a thin lighter rim so it stays visible on dark taskbars. Tray status
+  dots keep their colors.
 - Add an explicit wait for another PC to hand off the library. Opening Medal
   while another PC owns it now offers **Wait and open when ready** (No is the
   default), with Cancel and a 15-minute limit; `launch --wait-for-handoff
