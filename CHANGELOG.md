@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Show the last cloud-copy check in text/JSON status, the status panel and
+  privacy-filtered diagnostics. Failed and incomplete checks include recovery
+  guidance; warnings clear after a passing check or a later verified handoff
+  for that target. An incomplete check keeps earlier unresolved damage visible.
 - Add **Retry cloud copies** to the status panel while Ready with optional
   copies pending. Progress and results stay visible, cancellation keeps copies
   pending, and closing the panel keeps the guarded retry running.

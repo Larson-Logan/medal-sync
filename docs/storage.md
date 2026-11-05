@@ -494,6 +494,24 @@ handoff reads every file back there, and an optional target is queued for
 `replicate retry`. A check never counts as the verification a handoff needs.
 Exit codes: 0 passed, 1 missing or different files, 3 incomplete or canceled.
 
+`status --json` lists the last check for each configured copy, including required
+copies. Text status and the status panel report failed and incomplete checks.
+A failed check reports missing and
+different counts and explains that the next handoff reads every referenced file
+back. Incomplete checks show the cause and next step; sign-in failures ask you
+to sign in again. A newer incomplete attempt does not hide earlier unresolved
+damage. Notices yield to higher-priority panel notices, including active retry
+progress.
+
+A passing check clears the warning. A later successful handoff clears it only
+for the targets named in this library's verification receipt; a handoff that
+deferred that copy does not clear it. Results remain historical in JSON and
+`replica history`. Checks for other libraries are ignored. Diagnostics include
+tokenized targets, results, counts and coarse ages, without target names, paths,
+remotes, provider errors or clip details. Status and diagnostics only read these
+local records; text/JSON status and diagnostics retain them while shared storage
+is offline.
+
 ### Clean up a cloud copy
 
 Files the library no longer references stay at a cloud copy, as does version

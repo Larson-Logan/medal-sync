@@ -92,6 +92,7 @@ internal static class SessionCommands
         Func<bool>? supervisorRunning = null)
     {
         var now = DateTimeOffset.UtcNow;
+        var cloudChecks = ReplicaCheckStatus.Read(state, config.LibraryId, now, config.Replication?.Targets ?? []);
         CoordinationStore store;
         OwnershipRecord journal;
         try
@@ -103,18 +104,22 @@ internal static class SessionCommands
         catch (IOException)
         {
             const string waiting = "Waiting for storage: the shared library's server cannot be reached right now. Clips and any session stay on this PC.";
-            output.WriteLine(json
-                ? StatusReport.Offline(config.LibraryId, waiting, StorageReplication.Pending(state, config.LibraryId),
-                    StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now).ToJson()
-                : waiting);
+            if (json)
+                output.WriteLine((StatusReport.Offline(config.LibraryId, waiting, StorageReplication.Pending(state, config.LibraryId),
+                    StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now) with { CloudCopies = cloudChecks }).ToJson());
+            else
+            {
+                output.WriteLine(waiting);
+                foreach (string message in cloudChecks.SelectMany(c => c.Messages())) output.WriteLine(message);
+            }
             return 3;
         }
         if (json)
         {
-            var desktop = DesktopStatus.Read(state, config.LibraryId, journal, device, (supervisorRunning ?? AnotherInstanceRunning)(), now);
+            var desktop = DesktopStatus.Read(state, config.LibraryId, journal, device, (supervisorRunning ?? AnotherInstanceRunning)(), now, cloudChecks);
             var report = StatusReport.Reached(config.LibraryId, journal, device, desktop, store.PendingRequests(now), store.StaleRequests(now),
                 StorageReplication.Pending(state, config.LibraryId), StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now)
-                with { ReplicaRetry = ReplicaRetryStatus.Read(state, config.LibraryId, now) };
+                with { ReplicaRetry = ReplicaRetryStatus.Read(state, config.LibraryId, now), CloudCopies = cloudChecks };
             output.WriteLine(report.ToJson());
             return 0;
         }
@@ -126,6 +131,7 @@ internal static class SessionCommands
             output.WriteLine($"Cloud copy '{replica.Name}' is pending since {replica.Since:yyyy-MM-dd HH:mm} UTC; retry while Ready with 'medal-sync replicate retry --apply', or on the next finish.");
         if (ReplicaRetryStatus.Read(state, config.LibraryId, now) is { } retry)
             output.WriteLine($"Cloud retry (generation {retry.Generation}): {retry.Message}");
+        foreach (string message in cloudChecks.SelectMany(c => c.Messages())) output.WriteLine(message);
         foreach (var item in StorageCheckReport.Outstanding(state, config.LibraryId))
             output.WriteLine($"Storage needs attention: {item.Detail} Run 'medal-sync storage check' after fixing it.");
         return 0;
@@ -141,7 +147,9 @@ internal static class SessionCommands
         var store = CoordinationStore.Open(config);
         var journal = store.ReadJournal();
         _ = store.Generations.ReadManifest(journal.CommittedGeneration);
-        return DesktopStatus.Read(state, config.LibraryId, journal, device, AnotherInstanceRunning(), DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        return DesktopStatus.Read(state, config.LibraryId, journal, device, AnotherInstanceRunning(), now,
+            ReplicaCheckStatus.Read(state, config.LibraryId, now, config.Replication?.Targets ?? []));
     }
 
     public static int MountPlanCommand(Arguments args, TextWriter output)

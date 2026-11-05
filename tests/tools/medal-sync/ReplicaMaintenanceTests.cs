@@ -225,6 +225,66 @@ public sealed class ReplicaMaintenanceTests : IDisposable
     }
 
     private ReplicaAudit Audit() => new(_config, _state, _store, RequireIdle, _remote, clock: () => _now);
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void RequiredCopyCheckFailureAppearsInTextJsonAndTrayAndAPassingCheckClearsIt()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        _remote.OnCheck = () => new(new Dictionary<string, RemoteCheck>
+        {
+            ["one.mp4"] = RemoteCheck.Missing, ["two.mp4"] = RemoteCheck.Differs,
+        }, null);
+        Assert.Equal(ReplicaAudit.Failed, Assert.Single(Audit().Apply(Audit().Plan("vault"))).Result);
+        using var text = new StringWriter();
+        Assert.Equal(0, SessionCommands.WriteStatus(_config, _state, _first, false, text, () => false));
+        Assert.Contains("Cloud copy 'vault' failed its last complete check", text.ToString(), StringComparison.Ordinal);
+        Assert.Contains("1 missing, 1 different", text.ToString(), StringComparison.Ordinal);
+        using var json = new StringWriter();
+        Assert.Equal(0, SessionCommands.WriteStatus(_config, _state, _first, true, json, () => false));
+        using var document = JsonDocument.Parse(json.ToString());
+        Assert.Equal(1, document.RootElement.GetProperty("format").GetInt32());
+        var vault = Assert.Single(document.RootElement.GetProperty("cloudCopies").EnumerateArray(), c => c.GetProperty("name").GetString() == "vault");
+        Assert.Equal("failed", vault.GetProperty("lastCheck").GetProperty("result").GetString());
+        Assert.Equal(1, vault.GetProperty("lastCheck").GetProperty("missing").GetInt32());
+        Assert.True(vault.GetProperty("needsAttention").GetBoolean());
+        Assert.DoesNotContain("snapshotDigest", vault.GetRawText(), StringComparison.Ordinal);
+        var desktop = DesktopStatus.Read(_state, _config.LibraryId, _store.ReadJournal(), _first, false, _now);
+        Assert.Contains("vault", desktop.Notice, StringComparison.Ordinal);
+        Assert.Contains("failed its last complete check", desktop.Notice, StringComparison.Ordinal);
+
+        _remote.OnCheck = () => new(new Dictionary<string, RemoteCheck>
+        {
+            ["one.mp4"] = RemoteCheck.Match, ["two.mp4"] = RemoteCheck.Match,
+        }, null);
+        Assert.Equal(ReplicaAudit.Passed, Assert.Single(Audit().Apply(Audit().Plan("vault"))).Result);
+        Assert.Null(DesktopStatus.Read(_state, _config.LibraryId, _store.ReadJournal(), _first, false, _now).Notice);
+        using var after = new StringWriter();
+        SessionCommands.WriteStatus(_config, _state, _first, false, after, () => false);
+        Assert.DoesNotContain("failed its last complete check", after.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void IncompleteSignInCheckRemainsVisibleInStatusWhenCoordinationIsOffline()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        _remote.OnCheck = () => new(new Dictionary<string, RemoteCheck>(), new RcloneFailedException("Synthetic sign-in failure", 1, hints: RcloneHints.SignIn));
+        Assert.Equal(ReplicaAudit.Incomplete, Assert.Single(Audit().Apply(Audit().Plan("vault"))).Result);
+        var offline = _config with { CoordinationRoot = _fixture.PathFor("offline") };
+        using var text = new StringWriter();
+        Assert.Equal(3, SessionCommands.WriteStatus(offline, _state, _first, false, text, () => false));
+        Assert.Contains("Sign in again", text.ToString(), StringComparison.Ordinal);
+        using var json = new StringWriter();
+        Assert.Equal(3, SessionCommands.WriteStatus(offline, _state, _first, true, json, () => false));
+        using var document = JsonDocument.Parse(json.ToString());
+        Assert.False(document.RootElement.GetProperty("safeToSwitch").GetBoolean());
+        var vault = Assert.Single(document.RootElement.GetProperty("cloudCopies").EnumerateArray(), c => c.GetProperty("name").GetString() == "vault");
+        Assert.Equal("incomplete", vault.GetProperty("lastCheck").GetProperty("result").GetString());
+        Assert.Equal("sign-in", vault.GetProperty("lastCheck").GetProperty("reason").GetString());
+        Assert.True(vault.GetProperty("needsAttention").GetBoolean());
+    }
+
     private MedalSyncConfig PruneConfig(bool required) => _config with
     {
         Replication = _config.Replication! with

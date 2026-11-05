@@ -263,6 +263,12 @@ required replica, last confirmation time and the next action. Unavailable counts
 stay unavailable; an empty queue alone never means Ready. Ready requires the
 committed, released journal state after the supervisor's checks.
 
+Failed and incomplete cloud-copy checks appear in text status and as a panel
+notice when no higher-priority notice is showing. Missing or different files
+show counts; an incomplete sign-in check says to sign in again. A passing check
+or a later handoff that verifies that target clears its warning. Text/JSON
+status and diagnostics retain these local results while shared storage is offline.
+
 The view reconnects automatically. Status older than 20 seconds, an unreadable
 journal or a lost progress feed shows Unknown; keep this PC's session and cache.
 **Retry finish** is available for this PC's interrupted finish after supervision
@@ -308,6 +314,7 @@ the reason on standard error.
 | `safeToSwitch` | `true` only when the journal is `CLEAN` and the phase is `READY`. |
 | `handoffRequests` | `null` when unreachable. Each has `device`, `requestedAt`, `ageSeconds` and `stale` (older than six hours, no longer prompting). |
 | `pendingCloudCopies` | Optional cloud copies waiting for a retry: `name`, `firstFailure`, `lastAttempt`. |
+| `cloudCopies` | Configured cloud copies: `name`, `lastCheck`, `lastComplete` and `needsAttention`. Each check has `result` (`passed`, `failed`, `incomplete`), `reason` (or `null`), `finishedAt`, `generation`, and counts `planned`, `checked`, `matched`, `missing`, `mismatched`, `unknown`, `bytes`. A check is `null` when unavailable or never run. `lastComplete` preserves the latest completed check if a newer attempt is incomplete. A later verified handoff clears `needsAttention` without rewriting the historical check. |
 | `lastVerifiedAt` | When this PC last verified primary storage and its cloud copies, or `null`. |
 | `replicaRetry` | Ready-state cloud retry progress/result, or `null`: `generation`, `running`, `message`, `confirmedAt`, optional `target`, plus format and library identity. Stale running evidence becomes an explicit stale result. This does not change library ownership. |
 | `observedAt` | When this report was made. |

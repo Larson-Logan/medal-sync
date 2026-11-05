@@ -75,7 +75,7 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
     /// while a supervisor runs is an explicit Unknown, never Ready.
     /// </summary>
     internal static DesktopStatus Read(LocalState state, string libraryId, OwnershipRecord journal, DeviceIdentity? device,
-        bool supervisorRunning, DateTimeOffset now)
+        bool supervisorRunning, DateTimeOffset now, IReadOnlyList<CloudCopyCheckStatus>? cloudChecks = null)
     {
         ProgressEnvelope? report = null;
         try { report = Json.ReadFile<ProgressEnvelope>(Path.Combine(state.Root, "desktop-status.json"), "Desktop progress"); }
@@ -92,11 +92,13 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
             if (status.Notice is null && now - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
-        if (status.Notice is null && pending.Count > 0)
-            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending. Choose Retry cloud copies while Ready, run 'medal-sync replicate retry --apply', or wait for the next finish." };
         if (status.Notice is null && StorageCheckReport.Outstanding(state, libraryId) is { Count: > 0 } problems)
             status = status with { Notice = "Storage needs attention: " + string.Join(" ", problems.Select(p => p.Detail))
                 + " Run 'medal-sync storage check' after fixing it." };
+        var checkNotice = string.Join(" ", (cloudChecks ?? ReplicaCheckStatus.Read(state, libraryId, now)).SelectMany(c => c.Messages()));
+        if (status.Notice is null && checkNotice.Length > 0) status = status with { Notice = checkNotice };
+        if (status.Notice is null && pending.Count > 0)
+            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending. Choose Retry cloud copies while Ready, run 'medal-sync replicate retry --apply', or wait for the next finish." };
         return status;
     }
 

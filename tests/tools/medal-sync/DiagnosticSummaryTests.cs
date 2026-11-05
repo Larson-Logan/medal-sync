@@ -146,6 +146,33 @@ public sealed class DiagnosticSummaryTests : IDisposable
     }
 
     [Fact]
+    public void CloudCopyChecksExportTokensCountsAndCoarseAgeWithoutPrivateHistoryValues()
+    {
+        var failure = new CloudCopyCheck("failed", null, Now.AddMinutes(-10), 42, 4, 4, 2, 1, 1, 0, 1024);
+        string text = DiagnosticSummary.Build(Full() with
+        {
+            CloudCopyChecks = [new("canary-vault", failure, failure, true) { Failed = true }],
+        });
+        AssertNoCanary(text);
+        var check = Assert.Single(Parse(text)["replication"]!["cloudCopyChecks"]!.AsArray())!;
+        Assert.Equal("target-2", (string)check["target"]!);
+        Assert.True((bool)check["needsAttention"]!);
+        Assert.Equal("failed", (string)check["lastCheck"]!["result"]!);
+        Assert.Equal("under 1 hour", (string)check["lastCheck"]!["finishedAgo"]!);
+        Assert.Equal(42, (long)check["lastCheck"]!["generation"]!);
+        Assert.Equal(1, (int)check["lastCheck"]!["missing"]!);
+        Assert.Null(check["lastCheck"]!["finishedAt"]);
+        Assert.Contains("cloud-copy-check-failed", Parse(text)["refusals"]!.AsArray().Select(r => (string)r!));
+
+        var privateCheck = failure with { Result = "CanaryReason", Reason = @"C:\CanarySecrets\CanaryToken" };
+        string malformed = DiagnosticSummary.Build(Full() with { CloudCopyChecks = [new("canary-vault", privateCheck, null, true)] });
+        AssertNoCanary(malformed);
+        var sanitized = Parse(malformed)["replication"]!["cloudCopyChecks"]![0]!["lastCheck"]!;
+        Assert.Equal("unrecognized", (string)sanitized["result"]!);
+        Assert.Equal("unrecognized", (string)sanitized["reason"]!);
+    }
+
+    [Fact]
     public void MissingConfigurationIsStillUseful()
     {
         var report = Parse(DiagnosticSummary.Build(Full() with { ConfigPresent = false, Config = null, Journal = null }));
