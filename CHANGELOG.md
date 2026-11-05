@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.4.0 — 2026-11-05
+
 - Use less CPU, memory and disk activity while Medal Sync runs:
   - The status view no longer reopens the library on every refresh. In Google
     Drive mode each refresh, every 5 seconds even with the panel closed,
