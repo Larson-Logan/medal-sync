@@ -113,7 +113,9 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         var progress = fresh ? report?.Progress : null;
         if (journal.Owner is { } owner && owner.DeviceId != device.DeviceId)
             return new(journal.State == OwnershipState.RecoveryRequired ? SessionPhase.RecoveryNeeded : SessionPhase.Waiting,
-                $"Quit Medal and finish the handoff on {owner.DisplayName}. Reopen Medal here after that PC is Ready.", now);
+                Ownership.IsFinishing(journal.State)
+                    ? $"{owner.DisplayName} is finishing its uploads and hands off the library by itself. Open Medal here after it is Ready."
+                    : $"Quit Medal and finish the handoff on {owner.DisplayName}. Reopen Medal here after that PC is Ready.", now);
         if (journal.State == OwnershipState.Clean)
         {
             // An operation may be preparing to acquire ownership. Never flash Ready during startup.

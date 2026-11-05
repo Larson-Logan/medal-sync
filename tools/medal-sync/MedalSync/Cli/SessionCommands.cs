@@ -291,6 +291,8 @@ internal static class SessionCommands
         bool replaceLocal = args.Flag("--replace-local-library");
         var wait = WaitSeconds(args.Value("--wait-for-server"));
         var handoff = HandoffWait.ParseSeconds(args.Value("--wait-for-handoff"));
+        bool quiet = args.Flag("--no-switch-request");
+        if (quiet && handoff is not null) throw new UsageException("--no-switch-request cannot be combined with --wait-for-handoff, which always asks the other PC to switch.");
         string? link = args.Value("--medal-link");
         if (link is not null) link = MedalLink.Require(link);
         args.RequireAllUsed();
@@ -316,7 +318,7 @@ internal static class SessionCommands
         try
         {
             (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report,
-                StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null);
+                StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null, askOwnerToSwitch: !quiet);
             journal = store.ReadJournal();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -630,7 +632,7 @@ internal static class SessionCommands
 
     private static (SessionCoordinator, CoordinationStore, RcloneClipMount) Coordinator(Context context, bool acceptChanges,
         bool replaceLocal = false, Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
-        string? launchLink = null, Action<SessionProgress>? progress = null, Func<LaunchPreflight>? preflight = null)
+        string? launchLink = null, Action<SessionProgress>? progress = null, Func<LaunchPreflight>? preflight = null, bool askOwnerToSwitch = true)
     {
         var clock = new SystemClock();
         var store = CoordinationStore.Open(context.Config, () => shutdown?.RequireTime());
@@ -648,6 +650,7 @@ internal static class SessionCommands
             TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal)
         {
             EnrollmentFolder = EnrollmentOwnership.PendingFolder(context.State.Root),
+            AskOwnerToSwitch = askOwnerToSwitch,
         };
         return (new SessionCoordinator(store, library, mount, new MedalProcess(context.Install, launchLink, capture: context.Config.Capture), checker, clock, options,
             () => NativeBackupCompatibility.Prepare(context.Config, context.Install, context.State),

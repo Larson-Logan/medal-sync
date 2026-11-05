@@ -226,7 +226,7 @@ public sealed partial class SessionTests : IDisposable
     private Pc Computer(DeviceIdentity device, string machine, bool acceptChanges = false, bool replaceLocal = false, string? database = null, Action? prepareNativeBackup = null,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null,
         ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null, SpacePressureMonitor? space = null,
-        Func<LaunchPreflight>? preflight = null, string? enrollmentFolder = null)
+        Func<LaunchPreflight>? preflight = null, string? enrollmentFolder = null, bool askOwnerToSwitch = true)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
@@ -235,6 +235,7 @@ public sealed partial class SessionTests : IDisposable
             TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal)
         {
             EnrollmentFolder = enrollmentFolder,
+            AskOwnerToSwitch = askOwnerToSwitch,
         };
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
         return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space, preflight));

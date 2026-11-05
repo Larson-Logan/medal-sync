@@ -148,6 +148,20 @@ public sealed class DesktopStatusTests
     }
 
     [Fact]
+    public void AnotherPcThatIsOnlyUploadingIsNotDescribedAsNeedingMedalQuit()
+    {
+        var other = new DeviceIdentity(new string('d', 32), "Other PC");
+        Assert.StartsWith("Quit Medal and finish the handoff on Synthetic PC.", DesktopStatus.Resolve(Journal, other, null, false, Now).NextAction,
+            StringComparison.Ordinal);
+        foreach (var state in new[] { OwnershipState.Draining, OwnershipState.Publishing })
+        {
+            var finishing = DesktopStatus.Resolve(Journal with { State = state }, other, null, false, Now);
+            Assert.Equal(SessionPhase.Waiting, finishing.Phase);
+            Assert.Equal("Synthetic PC is finishing its uploads and hands off the library by itself. Open Medal here after it is Ready.", finishing.NextAction);
+        }
+    }
+
+    [Fact]
     public void StartupDoesNotFlashReadyBeforeAcquiringOwnership()
     {
         var clean = Ownership.Initial(Journal.LibraryId, Journal.AccountId, Now);

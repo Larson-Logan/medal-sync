@@ -406,6 +406,143 @@ public sealed partial class SessionTests
         Assert.Equal(settled, tracker.Settled);
     }
 
+    [Fact]
+    public void ASignInLaunchDoesNotAskTheOwnerToSwitch()
+    {
+        FirstPcHoldsTheLibrary();
+        var before = _store.ReadJournal();
+        var second = Computer(SecondPc, "second", askOwnerToSwitch: false);
+
+        var outcome = second.Coordinator.Launch();
+
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.Equal(LaunchWait.OwnedElsewhere, outcome.Wait);
+        Assert.Equal("Medal is in use on First PC, so Medal Sync did not open it here at sign-in, and First PC was not interrupted. "
+            + "To switch, quit Medal on First PC, then open Medal here.", outcome.Message);
+        Assert.Empty(_store.PendingRequests(_clock.Now));
+        Assert.Equal(before, _store.ReadJournal());
+        Assert.Equal(0, second.Medal.Launches);
+    }
+
+    [Fact]
+    public void AnExplicitWaitAsksTheOwnerEvenWhenAPlainLaunchWouldNot()
+    {
+        FirstPcHoldsTheLibrary();
+        var second = Computer(SecondPc, "second", askOwnerToSwitch: false);
+        var updates = new List<HandoffWaitUpdate>();
+        var seen = new List<HandoffRequest>();
+        _clock.OnSleep = () => seen.AddRange(_store.PendingRequests(_clock.Now));
+
+        var outcome = second.Coordinator.LaunchWhenReleased(WaitFor(TimeSpan.FromMinutes(5), updates, () => updates.Count >= 2));
+        _clock.OnSleep = null;
+
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.Equal(SecondPc, Assert.Single(seen.DistinctBy(r => r.RequestId)).Device);
+        Assert.Empty(_store.PendingRequests(_clock.Now));
+    }
+
+    [Fact]
+    public void AWaitChosenRightAfterALaunchKeepsThatLaunchsRequest()
+    {
+        FirstPcHoldsTheLibrary();
+        var second = Computer(SecondPc, "second");
+        Assert.Equal(LaunchWait.OwnedElsewhere, second.Coordinator.Launch().Wait);
+        var sent = Assert.Single(_store.PendingRequests(_clock.Now));
+        var updates = new List<HandoffWaitUpdate>();
+        var seen = new HashSet<string>();
+        _clock.OnSleep = () => { foreach (var request in _store.PendingRequests(_clock.Now)) seen.Add(request.RequestId); };
+
+        // The owner was told once, by the launch; the wait adds no second request, and cancelling it withdraws that one.
+        var outcome = second.Coordinator.LaunchWhenReleased(WaitFor(TimeSpan.FromMinutes(5), updates, () => updates.Count >= 3));
+        _clock.OnSleep = null;
+
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.Equal(sent.RequestId, Assert.Single(seen));
+        Assert.Empty(_store.PendingRequests(_clock.Now));
+    }
+
+    [Fact]
+    public void AWaitChosenLongAfterALaunchSendsAFreshRequest()
+    {
+        FirstPcHoldsTheLibrary();
+        var second = Computer(SecondPc, "second");
+        second.Coordinator.Launch();
+        var sent = Assert.Single(_store.PendingRequests(_clock.Now));
+        _clock.Sleep(HandoffWait.ReuseRequest + TimeSpan.FromSeconds(1));
+        var updates = new List<HandoffWaitUpdate>();
+        var seen = new HashSet<string>();
+        _clock.OnSleep = () => { foreach (var request in _store.PendingRequests(_clock.Now)) seen.Add(request.RequestId); };
+
+        second.Coordinator.LaunchWhenReleased(WaitFor(TimeSpan.FromMinutes(5), updates, () => updates.Count >= 2));
+        _clock.OnSleep = null;
+
+        Assert.NotEqual(sent.RequestId, Assert.Single(seen));
+    }
+
+    [Fact]
+    public void AnOwnerThatIsOnlyUploadingIsNotDescribedAsNeedingMedalQuit()
+    {
+        var (first, session) = FirstPcHoldsTheLibrary();
+        first.Medal.Running = false;
+        _store.Update(r => Ownership.BeginDrain(r, FirstPc, session, _clock.Now), TimeSpan.FromSeconds(1));
+        var second = Computer(SecondPc, "second");
+
+        var outcome = second.Coordinator.Launch();
+
+        Assert.Equal(LaunchWait.OwnedElsewhere, outcome.Wait);
+        Assert.Equal("First PC is finishing its last session (uploading). It hands off the library by itself, "
+            + "so nobody needs to quit Medal there; open Medal here once it is Ready.", outcome.Message);
+        var update = new HandoffWaitUpdate(FirstPc, OwnershipState.Draining, _clock.Now, Fresh: true, TimeSpan.FromMinutes(5));
+        Assert.Contains("hands off by itself once its uploads finish", update.Describe(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Quit Medal", update.Describe(), StringComparison.Ordinal);
+        Assert.Contains("hands off by itself", update.Lines().Detail, StringComparison.Ordinal);
+        var busy = Assert.Throws<OwnershipConflictException>(() => Ownership.Acquire(_store.ReadJournal(), SecondPc, SessionCoordinator.NewId(), _clock.Now));
+        Assert.EndsWith("Wait for it to finish uploading to switch PCs.", busy.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheOwnersStatusNamesWhoIsWaitingUntilTheyStopAndIgnoresItsOwnRequest()
+    {
+        List<SessionProgress> reports = [];
+        var pc = Computer(FirstPc, "first", progress: reports.Add);
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        var request = new HandoffRequest(1, SecondPc, SessionCoordinator.NewId(), _clock.Now);
+        _store.WriteRequest(request);
+        // Left behind by this PC, for example from a wait that could not withdraw it: never "First PC wants to use Medal".
+        _store.WriteRequest(new HandoffRequest(1, FirstPc, SessionCoordinator.NewId(), _clock.Now));
+        int polls = 0;
+        using var cancel = new CancellationTokenSource();
+        _clock.OnSleep = () =>
+        {
+            if (++polls == 2) Assert.True(_store.WithdrawRequest(request));
+            if (polls == 4) cancel.Cancel();
+        };
+        List<string> notices = [];
+
+        pc.Coordinator.Supervise(session, notices.Add, cancel.Token);
+        _clock.OnSleep = null;
+
+        Assert.Equal("Second PC wants to use Medal. Quit Medal from its tray icon to switch.", Assert.Single(notices));
+        var active = reports.Where(r => r.Phase == SessionPhase.Active).Select(r => r.NextAction).ToList();
+        Assert.Contains("Medal is open. Second PC is waiting for the library. Quit Medal from its tray icon when you are done here, "
+            + "and Medal Sync hands it off.", active);
+        Assert.StartsWith("Medal is open. Quit Medal normally", active[^1], StringComparison.Ordinal);
+        Assert.DoesNotContain(active, a => a.Contains("First PC", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheOwnersStatusListsEveryWaitingPcAndKeepsTheRecordingState()
+    {
+        Assert.Equal("Medal is recording a game. Second PC and Third PC are waiting for the library. "
+            + "Quit Medal from its tray icon when you are done here, and Medal Sync hands it off.",
+            SessionCoordinator.ActiveStatus(recording: true, ["Second PC", "Third PC"]));
+        Assert.Equal("Medal is open. Second PC, Third PC and Fourth PC are waiting for the library. "
+            + "Quit Medal from its tray icon when you are done here, and Medal Sync hands it off.",
+            SessionCoordinator.ActiveStatus(recording: false, ["Second PC", "Third PC", "Fourth PC"]));
+        Assert.StartsWith("Medal is recording a game. Quit Medal", SessionCoordinator.ActiveStatus(recording: true, []), StringComparison.Ordinal);
+    }
+
     private sealed class View(bool cancelled) : IHandoffWaitView
     {
         public bool Cancelled => cancelled;

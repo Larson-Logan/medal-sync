@@ -10,7 +10,7 @@ namespace MedalSync.Cli;
 /// </summary>
 internal static class CommandRunner
 {
-    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--help", "--new-library", "--spike" };
+    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--no-switch-request", "--help", "--new-library", "--spike" };
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
@@ -72,7 +72,7 @@ internal static class CommandRunner
                                                  Review old generations and recovery folders to remove
           retention --in FILE --apply            Remove exactly what that review listed (every PC Ready)
           startup [--apply | --restore]          Preview/start Medal through Medal Sync at sign-in, or put Medal's own entries back
-          launch [--replace-local-library] [--wait-for-server SECONDS] [--wait-for-handoff SECONDS] [--medal-link URL]
+          launch [--replace-local-library] [--wait-for-server SECONDS] [--wait-for-handoff SECONDS | --no-switch-request] [--medal-link URL]
                                                  Start Medal through medal-sync and hand off on exit
           finish [--accept-library-changes]      Finish this PC's interrupted session
           recover-start --session ID [--apply]  Review/recover an older orphan login only when its cache is empty

@@ -61,7 +61,7 @@ shows it too.
 | Command | What it does |
 | --- | --- |
 | `medal-sync-launch.exe` | Checks storage and ownership, starts Medal, supervises the session and hands off after Medal exits. Waits up to 20 seconds for the server. Offers the configuration wizard when Medal Sync is not set up. |
-| `medal-sync-launch.exe --at-sign-in` | The same, as used by Medal's startup entry. Waits up to 2 minutes for the server, and exits quietly when Medal Sync is not set up. |
+| `medal-sync-launch.exe --at-sign-in` | The same, as used by Medal's startup entry. Waits up to 2 minutes for the server, and exits quietly when Medal Sync is not set up. When another PC owns the library it sends no switch request, so that PC is not interrupted. |
 | `medal-sync-launch.exe medal://...` | Opens a Medal link through the same checks, or passes it to the running session. |
 | `medal-sync-launch.exe --configure` | Opens the configuration wizard. |
 | `medal-sync-launch.exe --status` | Opens the status panel. |
@@ -144,7 +144,7 @@ Each option maps to a field in `config.json`; see the
 
 | Command | What it does |
 | --- | --- |
-| `launch [--wait-for-server SECONDS] [--wait-for-handoff SECONDS] [--medal-link URL] [--replace-local-library]` | Starts Medal through Medal Sync and supervises it until it exits, then hands off. `--wait-for-server` is 0 to 600 seconds. Without `--wait-for-handoff`, launch returns at once (exit 3) when another PC owns the library. With it (1 to 3600 seconds), launch keeps one switch request and checks back until that PC releases the library, then starts normally; timeout, Ctrl+C or Windows shutdown withdraws only that request and starts nothing. The desktop launcher normally runs this for you. |
+| `launch [--wait-for-server SECONDS] [--wait-for-handoff SECONDS \| --no-switch-request] [--medal-link URL] [--replace-local-library]` | Starts Medal through Medal Sync and supervises it until it exits, then hands off. `--wait-for-server` is 0 to 600 seconds. Without `--wait-for-handoff`, launch returns at once (exit 3) when another PC owns the library, after sending that PC a switch request unless `--no-switch-request` is given (the sign-in launcher uses it). With it (1 to 3600 seconds), launch keeps one switch request and checks back until that PC releases the library, then starts normally; timeout, Ctrl+C or Windows shutdown withdraws only that request and starts nothing. The desktop launcher normally runs this for you. |
 | `finish [--accept-library-changes]` | Finishes this PC's interrupted session: drains uploads, verifies storage, publishes and releases ownership. Exit 3 means storage is still unavailable. `--accept-library-changes` approves the clip removals that finish listed; review them first. |
 
 ### Enrollment recovery

@@ -20,6 +20,19 @@
 - Change the Medal Sync icon from violet to charcoal and white to match Medal,
   with a thin lighter rim so it stays visible on dark taskbars. Tray status
   dots keep their colors.
+- Handle two PCs being on at the same time more gracefully:
+  - Medal starting at sign-in on one PC no longer sends a switch request to the
+    PC that has the library, so that PC is not told to quit Medal just because
+    another PC was turned on. Opening Medal yourself still asks. The sign-in
+    launcher passes the new `launch --no-switch-request`.
+  - Choosing **Wait and open when ready** reuses the request the launch just
+    sent, so the other PC gets one notice instead of two.
+  - While Medal is open, the status panel on the PC that has the library names
+    every PC waiting for it, so a later notice cannot hide the request. A PC
+    drops off as soon as it stops waiting. A PC never asks itself to switch.
+  - When the other PC has already quit Medal and is only uploading, the
+    launch message, the waiting window and the status panel say it hands off by
+    itself, instead of asking you to quit Medal there.
 - Add an explicit wait for another PC to hand off the library. Opening Medal
   while another PC owns it now offers **Wait and open when ready** (No is the
   default), with Cancel and a 15-minute limit; `launch --wait-for-handoff

@@ -30,6 +30,12 @@ internal sealed record HandoffWait(TimeSpan Timeout, Func<bool>? Cancelled = nul
 {
     public static readonly TimeSpan MaxTimeout = TimeSpan.FromHours(1);
 
+    /// <summary>
+    /// A wait chosen within this long of a plain launch keeps the request that launch sent, so the owner is told
+    /// once. After longer (the offer sat unanswered), the wait sends a new request, which tells the owner again.
+    /// </summary>
+    public static readonly TimeSpan ReuseRequest = TimeSpan.FromMinutes(5);
+
     /// <summary>Parses <c>--wait-for-handoff SECONDS</c>: null when absent, otherwise 1 second to <see cref="MaxTimeout"/>.</summary>
     public static TimeSpan? ParseSeconds(string? value)
     {
@@ -63,8 +69,9 @@ internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? 
             : null;
         if (Fresh)
         {
-            return seen is null
-                ? "Another PC took the library first. Still waiting for it to hand off."
+            if (seen is null) return "Another PC took the library first. Still waiting for it to hand off.";
+            return State is { } current && Ownership.IsFinishing(current)
+                ? $"{seen}. It hands off by itself once its uploads finish; this PC then opens Medal."
                 : $"{seen}. Quit Medal there; this PC opens Medal once the handoff is complete.";
         }
         return seen is null
@@ -79,6 +86,7 @@ internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? 
         string title = $"Waiting for {who} to hand off the library";
         string detail = (Fresh, State, SeenAt) switch
         {
+            (true, { } state, { } at) when Ownership.IsFinishing(state) => $"{who}: {Ownership.Describe(state)}, hands off by itself. Checked at {Clock(at)}.",
             (true, { } state, { } at) => $"{who}: {Ownership.Describe(state)}, checked at {Clock(at)}.",
             (true, _, _) => "Another PC took the library first; still waiting.",
             (false, { } state, { } at) => $"Server unreachable. Last seen {Ownership.Describe(state)} at {Clock(at)}; may be out of date.",

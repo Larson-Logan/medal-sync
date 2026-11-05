@@ -156,4 +156,10 @@ internal sealed record SessionOptions(
 {
     /// <summary>The review folder of this PC's interrupted <c>enroll --apply</c>, when one is recorded; named in its refusal.</summary>
     public string? EnrollmentFolder { get; init; }
+
+    /// <summary>
+    /// Whether a plain launch that finds the library owned elsewhere asks that PC to switch. False when Windows started
+    /// Medal at sign-in: nobody here asked for Medal yet, so the owner is not interrupted. An explicit wait always asks.
+    /// </summary>
+    public bool AskOwnerToSwitch { get; init; } = true;
 }

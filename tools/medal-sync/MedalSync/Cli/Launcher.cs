@@ -86,9 +86,15 @@ internal static partial class Launcher
     public static LauncherStep Decide(bool medalRunning, bool supervisorRunning) =>
         !supervisorRunning ? LauncherStep.Launch : medalRunning ? LauncherStep.Forward : LauncherStep.Busy;
 
+    /// <summary>
+    /// At sign-in Windows started Medal, not the user, so another PC that owns the library is not asked to switch.
+    /// Opening Medal here later is what asks it.
+    /// </summary>
     public static string[] LaunchArguments(LauncherRequest request)
     {
-        string[] arguments = ["launch", "--wait-for-server", (request.AtSignIn ? SignInWaitSeconds : ManualWaitSeconds).ToString(CultureInfo.InvariantCulture)];
+        string[] arguments = request.AtSignIn
+            ? ["launch", "--wait-for-server", SignInWaitSeconds.ToString(CultureInfo.InvariantCulture), "--no-switch-request"]
+            : ["launch", "--wait-for-server", ManualWaitSeconds.ToString(CultureInfo.InvariantCulture)];
         return request.Link is null ? arguments : [.. arguments, "--medal-link", MedalLink.Require(request.Link)];
     }
 

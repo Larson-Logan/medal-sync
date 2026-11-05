@@ -178,7 +178,10 @@ internal static class Ownership
                 $"Medal's library is {Describe(current.State)} on {current.Owner.DisplayName} (since {current.UpdatedAt:yyyy-MM-dd HH:mm} UTC). "
                 + (current.State == OwnershipState.RecoveryRequired
                     ? "That PC must recover its session first."
-                    : "Quit Medal there to switch PCs."));
+                    : IsFinishing(current.State) ? "Wait for it to finish uploading to switch PCs." : "Quit Medal there to switch PCs."));
+
+    /// <summary>Medal was quit on the owning PC and it is uploading: it releases the library by itself, with nobody needing to quit Medal there.</summary>
+    public static bool IsFinishing(OwnershipState state) => state is OwnershipState.Draining or OwnershipState.Publishing;
 
     public static string Describe(OwnershipState state) => state switch
     {

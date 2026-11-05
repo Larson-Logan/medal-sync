@@ -284,14 +284,20 @@ steps in **Last finish result**; follow those steps before retrying. The last
 supervisor refusal stays available when reopening status for that same session.
 When you open Medal while another PC owns the library, Medal Sync sends a switch
 request and asks whether to **wait and open Medal when ready**. No is the
-default. Yes shows a waiting window that names the PC that has the library,
+default. If that PC has already quit Medal and is only uploading, the message
+says it hands off by itself; nobody needs to go to it. Yes shows a waiting window that names the PC that has the library,
 when it was last checked and whether the server can be reached. Medal opens by
 itself once that PC finishes its handoff, after the usual startup checks. Cancel,
 Windows shutdown or 15 minutes without a handoff stop the wait and withdraw the
 request. An unreachable server or a quiet owner never counts as a handoff. If two
-PCs wait, only one gets the library; the other keeps waiting. At sign-in nothing
-is offered. Scripts can use `launch --wait-for-handoff SECONDS`. When another PC asks
-to switch, the panel shows one notice per request. A request older than six
+PCs wait, only one gets the library; the other keeps waiting. Choosing to wait
+reuses the request just sent, so the other PC is told once. At sign-in nothing
+is offered and no request is sent: Windows started Medal, not you, so the PC
+that has the library is not interrupted. Open Medal when you want to switch.
+Scripts can use `launch --wait-for-handoff SECONDS`. When another PC asks
+to switch, the panel shows one notice per request, and while Medal is open the
+status names every PC still waiting. A PC disappears from it as soon as it
+stops waiting. A request older than six
 hours no longer prompts; `status` lists it as old until the next session on the
 owning PC removes it. If supervision stops while Medal is still open, its last
 message also appears in the panel instead of a dialog that would take focus.

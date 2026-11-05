@@ -92,6 +92,10 @@ internal sealed class SessionCoordinator(
     private string? _uploadSession;
     private readonly Dictionary<ulong, (DateTimeOffset Since, long Tries)> _uploadRetries = [];
 
+    // The switch request the last plain launch wrote. A wait the user chooses right after it keeps this one request,
+    // so the owner is told once that this PC wants Medal, not once for the launch and again for the wait.
+    private HandoffRequest? _sentRequest;
+
     // Set only while LaunchWhenReleased runs: its one switch request and the caller's cancellation.
     private HandoffRequest? _waitRequest;
     private bool _waitRequestSent;
@@ -118,8 +122,11 @@ internal sealed class SessionCoordinator(
     public LaunchOutcome LaunchWhenReleased(HandoffWait wait)
     {
         Report(SessionPhase.Starting, "Preparing the shared library. Keep Medal closed until startup finishes.");
-        var request = new HandoffRequest(HandoffRequest.CurrentFormat, Me, NewId(), clock.Now);
-        (_waitRequest, _waitRequestSent, _waitCancelled) = (request, false, wait.Cancelled);
+        var previous = _sentRequest;
+        bool reuse = previous is not null && previous.RequestedAt <= clock.Now && clock.Now - previous.RequestedAt < HandoffWait.ReuseRequest;
+        var request = reuse ? previous! : new HandoffRequest(HandoffRequest.CurrentFormat, Me, NewId(), clock.Now);
+        _sentRequest = null;
+        (_waitRequest, _waitRequestSent, _waitCancelled) = (request, reuse, wait.Cancelled);
         LaunchOutcome outcome;
         bool sent;
         try
@@ -293,12 +300,29 @@ internal sealed class SessionCoordinator(
             {
                 return new LaunchOutcome(LaunchStatus.Blocked, $"Medal's library is waiting for recovery on {where}: {journal.Reason}");
             }
-            if (!SendRequest()) return StorageOfflineLaunch();
-            return new LaunchOutcome(LaunchStatus.Waiting,
-                $"Medal is {Ownership.Describe(journal.State)} on {where}. A switch request was sent; quit Medal there and this PC can start.",
+            bool asked = _waitRequest is not null || options.AskOwnerToSwitch;
+            if (asked && !SendRequest()) return StorageOfflineLaunch();
+            return new LaunchOutcome(LaunchStatus.Waiting, OwnedElsewhereMessage(journal.State, where, asked),
                 Wait: LaunchWait.OwnedElsewhere, Journal: journal);
         }
         return StartSession();
+    }
+
+    /// <summary>
+    /// Why Medal did not start here, matched to what the owner is doing: a PC that is only uploading hands off by
+    /// itself, so nobody needs to quit Medal there, and a launch that sent no request must not claim it did.
+    /// </summary>
+    internal static string OwnedElsewhereMessage(OwnershipState state, string where, bool asked)
+    {
+        if (Ownership.IsFinishing(state))
+        {
+            return $"{where} is finishing its last session ({Ownership.Describe(state)}). It hands off the library by itself, "
+                + "so nobody needs to quit Medal there; open Medal here once it is Ready.";
+        }
+        return asked
+            ? $"Medal is {Ownership.Describe(state)} on {where}. A switch request was sent; quit Medal there and this PC can start."
+            : $"Medal is {Ownership.Describe(state)} on {where}, so Medal Sync did not open it here at sign-in, and {where} was not interrupted. "
+                + $"To switch, quit Medal on {where}, then open Medal here.";
     }
 
     private static LaunchOutcome StorageOfflineLaunch() => new(LaunchStatus.Waiting,
@@ -313,7 +337,9 @@ internal sealed class SessionCoordinator(
     {
         if (_waitRequest is null)
         {
-            store.WriteRequest(new HandoffRequest(HandoffRequest.CurrentFormat, Me, NewId(), clock.Now));
+            var request = new HandoffRequest(HandoffRequest.CurrentFormat, Me, NewId(), clock.Now);
+            store.WriteRequest(request);
+            _sentRequest = request;
             return true;
         }
         if (_waitRequestSent) return true;
@@ -874,6 +900,8 @@ internal sealed class SessionCoordinator(
         int failedAttempts = 0;
         var nextCompatibilityCheck = clock.Now;
         var nextRequestCleanup = clock.Now;
+        // The PCs asking for the library at the last successful check, shown in this PC's status while Medal runs.
+        IReadOnlyList<string> waiting = [];
         void Send(string message)
         {
             // A notice is advisory. A failed log write or view must never end supervision while Medal runs.
@@ -923,11 +951,15 @@ internal sealed class SessionCoordinator(
                 }
                 try
                 {
-                    foreach (var request in store.PendingRequests(clock.Now))
+                    // A request left by this PC itself (for example from before it took the library) never asks it to switch.
+                    var requests = store.PendingRequests(clock.Now).Where(r => r.Device.DeviceId != Me.DeviceId).ToList();
+                    foreach (var request in requests)
                     {
                         // Keyed by request, so a new request from the same PC notifies again.
                         if (told.Add("request:" + request.RequestId)) Send($"{request.Device.DisplayName} wants to use Medal. {QuitFromTray} to switch.");
                     }
+                    // A withdrawn request (the other PC cancelled, timed out or gave up) disappears from the status at once.
+                    waiting = requests.Select(r => r.Device.DisplayName).Distinct(StringComparer.Ordinal).ToList();
                     if (clock.Now >= nextRequestCleanup)
                     {
                         nextRequestCleanup = clock.Now + TimeSpan.FromMinutes(10);
@@ -951,7 +983,7 @@ internal sealed class SessionCoordinator(
                     // Also restores the recording limit if Medal reopened while uploads were finishing.
                     if (mount.UseUploadLimit(recording: true) is { } limitProblem) Once(limitProblem);
                     bool recording = IsRecording();
-                    Report(SessionPhase.Active, recording ? RecordingMessage : ActiveMessage, session, recording: recording);
+                    Report(SessionPhase.Active, ActiveStatus(recording, waiting), session, recording: recording);
                 }
                 else
                 {
@@ -967,6 +999,19 @@ internal sealed class SessionCoordinator(
             Pause(options.PollInterval);
         }
         return new FinishOutcome(FinishStatus.Pending, "Stopped watching; the session stays on this PC.", -1);
+    }
+
+    /// <summary>
+    /// The live status while Medal runs. While other PCs are asking for the library it says who, instead of the
+    /// general advice, so a notice replaced by a later one cannot hide that someone is waiting.
+    /// </summary>
+    internal static string ActiveStatus(bool recording, IReadOnlyList<string> waiting)
+    {
+        if (waiting.Count == 0) return recording ? RecordingMessage : ActiveMessage;
+        string who = waiting.Count == 1 ? waiting[0] : string.Join(", ", waiting.SkipLast(1)) + " and " + waiting[^1];
+        string asks = waiting.Count == 1 ? "is waiting" : "are waiting";
+        return (recording ? "Medal is recording a game. " : "Medal is open. ")
+            + $"{who} {asks} for the library. {QuitFromTray} when you are done here, and Medal Sync hands it off.";
     }
 
     private FinishOutcome FinishShutdown(string session)
