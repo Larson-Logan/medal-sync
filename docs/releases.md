@@ -106,7 +106,25 @@ checking for unmerged commits and local edits.
 
 ### Promote dev to main
 
-To promote, open a pull request from `dev` to `main` and merge it once
+First prepare the release on a branch from `dev`. The
+[release preparation script](../scripts/prepare-release.py) chooses the version
+from the pull request titles that `dev` has and `main` does not, raises
+`VersionPrefix` when they need it and renames `## Unreleased` to the release
+heading:
+
+```powershell
+git fetch origin main dev --tags
+git switch -c release/prepare origin/dev
+python scripts/prepare-release.py --dry-run   # show the plan only
+python scripts/prepare-release.py
+```
+
+It prints the version, the pull request title, such as
+`release: prepare 1.5.0`, and the promoted pull requests grouped for the
+promotion's description. Commit the two files and merge that pull request into
+`dev`. Running it again on a prepared branch changes nothing.
+
+Then open a pull request from `dev` to `main` and merge it once
 `validate` is green. Its title is free-form, and the title check labels it
 `promotion` so release notes skip it. Fix anything it finds on `dev` first.
 
@@ -184,7 +202,8 @@ Every promotion to `main` is a release. To start a new version, raise
 `VersionPrefix` and update the changelog in a pull request to `dev`, merge it,
 then promote `dev` to `main`; that release is `.00`. To ship a hotfix, merge
 the fix to `dev` and promote it without touching `VersionPrefix`; it is
-released as the next number, such as `.01`. Changing `VersionPrefix` to a
+released as the next number, such as `.01`. Either way,
+[prepare the release](#promote-dev-to-main) first. Changing `VersionPrefix` to a
 version that already has a release is refused. A hotfix carries fixes only:
 once `dev` holds a `feat` or breaking pull request, the
 [promotion check](#promote-dev-to-main) requires a new MINOR or MAJOR version.
