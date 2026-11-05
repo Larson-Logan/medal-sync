@@ -122,7 +122,10 @@ python scripts/prepare-release.py
 It prints the version, the pull request title, such as
 `release: prepare 1.5.0`, and the promoted pull requests grouped for the
 promotion's description. Commit the two files and merge that pull request into
-`dev`. Running it again on a prepared branch changes nothing.
+`dev`. If more pull requests merge before the promotion, run it again: it moves
+their entries, and any section prepared for a release that never shipped, such
+as a hotfix that a later feature turned into a new minor version, under one
+heading. On a branch that is already prepared it changes nothing.
 
 Then open a pull request from `dev` to `main` and merge it once
 `validate` is green. Its title is free-form, and the title check labels it
@@ -138,8 +141,10 @@ the `dev` commit with `main` and fails when:
 - `VersionPrefix` is lower than on `main`, or already released;
 - `CHANGELOG.md` still has entries under `## Unreleased`, or its newest
   heading does not name the release this promotion publishes, such as
-  `## 1.4.0 — DATE` for a new version or `## 1.4.0.01 — DATE` for a hotfix.
-  A release with only internal changes still needs a heading that says so.
+  `## 1.4.0 — DATE` for a new version or `## 1.4.0.01 — DATE` for a hotfix,
+  or the section below that heading was prepared for a release that never
+  shipped. A release with only internal changes still needs a heading that
+  says so.
 
 The check chooses the version as the release workflow does and names it in
 the run summary. Preview it before opening the promotion:

@@ -19,7 +19,9 @@ main does not:
 
 It then renames `## Unreleased` in CHANGELOG.md to the release heading, such
 as `## 1.5.0 — 2026-11-20` or `## 1.4.0.01 — 2026-11-20`, and starts a new
-empty `## Unreleased` above it. Commit the result, open a pull request to dev
+empty `## Unreleased` above it. A section prepared earlier for a release that
+never shipped, such as a hotfix that a later feature turned into a new minor
+version, folds into that heading. Commit the result, open a pull request to dev
 titled with the printed title, and promote dev to main once it merges. The
 printed summary lists the promoted pull requests for the promotion's
 description. Only the standard library is used.
@@ -61,7 +63,7 @@ def plan(root, main, date, dev='HEAD'):
 
     changelog_path = Path(root) / 'CHANGELOG.md'
     changelog = changelog_path.read_text(encoding='utf-8')
-    updated = dated_changelog(changelog, version, names, date)
+    updated = dated_changelog(changelog, names, date, promotion.newest_released(tags))
     if prefix != current:
         props = promotion.PREFIX.sub(f'<VersionPrefix>{promotion.text(prefix)}</VersionPrefix>', props, count=1)
     return {
@@ -72,29 +74,35 @@ def plan(root, main, date, dev='HEAD'):
     }
 
 
-def dated_changelog(changelog, version, names, date):
-    """CHANGELOG.md with its Unreleased entries under the release heading."""
+def dated_changelog(changelog, names, date, released):
+    """CHANGELOG.md with its Unreleased entries under the release heading.
+
+    Sections right below Unreleased that were prepared for a release that
+    never shipped, such as a hotfix overtaken by a feature, fold into the new
+    heading too, so nothing is left under a version nobody can install.
+    """
     lines = changelog.splitlines(keepends=True)
     headings = [index for index, line in enumerate(lines) if line.startswith('## ')]
     unreleased = next((index for index in headings if lines[index].strip() == '## Unreleased'), None)
     if unreleased is None:
         raise PromotionError('CHANGELOG.md has no ## Unreleased heading.')
-    following = [index for index in headings if index > unreleased]
-    end = following[0] if following else len(lines)
-    entries = lines[unreleased + 1:end]
-    newest = lines[following[0]][3:].strip() if following else ''
-    heading = promotion.RELEASE_HEADING.fullmatch(newest)
-    named = bool(heading and heading.group(1) in names)
-    if not any(line.strip() for line in entries):
-        if named:
-            return changelog  # Already prepared.
-        entries = [f'{PLACEHOLDER}\n', '\n']
-    elif named:
-        raise PromotionError(f'CHANGELOG.md already has "## {newest}" and more entries under ## Unreleased. '
-                             f'Move those entries under "## {newest}" by hand.')
-    body = ''.join(entries).strip('\n') + '\n'
-    release = f'## Unreleased\n\n## {names[0]} — {date}\n\n{body}'
-    return ''.join(lines[:unreleased]) + release + ('\n' + ''.join(lines[end:]) if end < len(lines) else '')
+    bounds = [index for index in headings if index > unreleased] + [len(lines)]
+    sections = [(unreleased, bounds[0], None)]
+    for start, end in zip(bounds, bounds[1:]):
+        heading = promotion.RELEASE_HEADING.fullmatch(lines[start][3:].strip())
+        key = heading and promotion.release_key(heading.group(1))
+        if not key or not (heading.group(1) in names or (released is not None and key > released)):
+            break
+        sections.append((start, end, heading.group(1)))
+    entries = [line for start, end, _ in sections for line in lines[start + 1:end]]
+    if len(sections) == 2 and sections[1][2] in names and not any(
+            line.strip() for line in lines[unreleased + 1:bounds[0]]):
+        return changelog  # Already prepared.
+    body = ''.join(line for line in entries if line.strip() != PLACEHOLDER).strip('\n')
+    body = re.sub(r'\n{3,}', '\n\n', body) or PLACEHOLDER
+    release = f'## Unreleased\n\n## {names[0]} — {date}\n\n{body}\n'
+    rest = sections[-1][1]
+    return ''.join(lines[:unreleased]) + release + ('\n' + ''.join(lines[rest:]) if rest < len(lines) else '')
 
 
 def grouped(titles):

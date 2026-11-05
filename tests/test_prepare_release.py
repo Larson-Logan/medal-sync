@@ -154,14 +154,37 @@ class PrepareReleaseTests(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertIn('already released', err)
 
-    def test_refuses_to_guess_when_the_heading_exists_and_more_entries_arrived(self):
+    def test_later_entries_fold_into_the_prepared_section(self):
         self.commit('feat: add a thing (#1)', entry='Add a thing.')
         self.prepared()
         self.commit('release: prepare 1.4.0')
         self.commit('fix: repair a thing (#2)', entry='Repair a thing.')
-        code, _, err = self.run_script()
-        self.assertEqual(1, code)
-        self.assertIn('already has "## 1.4.0 — 2026-11-20"', err)
+        self.assertIn('Medal Sync 1.4.0.00', self.prepared('--date', '2026-11-21'))
+        self.assertEqual('# Changelog\n\n## Unreleased\n\n## 1.4.0 — 2026-11-21\n\n'
+                         '- Repair a thing.\n\n- Add a thing.\n\n' + SHIPPED, self.files()[1])
+        self.assertEqual(('1.4.0.00', []), self.promote())
+
+    def test_a_prepared_hotfix_folds_into_the_new_minor_version(self):
+        self.commit('fix: repair a thing (#1)', entry='Repair a thing.')
+        self.prepared()
+        self.commit('release: prepare 1.3.1.06')
+        self.commit('feat: add a thing (#2)', entry='Add a thing.')
+        self.assertIn('Medal Sync 1.4.0.00 (VersionPrefix 1.3.1 -> 1.4.0)', self.prepared())
+        changelog = self.files()[1]
+        self.assertEqual('# Changelog\n\n## Unreleased\n\n## 1.4.0 — 2026-11-20\n\n'
+                         '- Add a thing.\n\n- Repair a thing.\n\n' + SHIPPED, changelog)
+        self.assertNotIn('1.3.1.06', changelog)
+        self.assertEqual(('1.4.0.00', []), self.promote())
+
+    def test_the_placeholder_gives_way_to_real_entries(self):
+        self.commit('ci: tidy a workflow (#1)')
+        self.prepared()
+        self.commit('release: prepare 1.3.1.06')
+        self.commit('fix: repair a thing (#2)', entry='Repair a thing.')
+        self.prepared()
+        changelog = self.files()[1]
+        self.assertIn('## 1.3.1.06 — 2026-11-20\n\n- Repair a thing.\n\n## 1.3.1.05', changelog)
+        self.assertNotIn(prepare.PLACEHOLDER, changelog)
 
     def test_refuses_a_malformed_date(self):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):

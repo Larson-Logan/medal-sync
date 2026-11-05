@@ -112,6 +112,13 @@ class PromotionCheckTests(unittest.TestCase):
         self.commit('ci: tidy a workflow (#9)')
         self.assert_refused('"## 1.3.1.05 — 2026-11-01"', 'publishes 1.3.1.06')
 
+    def test_a_prepared_release_that_never_shipped_is_refused(self):
+        # Prepared as hotfix 1.3.1.06, then a feature made the promotion 1.4.0.
+        stale = '## 1.3.1.06 — 2026-11-05\n\n- Prepared fix.\n\n'
+        changelog = '# Changelog\n\n## Unreleased\n\n## 1.4.0 — 2026-11-06\n\n- New change.\n\n' + stale + SHIPPED
+        self.commit('feat(setup): add a field (#9)', prefix='1.4.0', changelog=changelog)
+        self.assert_refused('"## 1.3.1.06 — 2026-11-05", which was never released', 'prepare-release.py')
+
     def test_the_heading_needs_a_date(self):
         changelog = '# Changelog\n\n## 1.3.1.06 — Unreleased\n\n- New change.\n\n' + SHIPPED
         self.commit('fix: a fix (#9)', changelog=changelog)
