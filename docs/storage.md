@@ -227,11 +227,11 @@ device. An existing journal is never reinitialized.
 On the other PC, configure `--library-id` with the first PC's ID, the same
 `--cloud-journal-id`, Drive folder and capture folder. Choose separate local
 media/cache/history folders and authorize rclone on that PC. **Do not run init
-or enroll again.** Launch Medal through Medal Sync. An empty library joins
+again.** Launch Medal through Medal Sync. An empty library joins
 automatically; existing unshared clips refuse replacement and remain protected.
-Export and preserve them before choosing the existing explicit
-`launch --replace-local-library` workflow. There is no automatic union of
-unshared libraries in cloud mode.
+To keep them, merge them with `enroll` instead
+([enroll into an rclone primary](#enroll-a-pc-with-existing-clips-into-an-rclone-primary)).
+`launch --replace-local-library` sets them aside instead (a backup is kept).
 
 Launch restores only library tables, backs up the database, and updates the
 capture-folder setting to the configured virtual drive when necessary; other
@@ -275,9 +275,29 @@ A PC that still points at the old primary refuses to start if the library
 needs clips that are missing there and locally. Nothing is lost. The old
 primary is never modified or deleted; remove it yourself once every PC uses the new one.
 
-Enrollment copies, spike promotion and persistent media refresh (`refresh-media`)
-work on folder primaries only. Cloud mode supports first-PC relocation into its
-persistent local copy before initialization; other rclone primaries refuse relocation.
+Spike promotion and persistent media refresh (`refresh-media`) work on folder
+primaries only. Cloud mode supports first-PC relocation into its persistent
+local copy before initialization; other rclone primaries refuse relocation.
+
+### Enroll a PC with existing clips into an rclone primary
+
+`enroll` works with an rclone primary such as `onedrive:MedalSync` or
+`sftp-home:Media/Videos`, and in cloud mode. The preview reviews the same
+lossless union as with an SMB primary. It also lists the primary and this PC's
+local copy: a file already on the primary at an enrollment destination is a
+conflict, and so is a local-copy file with different bytes. If the primary
+cannot be reached, the preview waits (exit 3) and changes nothing.
+
+`enroll --apply` copies this PC's files into its persistent local copy
+(`localCopyRoot`) instead of a share. It first downloads committed clips this
+PC lacks, as a launch would. It then restores the merged library and hands its
+still-owned session to the normal finish, which runs right away. Enrollment
+itself never publishes: only that finish uploads and byte-verifies every
+referenced clip on the primary, publishes the union and releases ownership. If
+the primary is offline at that finish, the usual pending wait applies. This PC
+keeps the library and its clips, and the switch finishes when storage is back.
+`enroll recover` works as for an SMB primary until the session is handed to
+finish; after that, it only runs the finish.
 
 ## Add OneDrive, Dropbox or Google Drive
 

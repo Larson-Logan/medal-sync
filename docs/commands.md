@@ -105,7 +105,7 @@ library, for example a copy.
 | `config create ... --out FILE [--apply]` | Previews, then creates, a new configuration file. Options are listed below. |
 | `storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]` | Allocates one pre-generated Google Drive journal ID for a new cloud library. Prints only the ID; creates no Drive file. Reuse it with `config create --storage-mode cloud --cloud-journal-id ID` on every PC. |
 | `init [--apply]` | Creates a new shared library from this PC as generation 0. Every clip must already be on primary storage; cloud mode instead uploads and verifies the persistent local copy first. Only for a new library; never run it against an existing journal. |
-| `enroll --out DIR [--apply]` | Adds this PC to an existing library. The preview writes a review of the merged library to `DIR`; apply uses that exact review. |
+| `enroll --out DIR [--apply]` | Adds this PC to an existing library. The preview writes a review of the merged library to `DIR`; apply uses that exact review. With an rclone primary, files go to the persistent local copy and apply ends by running `finish`, which uploads, verifies and publishes; exit 3 means the primary is unreachable (see [enroll into an rclone primary](storage.md#enroll-a-pc-with-existing-clips-into-an-rclone-primary)). |
 | `enroll recover --out DIR [--rollback] [--apply]` | Handles two cases. See [enrollment recovery](#enrollment-recovery). |
 | `storage init-primary [--apply]` | Marks a new, empty primary folder or rclone remote for this library, so you can [switch primaries](storage.md#switch-primaries). Needs `replication.localCopyRoot` and a Ready library. |
 | `replicate retry [--target NAME] [--apply]` | Previews pending optional cloud copies of the committed generation while Ready. `--apply` copies and verifies from this PC's persistent copy, otherwise primary storage, without taking ownership. Launch, shutdown or a changed journal/configuration cancels unfinished work. Exit 3 means canceled or still pending. See [retry cloud copies](storage.md#retry-cloud-copies-while-ready). |
@@ -156,11 +156,15 @@ handles two cases, and refuses anything else without changing it:
   window, crash or reboot) or failed while this PC held the library for the
   enrollment. Launch and finish refuse to give that ownership back and name
   `DIR`. `apply.json` there says where it stopped: `prepared`, `copying`,
-  `copied`, `restored` or `capture-configured`. Without `--rollback`, recovery
-  finishes the enrollment: copies already on the server with the same bytes
-  are reused, then the merged library is restored and published. With
+  `copied`, `restored`, `capture-configured` or, with an rclone primary,
+  `handing-off`. Without `--rollback`, recovery finishes the enrollment: copies
+  already on the server (or, with an rclone primary, in the local copy) with
+  the same bytes are reused, then the merged library is restored and published.
+  With an rclone primary it is handed to `finish` instead of published. With
   `--rollback`, it puts back this PC's original library and capture folder and
-  gives the library back. Files already copied to the server stay there. An
+  gives the library back. Files already copied stay where they are. Once an
+  rclone-primary enrollment has handed its session to finish (`handed-off`),
+  recovery cannot roll it back; with `--apply` it runs that finish. An
   apply that stopped at `prepared` never took the library; prepare a fresh
   preview in a new folder instead. Never use `launch --replace-local-library`
   for this; it would drop this PC's own clips from Medal.

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Let a PC with existing clips `enroll` into a library whose primary is an
+  rclone remote, such as `onedrive:MedalSync`, including cloud mode. Previously
+  it could only set its own records aside with `launch --replace-local-library`.
+  The preview reviews the same lossless union and also checks for conflicts on
+  the primary and in this PC's local copy. If the primary is unreachable it
+  waits (exit 3) and changes nothing. Apply copies into the persistent local
+  copy, restores the union and hands the still-owned session to the normal
+  finish. Only that finish uploads and verifies every clip, publishes the union
+  and releases the library; an outage there is the usual pending wait.
+  `enroll recover` continues, rolls back or finishes it (#95).
 - Show the last cloud-copy check in text/JSON status, the status panel and
   privacy-filtered diagnostics. Failed and incomplete checks include recovery
   guidance; warnings clear after a passing check or a later verified handoff

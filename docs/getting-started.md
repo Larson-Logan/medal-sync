@@ -224,6 +224,11 @@ paths and isolate the SSD cache from file synchronization. `init` without
 `--apply` previews server asset checks; initialization is only for a genuinely
 new shared library. A second PC uses the same library ID and `enroll` preview
 to review its existing records. Never initialize an existing journal.
+This works with an SMB primary and with an rclone primary such as
+`onedrive:MedalSync`. With an rclone primary, `enroll --apply` copies the PC's
+clips into its local copy, and the finish that follows uploads and verifies
+them before the library is shared or released. See
+[enroll into an rclone primary](storage.md#enroll-a-pc-with-existing-clips-into-an-rclone-primary).
 
 The new Start menu shortcut opens the companion without replacing Medal's own
 startup entries. Setup never changes them. After configuration and enrollment

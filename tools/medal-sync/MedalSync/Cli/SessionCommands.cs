@@ -421,6 +421,15 @@ internal static class SessionCommands
     {
         bool accept = args.Flag("--accept-library-changes");
         args.RequireAllUsed();
+        return FinishOwnSession(output, accept);
+    }
+
+    /// <summary>
+    /// The finish of this PC's unfinished session, as <c>finish</c> runs it; also run right after a cloud-primary
+    /// <c>enroll --apply</c> hands its session over. Exit 0 when Ready, 3 while pending, 1 when blocked.
+    /// </summary>
+    internal static int FinishOwnSession(TextWriter output, bool accept = false)
+    {
         var context = Load();
         using var instance = SingleInstance();
         var shutdown = new SessionShutdown(new SystemClock());
