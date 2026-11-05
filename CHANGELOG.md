@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add an explicit wait for another PC to hand off the library. Opening Medal
+  while another PC owns it now offers **Wait and open when ready** (No is the
+  default), with Cancel and a 15-minute limit; `launch --wait-for-handoff
+  SECONDS` does the same for scripts. The wait keeps one switch request, shows
+  the owner and whether that status is current, and backs off between checks.
+  Only a released journal starts Medal, through the normal acquisition and
+  launch checks; an unreachable server is never taken as a release. Cancel,
+  timeout or Windows shutdown withdraws only that wait's request and starts
+  nothing. A plain launch still returns at once (#32).
 - Show the last cloud-copy check in text/JSON status, the status panel and
   privacy-filtered diagnostics. Failed and incomplete checks include recovery
   guidance; warnings clear after a passing check or a later verified handoff

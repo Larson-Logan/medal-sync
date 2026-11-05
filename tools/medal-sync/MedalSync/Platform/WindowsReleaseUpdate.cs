@@ -142,14 +142,14 @@ internal static class WindowsReleaseUpdate
 
     private static bool WaitWithDialog(Func<UpdateReadiness> readiness, string version)
     {
-        IProgressDialog? dialog = null;
+        IShellProgressDialog? dialog = null;
         try
         {
             return WaitUntilReady(readiness, state =>
             {
                 if (dialog is null)
                 {
-                    dialog = CreateProgressDialog();
+                    dialog = ShellProgressDialog.Create();
                     dialog.SetTitle("Medal Sync update");
                     dialog.SetCancelMsg("Postponing the update. The verified installer is kept.", IntPtr.Zero);
                     dialog.StartProgressDialog(IntPtr.Zero, null, 0x4 | 0x20, IntPtr.Zero); // PROGDLG_NOTIME | PROGDLG_MARQUEEPROGRESS
@@ -244,7 +244,7 @@ internal static class WindowsReleaseUpdate
 
     internal static string Download(ReleaseAsset asset, string directory, HttpClient client)
     {
-        var dialog = CreateProgressDialog();
+        var dialog = ShellProgressDialog.Create();
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         try
         {
@@ -277,23 +277,5 @@ internal static class WindowsReleaseUpdate
             dialog.StopProgressDialog();
             Marshal.FinalReleaseComObject(dialog);
         }
-    }
-
-    private static IProgressDialog CreateProgressDialog() =>
-        (IProgressDialog)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("F8383852-FCD3-11D1-A6B9-006097DF5BD4"), true)!)!;
-
-    // Shell's native progress dialog owns its window and message pump independently of the tray view.
-    [ComImport, Guid("EBBC7C04-315E-11D2-B62F-006097DF5BD4"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IProgressDialog
-    {
-        void StartProgressDialog(IntPtr parent, [MarshalAs(UnmanagedType.IUnknown)] object? enableModeless, uint flags, IntPtr reserved);
-        void StopProgressDialog();
-        void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string title);
-        void SetAnimation(IntPtr instance, uint resource);
-        [PreserveSig] [return: MarshalAs(UnmanagedType.Bool)] bool HasUserCancelled();
-        void SetProgress(uint completed, uint total);
-        void SetProgress64(ulong completed, ulong total);
-        void SetLine(uint line, [MarshalAs(UnmanagedType.LPWStr)] string text, [MarshalAs(UnmanagedType.Bool)] bool compactPath, IntPtr reserved);
-        void SetCancelMsg([MarshalAs(UnmanagedType.LPWStr)] string message, IntPtr reserved);
     }
 }

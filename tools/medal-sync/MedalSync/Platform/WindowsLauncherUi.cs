@@ -26,6 +26,21 @@ internal sealed class WindowsLauncherUi : ILauncherUi
 
     public bool OfferConfiguration(string message) => Confirm(message);
 
+    /// <summary>No is the default: waiting, and later opening Medal by itself, needs an explicit Yes.</summary>
+    public IHandoffWaitView? OfferHandoffWait(HandoffWaitOffer offer)
+    {
+        if (!Confirm($"{offer.Message}\n\nWait here and open Medal automatically once the other PC hands off the library? "
+            + $"Medal Sync keeps checking for up to {Session.HandoffWaitUpdate.Duration(offer.Timeout)}, and you can cancel at any time."))
+            return null;
+        try { return new WindowsHandoffWaitView(offer.Timeout, Show); }
+        catch (Exception ex) when (ex is COMException or InvalidCastException or InvalidComObjectException or MarshalDirectiveException or TypeLoadException)
+        {
+            // Without a visible Cancel there is no wait.
+            Show("The waiting window could not be shown, so Medal Sync is not waiting. Open Medal again after the other PC reaches Ready.");
+            return null;
+        }
+    }
+
     public bool ConfirmLibraryChanges(LibraryChangeReview review)
     {
         var pages = review.Pages();

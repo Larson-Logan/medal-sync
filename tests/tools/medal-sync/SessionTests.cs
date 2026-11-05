@@ -9,7 +9,7 @@ using MedalSync.Util;
 
 namespace MedalSync.Tests;
 
-public sealed class SessionTests : IDisposable
+public sealed partial class SessionTests : IDisposable
 {
     private const string LibraryId = "0123456789abcdef0123456789abcdef";
     private static readonly DeviceIdentity FirstPc = new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "First PC");

@@ -15,7 +15,10 @@ internal enum LaunchStatus
 }
 
 /// <param name="Warning">Medal started, but something the user must fix will stop the handoff; shown as a passive notice.</param>
-internal sealed record LaunchOutcome(LaunchStatus Status, string Message, string? Session = null, bool StorageOffline = false, string? Warning = null);
+/// <param name="Wait">Whether an explicit handoff wait may keep polling after this outcome.</param>
+/// <param name="Journal">The journal that showed another PC as owner, for <see cref="LaunchWait.OwnedElsewhere"/>.</param>
+internal sealed record LaunchOutcome(LaunchStatus Status, string Message, string? Session = null, bool StorageOffline = false, string? Warning = null,
+    LaunchWait Wait = LaunchWait.None, OwnershipRecord? Journal = null);
 
 /// <summary>
 /// The result of a read-only check that runs before ownership is taken. <paramref name="Refusal"/> keeps Medal closed
@@ -84,8 +87,15 @@ internal sealed class SessionCoordinator(
     private const string QuitFromTray = "Quit Medal from its tray icon";
     private const string ActiveMessage = "Medal is open. Quit Medal normally from its tray icon when you want to switch PCs.";
     private const string RecordingMessage = "Medal is recording a game. Quit Medal normally from its tray icon when you want to switch PCs.";
+    private const string ShutdownMessage = "Windows is shutting down; Medal was not started.";
+    private const string WaitCancelledMessage = "Stopped waiting for the other PC. Medal was not started and this PC's switch request was withdrawn.";
     private string? _uploadSession;
     private readonly Dictionary<ulong, (DateTimeOffset Since, long Tries)> _uploadRetries = [];
+
+    // Set only while LaunchWhenReleased runs: its one switch request and the caller's cancellation.
+    private HandoffRequest? _waitRequest;
+    private bool _waitRequestSent;
+    private Func<bool>? _waitCancelled;
 
     private DeviceIdentity Me => options.Device;
 
@@ -93,6 +103,126 @@ internal sealed class SessionCoordinator(
     {
         Report(SessionPhase.Starting, "Preparing the shared library. Keep Medal closed until startup finishes.");
         var outcome = LaunchCore();
+        ReportLaunch(outcome);
+        return outcome;
+    }
+
+    /// <summary>
+    /// Launch, except that while another PC owns the library this PC keeps one switch request and checks back, with
+    /// backoff, until that PC releases it, <see cref="HandoffWait.Timeout"/> passes, the caller cancels or Windows
+    /// shuts down. Release is only a Clean journal read from storage, never elapsed time, a missing lock or an
+    /// unreachable owner. The normal atomic acquisition then decides between PCs that waited; the loser keeps waiting.
+    /// Unless Medal started, this wait's own request is withdrawn and a newer one is left in place.
+    /// </summary>
+    public LaunchOutcome LaunchWhenReleased(HandoffWait wait)
+    {
+        Report(SessionPhase.Starting, "Preparing the shared library. Keep Medal closed until startup finishes.");
+        var request = new HandoffRequest(HandoffRequest.CurrentFormat, Me, NewId(), clock.Now);
+        (_waitRequest, _waitRequestSent, _waitCancelled) = (request, false, wait.Cancelled);
+        LaunchOutcome outcome;
+        bool sent;
+        try
+        {
+            outcome = WaitForRelease(wait);
+        }
+        catch
+        {
+            if (_waitRequestSent) WithdrawWaitRequest(request);
+            throw;
+        }
+        finally
+        {
+            sent = _waitRequestSent;
+            (_waitRequest, _waitRequestSent, _waitCancelled) = (null, false, null);
+        }
+        if (sent && outcome.Status is not (LaunchStatus.Started or LaunchStatus.AlreadyRunning)) WithdrawWaitRequest(request);
+        ReportLaunch(outcome);
+        return outcome;
+    }
+
+    private LaunchOutcome WaitForRelease(HandoffWait wait)
+    {
+        var deadline = clock.Now + wait.Timeout;
+        var interval = wait.FirstPoll;
+        DeviceIdentity? owner = null;
+        OwnershipState? state = null;
+        DateTimeOffset? seenAt = null;
+        while (!WaitStopped())
+        {
+            var outcome = LaunchCore();
+            if (outcome.Wait == LaunchWait.None) return outcome;
+            bool fresh = outcome.Wait == LaunchWait.OwnedElsewhere;
+            if (outcome.Journal is { } journal)
+            {
+                // A change such as in use to uploading usually comes shortly before release, so look again soon.
+                if (seenAt is not null && (journal.State != state || journal.Owner != owner)) interval = wait.FirstPoll;
+                (owner, state, seenAt) = (journal.Owner, journal.State, clock.Now);
+            }
+            else if (fresh)
+            {
+                // Another waiting PC acquired first; the next check reads who owns it now.
+                (owner, state, seenAt, interval) = (null, null, clock.Now, wait.FirstPoll);
+            }
+            var update = new HandoffWaitUpdate(owner, state, seenAt, fresh, deadline - clock.Now);
+            if (clock.Now >= deadline) return WaitTimedOut(wait, update);
+            Report(fresh ? SessionPhase.Waiting : SessionPhase.WaitingForStorage, update.Describe());
+            try { wait.Update?.Invoke(update); }
+            catch (Exception) { /* The view is advisory; the wait continues. */ }
+            var left = deadline - clock.Now;
+            if (!Pause(interval < left ? interval : left, wait.Slice)) break;
+            interval = interval + interval < wait.MaxPoll ? interval + interval : wait.MaxPoll;
+        }
+        return new LaunchOutcome(LaunchStatus.Waiting, shutdown?.SuppressUi == true ? ShutdownMessage : WaitCancelledMessage);
+    }
+
+    private static LaunchOutcome WaitTimedOut(HandoffWait wait, HandoffWaitUpdate update)
+    {
+        string after = $"Stopped waiting after {HandoffWaitUpdate.Duration(wait.Timeout)}";
+        if (!update.Fresh)
+        {
+            return new LaunchOutcome(LaunchStatus.Waiting,
+                $"{after}: the shared library's server could not be reached. Nothing was changed; open Medal again once it is back.", StorageOffline: true);
+        }
+        string where = update.Owner?.DisplayName ?? "another PC";
+        string what = update.State is { } state ? $" ({Ownership.Describe(state)})" : "";
+        return new LaunchOutcome(LaunchStatus.Waiting,
+            $"{after}: {where} still has the library{what}. Medal was not started and this PC's switch request was withdrawn; "
+            + $"quit Medal on {where}, then open Medal again here.");
+    }
+
+    /// <summary>Sleeps in short slices so cancellation and shutdown stop the wait promptly. False when stopped.</summary>
+    private bool Pause(TimeSpan duration, TimeSpan slice)
+    {
+        var until = clock.Now + duration;
+        while (clock.Now < until)
+        {
+            if (WaitStopped()) return false;
+            var left = until - clock.Now;
+            clock.Sleep(left < slice ? left : slice);
+        }
+        return !WaitStopped();
+    }
+
+    private bool WaitStopped() => shutdown?.SuppressUi == true || WaitCancelled();
+
+    private bool WaitCancelled()
+    {
+        try { return _waitCancelled?.Invoke() == true; }
+        catch (Exception) { return true; } // Unsure whether the user still wants Medal: do not start it.
+    }
+
+    /// <summary>Removes only this wait's request; a newer request from this PC stays. Never throws.</summary>
+    private void WithdrawWaitRequest(HandoffRequest request)
+    {
+        try { store.WithdrawRequest(request); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MedalSyncException)
+        {
+            // It expires after HandoffRequest.Lifetime and this PC's next session removes it.
+        }
+    }
+
+    private void ReportLaunch(LaunchOutcome outcome)
+    {
         Report(outcome.Status switch
         {
             LaunchStatus.Started or LaunchStatus.AlreadyRunning => SessionPhase.Active,
@@ -101,12 +231,11 @@ internal sealed class SessionCoordinator(
             _ => SessionPhase.RecoveryNeeded,
         }, outcome.Status is LaunchStatus.Started or LaunchStatus.AlreadyRunning
             ? ActiveMessage + (outcome.Warning is { } warning ? " " + warning : "") : outcome.Message, outcome.Session);
-        return outcome;
     }
 
     private LaunchOutcome LaunchCore()
     {
-        if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, "Windows is shutting down; Medal was not started.");
+        if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, ShutdownMessage);
         OwnershipRecord journal;
         try { journal = store.ReadJournal(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -152,16 +281,46 @@ internal sealed class SessionCoordinator(
             {
                 return new LaunchOutcome(LaunchStatus.Blocked, $"Medal's library is waiting for recovery on {where}: {journal.Reason}");
             }
-            store.WriteRequest(new HandoffRequest(HandoffRequest.CurrentFormat, Me, NewId(), clock.Now));
+            if (!SendRequest()) return StorageOfflineLaunch();
             return new LaunchOutcome(LaunchStatus.Waiting,
-                $"Medal is {Ownership.Describe(journal.State)} on {where}. A switch request was sent; quit Medal there and this PC can start.");
+                $"Medal is {Ownership.Describe(journal.State)} on {where}. A switch request was sent; quit Medal there and this PC can start.",
+                Wait: LaunchWait.OwnedElsewhere, Journal: journal);
         }
         return StartSession();
     }
 
     private static LaunchOutcome StorageOfflineLaunch() => new(LaunchStatus.Waiting,
         "Waiting for storage: the shared library's server cannot be reached right now. Nothing was changed; open Medal again once it is back.",
-        StorageOffline: true);
+        StorageOffline: true, Wait: LaunchWait.ServerUnreachable);
+
+    /// <summary>
+    /// A plain launch sends a new request every time. An explicit wait sends its one request once, and an outage
+    /// while sending it is only a reason to keep waiting. False when that request could not be written.
+    /// </summary>
+    private bool SendRequest()
+    {
+        if (_waitRequest is null)
+        {
+            store.WriteRequest(new HandoffRequest(HandoffRequest.CurrentFormat, Me, NewId(), clock.Now));
+            return true;
+        }
+        if (_waitRequestSent) return true;
+        try
+        {
+            store.WriteRequest(_waitRequest);
+            _waitRequestSent = true;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (StorageBusyException)
+        {
+            // Other PCs are updating cloud requests at the same moment; the journal was read, so retry on the next check.
+            return true;
+        }
+    }
 
     /// <summary>Clears this PC's own unfinished session before a new one starts.</summary>
     private LaunchOutcome? ResolveOwnSession(OwnershipRecord journal)
@@ -190,7 +349,8 @@ internal sealed class SessionCoordinator(
         }
         // Read-only provider checks: a refusal here changes nothing, and the library stays Ready.
         var checkedStorage = preflight?.Invoke() ?? LaunchPreflight.Proceed;
-        if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, "Windows is shutting down; Medal was not started.");
+        if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, ShutdownMessage);
+        if (WaitCancelled()) return new LaunchOutcome(LaunchStatus.Waiting, WaitCancelledMessage);
         if (checkedStorage.Refusal is { } refusal) return new LaunchOutcome(LaunchStatus.Blocked, refusal);
         string session = NewId();
         OwnershipRecord journal;
@@ -200,7 +360,8 @@ internal sealed class SessionCoordinator(
         }
         catch (OwnershipConflictException ex)
         {
-            return new LaunchOutcome(LaunchStatus.Waiting, ex.Message);
+            // Another PC acquired between the Clean read and this update; a waiting PC keeps waiting.
+            return new LaunchOutcome(LaunchStatus.Waiting, ex.Message, Wait: LaunchWait.OwnedElsewhere);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -242,7 +403,9 @@ internal sealed class SessionCoordinator(
             compatibility?.RequireLaunch();
             prepareNativeBackup?.Invoke();
             compatibility?.RequireLaunch();
-            if (shutdown?.SuppressUi == true) throw new UnsafeOperationException("Windows is shutting down; Medal was not started.");
+            if (shutdown?.SuppressUi == true) throw new UnsafeOperationException(ShutdownMessage);
+            // A wait cancelled while storage was being prepared must not open Medal later.
+            if (WaitCancelled()) throw new OperationCanceledException(WaitCancelledMessage);
         }
         catch (Exception ex)
         {
@@ -251,6 +414,7 @@ internal sealed class SessionCoordinator(
             string cleanup = GiveBackStart(session, ex.Message);
             if (ex is OperationCanceledException && shutdown?.Ending == true)
                 return new LaunchOutcome(LaunchStatus.Waiting, "Windows shutdown interrupted storage preparation. This PC can retry at next sign-in." + cleanup);
+            if (ex is OperationCanceledException && WaitCancelled()) return new LaunchOutcome(LaunchStatus.Waiting, WaitCancelledMessage + cleanup);
             if (ex is StorageOfflineException) return new LaunchOutcome(LaunchStatus.Waiting, "Waiting for storage: " + ex.Message + cleanup, StorageOffline: true);
             if (!IsExpected(ex)) throw;
             return new LaunchOutcome(LaunchStatus.Blocked, ex.Message + cleanup);

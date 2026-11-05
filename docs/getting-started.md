@@ -277,7 +277,15 @@ removals automatically. Interrupted startup cleanup instead requires reopening
 Medal Sync on this PC. A blocked finish shows its diagnostic and required recovery
 steps in **Last finish result**; follow those steps before retrying. The last
 supervisor refusal stays available when reopening status for that same session.
-Waiting for another PC does not start Medal automatically. When another PC asks
+When you open Medal while another PC owns the library, Medal Sync sends a switch
+request and asks whether to **wait and open Medal when ready**. No is the
+default. Yes shows a waiting window that names the PC that has the library,
+when it was last checked and whether the server can be reached. Medal opens by
+itself once that PC finishes its handoff, after the usual startup checks. Cancel,
+Windows shutdown or 15 minutes without a handoff stop the wait and withdraw the
+request. An unreachable server or a quiet owner never counts as a handoff. If two
+PCs wait, only one gets the library; the other keeps waiting. At sign-in nothing
+is offered. Scripts can use `launch --wait-for-handoff SECONDS`. When another PC asks
 to switch, the panel shows one notice per request. A request older than six
 hours no longer prompts; `status` lists it as old until the next session on the
 owning PC removes it. If supervision stops while Medal is still open, its last

@@ -14,7 +14,7 @@ internal static class CommandRunner
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
-        "--from", "--to", "--limit", "--before", "--wait-for-server", "--state-root", "--medal-link",
+        "--from", "--to", "--limit", "--before", "--wait-for-server", "--wait-for-handoff", "--state-root", "--medal-link",
         "--local-copy-root", "--cloud-remote", "--rclone-config",
         "--storage-mode", "--cloud-journal-id",
         "--replica-conflicts",
@@ -72,7 +72,7 @@ internal static class CommandRunner
                                                  Review old generations and recovery folders to remove
           retention --in FILE --apply            Remove exactly what that review listed (every PC Ready)
           startup [--apply | --restore]          Preview/start Medal through Medal Sync at sign-in, or put Medal's own entries back
-          launch [--replace-local-library] [--wait-for-server SECONDS] [--medal-link URL]
+          launch [--replace-local-library] [--wait-for-server SECONDS] [--wait-for-handoff SECONDS] [--medal-link URL]
                                                  Start Medal through medal-sync and hand off on exit
           finish [--accept-library-changes]      Finish this PC's interrupted session
           recover-start --session ID [--apply]  Review/recover an older orphan login only when its cache is empty
@@ -92,7 +92,8 @@ internal static class CommandRunner
 
     /// <summary>As <see cref="Run(string[], TextWriter, TextWriter)"/>; <paramref name="notify"/> receives a running session's messages.</summary>
     public static int Run(string[] args, TextWriter output, TextWriter error, Action<string>? notify,
-        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, Session.SessionShutdown? shutdown = null)
+        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, Session.SessionShutdown? shutdown = null,
+        Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait = null)
     {
         try
         {
@@ -102,7 +103,7 @@ internal static class CommandRunner
                 output.WriteLine(Help);
                 return parsed.Words.Count == 0 && !args.Contains("--help") ? 2 : 0;
             }
-            return Dispatch(parsed, output, notify, reviewLibraryChanges, shutdown);
+            return Dispatch(parsed, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait);
         }
         catch (UsageException ex)
         {
@@ -122,7 +123,7 @@ internal static class CommandRunner
     }
 
     private static int Dispatch(Arguments args, TextWriter output, Action<string>? notify,
-        Func<LibraryChangeReview, bool>? reviewLibraryChanges, Session.SessionShutdown? shutdown)
+        Func<LibraryChangeReview, bool>? reviewLibraryChanges, Session.SessionShutdown? shutdown, Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait)
     {
         string command = string.Join(' ', args.Words);
         // Read-only reports stay available while setup runs, which is often when help is needed.
@@ -166,7 +167,7 @@ internal static class CommandRunner
             "retention" => RetentionCommands.Run(args, output),
             "enroll" => EnrollmentCommands.Run(args, output),
             "enroll recover" => EnrollmentCommands.Recover(args, output),
-            "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown),
+            "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait),
             "finish" => SessionCommands.Finish(args, output),
             "recover-start" => SessionCommands.RecoverStart(args, output),
             "refresh-media" => MediaRefreshCommands.Run(args, output),

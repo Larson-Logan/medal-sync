@@ -185,6 +185,19 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
         throw new StorageBusyException("Another PC is updating switch requests. Try again shortly.");
     }
 
+    /// <summary>Removes <paramref name="request"/> only while it is still this device's current request. True when removed.</summary>
+    public bool Withdraw(HandoffRequest request)
+    {
+        for (int attempt = 0; attempt < 8; attempt++)
+        {
+            var current = Read();
+            if (!current.Value.Requests.Any(r => r == request)) return false;
+            var requests = current.Value.Requests.Where(r => r != request && DateTimeOffset.UtcNow - r.RequestedAt < HandoffRequest.Lifetime).ToList();
+            if (api.CompareExchange(current, current.Value with { Requests = requests })) return true;
+        }
+        throw new StorageBusyException("Another PC is updating switch requests. Try again shortly.");
+    }
+
     public void Create(LibrarySnapshot snapshot, AssetManifest assets, DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now)
     {
         // The pre-generated ID makes simultaneous initialization or retry return 409, rather than create two journals.
