@@ -301,5 +301,131 @@ class BetaPlanTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
 
 
+
+class PromotionReuseTests(unittest.TestCase):
+    """Runs the actual suite choice for a promotion against a fake gh and a disposable merge."""
+
+    STUB = textwrap.dedent(r"""
+        sleep() { echo slept >>"$CALLS"; }
+        gh() {
+          local args="$*" calls
+          echo "gh $args" >>"$CALLS"
+          calls="$(grep -c '^gh .*beta.yml/runs' "$CALLS" || true)"
+          case "$args" in
+            *beta.yml/runs*'branch=dev&event=push&head_sha='*)
+              if [ -n "$STUB_FAIL" ]; then echo '{"message":"Server Error"}'; return 1; fi
+              if [ "$calls" -le "${STUB_PENDING:-0}" ]; then echo "7 in_progress https://example.com/runs/7"
+              else echo "$STUB_RUN"; fi ;;
+            *actions/runs/7/jobs*)
+              if [ "$calls" -le "${STUB_PENDING:-0}" ]; then echo 'in_progress none'
+              else echo "$STUB_JOB"; fi ;;
+            *) echo "unexpected gh call: $args" >&2; return 1 ;;
+          esac
+        }
+    """)
+    ENV = {**{k: v for k, v in os.environ.items() if k not in ('GITHUB_ACTIONS', 'GITHUB_STEP_SUMMARY')},
+           'GIT_AUTHOR_NAME': 'Test', 'GIT_AUTHOR_EMAIL': 'test@example.invalid',
+           'GIT_COMMITTER_NAME': 'Test', 'GIT_COMMITTER_EMAIL': 'test@example.invalid',
+           'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+
+    def choose(self, run='7 completed https://example.com/runs/7', job='completed success',
+               pending=0, fail='', differ=False):
+        with tempfile.TemporaryDirectory(prefix='promotion-reuse-') as temporary:
+            root = Path(temporary)
+            repo = root / 'repo'
+            repo.mkdir()
+            git = lambda *args: subprocess.run(['git', *args], cwd=repo, env=self.ENV, check=True,
+                                               capture_output=True, text=True).stdout.strip()
+            git('init', '-q', '-b', 'main')
+            (repo / 'file.txt').write_text('main\n', encoding='utf-8')
+            git('add', '.')
+            git('commit', '-q', '-m', 'main')
+            git('checkout', '-q', '-b', 'dev')
+            (repo / 'file.txt').write_text('dev\n', encoding='utf-8')
+            git('commit', '-q', '-am', 'feat: change')
+            git('checkout', '-q', 'main')
+            git('merge', '-q', '--no-ff', '-m', 'Promote dev', 'dev')
+            if differ:
+                (repo / 'other.txt').write_text('main only\n', encoding='utf-8')
+                git('add', '.')
+                git('commit', '-q', '--amend', '--no-edit')
+            script = root / 'choose.sh'
+            # GitHub runs bash steps with -eo pipefail.
+            script.write_text('set -eo pipefail\n' + self.STUB
+                              + step_script('Choose the Windows suites from the source inventory', 'validate.yml'),
+                              encoding='utf-8', newline='\n')
+            output, summary, calls = root / 'output', root / 'summary', root / 'calls'
+            for path in (output, summary, calls):
+                path.touch()
+            environment = {**self.ENV, 'EVENT_NAME': 'pull_request', 'BASE_REF': 'main', 'REPO': 'example/project',
+                           'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(summary), 'CALLS': str(calls),
+                           'STUB_RUN': run, 'STUB_JOB': job, 'STUB_PENDING': str(pending), 'STUB_FAIL': fail}
+            result = subprocess.run(['bash', str(script)], cwd=repo, env=environment, capture_output=True, text=True)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            values = dict(line.split('=', 1) for line in output.read_text(encoding='utf-8').splitlines())
+            return (values, summary.read_text(encoding='utf-8'), calls.read_text(encoding='utf-8'),
+                    git('rev-parse', 'HEAD^2'))
+
+    def reused(self, values):
+        return all(values[suite] == 'false' for suite in ('unit', 'desktop', 'storage'))
+
+    def ran_all(self, values):
+        return all(values[suite] == 'true' for suite in ('unit', 'desktop', 'storage'))
+
+    def test_reuses_the_passing_beta_validation_of_the_promoted_commit(self):
+        values, summary, calls, dev = self.choose()
+        self.assertTrue(self.reused(values), values)
+        self.assertIn('already passed', summary)
+        self.assertIn(f'head_sha={dev}', calls)
+
+    def test_reuses_a_passing_validation_even_when_publishing_failed(self):
+        values, _, _, _ = self.choose(run='7 completed https://example.com/runs/7', job='completed success')
+        self.assertTrue(self.reused(values), values)
+
+    def test_waits_while_the_beta_validation_is_still_running(self):
+        values, _, calls, _ = self.choose(pending=2)
+        self.assertTrue(self.reused(values), values)
+        self.assertEqual(2, calls.count('slept'))
+
+    def test_stops_waiting_once_validation_finished_while_publishing_continues(self):
+        values, _, calls, _ = self.choose(run='7 in_progress https://example.com/runs/7', job='completed success')
+        self.assertTrue(self.reused(values), values)
+        self.assertNotIn('slept', calls)
+
+    def test_runs_every_suite_when_the_beta_validation_failed(self):
+        values, summary, _, _ = self.choose(job='completed failure')
+        self.assertTrue(self.ran_all(values), values)
+        self.assertIn('no passing beta validation', summary)
+
+    def test_runs_every_suite_when_the_beta_run_skipped_validation(self):
+        values, _, _, _ = self.choose(job='none none')
+        self.assertTrue(self.ran_all(values), values)
+
+    def test_runs_every_suite_when_the_commit_has_no_beta_run(self):
+        values, _, calls, _ = self.choose(run='none none')
+        self.assertTrue(self.ran_all(values), values)
+        self.assertNotIn('/jobs', calls)
+
+    def test_runs_every_suite_when_the_api_fails(self):
+        values, _, _, _ = self.choose(fail='1')
+        self.assertTrue(self.ran_all(values), values)
+
+    def test_runs_every_suite_without_asking_when_the_merge_differs_from_dev(self):
+        values, summary, calls, _ = self.choose(differ=True)
+        self.assertTrue(self.ran_all(values), values)
+        self.assertIn('differs from dev', summary)
+        self.assertEqual('', calls)
+
+    def test_validate_only_runs_for_pull_requests_and_calls(self):
+        workflow = (ROOT / '.github/workflows/validate.yml').read_text(encoding='utf-8')
+        triggers = workflow.split('\non:\n', 1)[1].split('\npermissions:', 1)[0]
+        self.assertNotIn('push:', triggers)
+        beta = (ROOT / '.github/workflows/beta.yml').read_text(encoding='utf-8')
+        # The reuse step looks the beta's aggregate job up by name.
+        self.assertIn('name: Validate beta\n', beta)
+        self.assertIn('  validate:\n    if:', workflow)
+        self.assertIn('"Validate beta / validate"', workflow)
+
+
 if __name__ == '__main__':
     unittest.main()

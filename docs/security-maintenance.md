@@ -47,10 +47,10 @@ branches implicitly.
   review threads and merge commits only, and requires the `validate` check from
   GitHub Actions. Validation fails any pull request into `main` whose head is
   not this repository's `dev`, and runs every suite for it unless the identical
-  `dev` commit already passed every suite on push. `validate`
+  `dev` commit already passed every suite in its beta run. `validate`
   summarizes the other jobs: it passes only when every suite passed, or was
   skipped because the source inventory showed the change cannot affect it or
-  a promotion reused `dev`'s run.
+  a promotion reused `dev`'s beta validation.
   Branches need not be up to date first: only `dev` merges into `main`, and
   validation tests the merge result.
 - **dev** selects `refs/heads/dev`. It refuses deletion, so merging a

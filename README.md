@@ -1,6 +1,6 @@
 # Medal Sync
 
-[![Validation](https://github.com/Larson-Logan/medal-sync/actions/workflows/validate.yml/badge.svg)](https://github.com/Larson-Logan/medal-sync/actions/workflows/validate.yml)
+[![Dev build](https://github.com/Larson-Logan/medal-sync/actions/workflows/beta.yml/badge.svg?branch=dev)](https://github.com/Larson-Logan/medal-sync/actions/workflows/beta.yml)
 [![Latest release](https://img.shields.io/github/v/release/Larson-Logan/medal-sync?label=release)](https://github.com/Larson-Logan/medal-sync/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
