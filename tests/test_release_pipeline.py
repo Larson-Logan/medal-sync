@@ -301,7 +301,6 @@ class BetaPlanTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
 
 
-
 class PromotionReuseTests(unittest.TestCase):
     """Runs the actual suite choice for a promotion against a fake gh and a disposable merge."""
 
