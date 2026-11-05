@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Medal Sync – Free Medal.tv Clip Sync and Backup for Windows</title>
 <meta name="description" content="Free, open-source Windows app that syncs your Medal.tv clip library between gaming PCs and backs it up to a NAS, OneDrive, Dropbox or Google Drive.">
-<meta name="keywords" content="Medal sync, Medal.tv sync, sync Medal clips between PCs, Medal clip backup, Medal library sync, Medal clips NAS, Medal clips Google Drive, Medal clips OneDrive, Medal clips Dropbox, free Medal storage">
 <link rel="canonical" href="https://larson-logan.github.io/medal-sync/">
 <link rel="icon" href="favicon.ico">
-<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#EEF0F4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17162E" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Medal Sync">
 <meta property="og:title" content="Medal Sync – Free Medal.tv clip sync and backup">
@@ -48,17 +48,17 @@
     {
       "@type": "Question",
       "name": "How do I sync Medal clips between two PCs?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Install Medal Sync on each PC and point them at the same library on an SMB share, NAS or Google Drive. Launch Medal through Medal Sync. When you quit Medal, it finishes uploads, verifies them and shows Ready; the other PC can then start Medal with the same clip library. Each PC keeps its own Medal login and recording settings." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Install Medal Sync on each PC and point them at the same library on an SMB share, NAS or Google Drive. Open Medal through Medal Sync. When you quit Medal, it finishes uploads, verifies them and shows Ready; your other PC can then open Medal with the same clip library. Each PC keeps its own Medal login and recording settings." }
     },
     {
       "@type": "Question",
       "name": "Can I back up Medal.tv clips to Google Drive, OneDrive or Dropbox?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Medal Sync can send verified copies of your clips to OneDrive, Dropbox, Google Drive or any rclone destination. Google Drive can also be the main library without a server." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Medal Sync can send verified copies of your clips to OneDrive, Dropbox, Google Drive or any rclone destination. Google Drive can also hold the main library without a server." }
     },
     {
       "@type": "Question",
       "name": "Can I store Medal clips on a NAS or home server?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Medal records to a fast virtual drive backed by a local SSD cache, and clips upload in the background to your SMB server or NAS." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Medal records to a fast drive backed by a local SSD cache, and clips upload in the background to your SMB server or NAS." }
     },
     {
       "@type": "Question",
@@ -71,126 +71,353 @@
 <style>
 :root {
   color-scheme: light dark;
-  --bg: #f7f8fa; --surface: #ffffff; --text: #16181d; --muted: #555b66;
-  --border: #d9dde4; --accent: #2254ad; --accent-text: #ffffff; --warn: #fff4d6; --warn-border: #e5c56b;
+  --paper: #EEF0F4;
+  --panel: #FFFFFF;
+  --ink: #1C1A3A;
+  --muted: #565573;
+  --line: #D3D6E0;
+  --action: #1C1A3A;
+  --action-ink: #FFFFFF;
+  --focus: #4338CA;
+  --shadow: 0 1px 2px rgb(28 26 58 / 0.06), 0 12px 32px -12px rgb(28 26 58 / 0.22);
+  /* The tray icon's status colors, used with the same meanings as in the app. */
+  --ready: #22C55E;
+  --working: #38BDF8;
+  --recording: #EF4444;
+  --waiting: #9CA3AF;
+  --open: #A855F7;
+  --attention: #F59E0B;
+
+  --display: "Bahnschrift", "DIN Condensed", "DIN Alternate", "Roboto Condensed", "Arial Narrow", sans-serif;
+  --text: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --step-0: 1.0625rem;
+  --step-1: 1.3125rem;
+  --step-2: 1.625rem;
+  --step-3: clamp(1.75rem, 1.35rem + 1.2vw, 2.125rem);
+  --step-hero: clamp(2.75rem, 1.4rem + 5.4vw, 5.25rem);
+  --gutter: 16px;
 }
+@media (min-width: 720px) { :root { --gutter: 40px; } }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1115; --surface: #171a20; --text: #e8eaee; --muted: #a3a9b4;
-    --border: #2b3039; --accent: #91b9ff; --accent-text: #0f1115; --warn: #2a2414; --warn-border: #6b5a26;
+    --paper: #17162E; --panel: #211F3D; --ink: #ECEBF7; --muted: #A9A7C4; --line: #34325A;
+    --action: #ECEBF7; --action-ink: #17162E; --focus: #A5B4FC;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -16px rgb(0 0 0 / 0.7);
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1115; --surface: #171a20; --text: #e8eaee; --muted: #a3a9b4;
-  --border: #2b3039; --accent: #91b9ff; --accent-text: #0f1115; --warn: #2a2414; --warn-border: #6b5a26;
+  --paper: #17162E; --panel: #211F3D; --ink: #ECEBF7; --muted: #A9A7C4; --line: #34325A;
+  --action: #ECEBF7; --action-ink: #17162E; --focus: #A5B4FC;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -16px rgb(0 0 0 / 0.7);
 }
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.6; }
-main, header, footer { max-width: 880px; margin: 0 auto; padding: 0 16px; }
-header { padding-top: 3.5rem; }
-.eyebrow { color: var(--muted); font-size: .85rem; letter-spacing: .08em; text-transform: uppercase; margin: 0; }
-h1 { font-size: clamp(2rem, 6vw, 2.9rem); line-height: 1.15; margin: .4rem 0 1rem; }
-h2 { font-size: 1.45rem; line-height: 1.25; margin: 2.75rem 0 .75rem; }
-h3 { font-size: 1.05rem; margin: 0 0 .35rem; }
-.lead { font-size: 1.2rem; color: var(--muted); max-width: 46rem; }
-a { color: var(--accent); }
-.actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.75rem 0 1rem; }
-.button { display: inline-block; padding: .7rem 1.2rem; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--accent); }
-.button.primary { background: var(--accent); color: var(--accent-text); }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; }
-.card p { margin: 0; color: var(--muted); }
-ol li, ul li { margin: .45rem 0; }
-.note { background: var(--warn); border: 1px solid var(--warn-border); border-radius: 12px; padding: .8rem 1.1rem; margin: 2rem 0 0; }
-details { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: .8rem 1.1rem; margin: .6rem 0; }
-summary { cursor: pointer; font-weight: 600; }
-details p { margin: .6rem 0 .2rem; color: var(--muted); }
-table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-th, td { text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-tr:last-child td { border-bottom: 0; }
-.table-wrap { overflow-x: auto; }
-footer { color: var(--muted); font-size: .9rem; padding-top: 2.5rem; padding-bottom: 3rem; }
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 400 var(--step-0)/1.6 var(--text);
+}
+a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 2px; }
+.wrap { max-width: 1160px; margin: 0 auto; padding: 0 var(--gutter); }
+
+/* Headings: Bahnschrift is the DIN typeface built into Windows, in its condensed width. */
+h1, h2, h3, .display {
+  font-family: var(--display);
+  font-stretch: 75%;
+  font-weight: 600; letter-spacing: 0;
+}
+
+/* Masthead */
+.masthead { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1.5rem; }
+.brand { display: inline-flex; align-items: center; gap: 0.6rem; text-decoration: none; font-size: var(--step-1); }
+.brand svg { width: 32px; height: 32px; flex: none; }
+.masthead nav a { color: var(--muted); }
+.masthead nav a:hover { color: var(--ink); }
+
+/* Hero */
+.hero { display: grid; gap: 3rem; padding-block: 2.5rem 4.5rem; align-items: center; }
+@media (min-width: 960px) { .hero { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 4rem; padding-block: 4rem 6rem; } }
+.hero h1 { font-size: var(--step-hero); line-height: 0.96; margin: 0 0 1.5rem; max-width: 11ch; }
+.lead { font-size: var(--step-1); line-height: 1.5; color: var(--muted); margin: 0; max-width: 34em; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.5rem; margin-top: 2rem; }
+.button {
+  display: inline-block; padding: 0.8rem 1.4rem; border-radius: 4px;
+  background: var(--action); color: var(--action-ink); text-decoration: none; font-weight: 600;
+}
+.button:hover { text-decoration: none; filter: brightness(1.15); }
+.button:active { transform: translateY(1px); }
+.fine { color: var(--muted); font-size: 0.9375rem; margin: 1rem 0 0; }
+
+/* Status windows: the one animated moment on the page */
+.handoff { margin: 0; }
+.windows { display: grid; gap: 1rem; }
+.window {
+  position: relative; z-index: 1; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: var(--shadow); overflow: hidden;
+}
+.titlebar {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.85rem;
+  border-bottom: 1px solid var(--line); font-size: 0.8125rem; color: var(--muted);
+}
+.titlebar svg { width: 16px; height: 16px; }
+.window-body { padding: 0.9rem 1rem 1rem; }
+.row { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+.device { font-size: var(--step-2); line-height: 1.1; margin: 0; }
+.state { display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; }
+.dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--waiting); box-shadow: 0 0 0 2px var(--panel); flex: none; }
+[data-state="ready"] .dot { background: var(--ready); }
+[data-state="working"] .dot { background: var(--working); }
+[data-state="recording"] .dot { background: var(--recording); }
+[data-state="open"] .dot { background: var(--open); }
+.window .dot { transition: background-color 250ms ease; }
+.next { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9375rem; line-height: 1.45; min-height: 2.9em; }
+.owner { margin: 0.75rem 0 0; font-size: 0.875rem; color: var(--muted); }
+.owner strong { color: var(--ink); font-weight: 600; }
+.handoff figcaption { display: flex; justify-content: space-between; gap: 1rem; margin-top: 1rem; color: var(--muted); font-size: 0.875rem; }
+.replay { white-space: nowrap; font: inherit; color: var(--ink); background: none; border: 0; padding: 0; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .window .dot { transition: none; } }
+
+/* Sections with headings in a left column */
+.section { display: grid; gap: 1rem 4rem; padding-block: 3.5rem; border-top: 1px solid var(--line); }
+@media (min-width: 960px) { .section { grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); padding-block: 4.5rem; } }
+.section h2 { font-size: var(--step-3); line-height: 1.05; margin: 0; max-width: 12ch; }
+.section-body { max-width: 44rem; }
+.section-body > p:first-child { margin-top: 0; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
+th { text-align: left; font-weight: 600; color: var(--muted); padding: 0 1rem 0.6rem 0; border-bottom: 2px solid var(--ink); }
+td { padding: 0.85rem 1rem 0.85rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td:first-child { font-weight: 600; min-width: 9rem; }
+td:last-child, th:last-child { padding-right: 0; white-space: nowrap; }
+.table-wrap { overflow-x: auto; margin-bottom: 1rem; }
+@media (max-width: 559px) {
+  /* Each storage option becomes one block; the column heading moves next to its answer. */
+  thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  tbody tr { display: grid; grid-template-columns: 1fr auto; gap: 0.2rem 1rem; padding: 0.85rem 0; border-bottom: 1px solid var(--line); }
+  tbody tr:first-child { border-top: 2px solid var(--ink); }
+  td { padding: 0; border: 0; min-width: 0; }
+  td:first-child { min-width: 0; }
+  td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; color: var(--muted); }
+  td:last-child { grid-column: 2; grid-row: 1; color: var(--muted); }
+  td:last-child::before { content: "Between PCs: "; }
+}
+
+.split { display: grid; gap: 2rem; }
+@media (min-width: 640px) { .split { grid-template-columns: 1fr 1fr; } }
+.split h3 { font-size: var(--step-1); margin: 0 0 0.5rem; }
+.split ul { margin: 0; padding-left: 1.1rem; }
+.split li { margin: 0.35rem 0; }
+
+.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 2.75rem 1fr; gap: 0 1rem; padding: 0.9rem 0; border-bottom: 1px solid var(--line); }
+.steps li:first-child { padding-top: 0; }
+.steps li::before {
+  content: counter(step); grid-row: span 2;
+  font-family: var(--display); font-stretch: 75%; font-weight: 600;
+  font-size: var(--step-3); line-height: 1; color: var(--muted);
+}
+.steps strong { font-weight: 600; }
+.steps p { margin: 0; color: var(--muted); }
+
+details { border-bottom: 1px solid var(--line); }
+details:first-child summary { padding-top: 0; }
+summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 1rem; padding: 1rem 0; font-weight: 600; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; font-family: var(--display); font-size: 1.5rem; line-height: 1; color: var(--muted); }
+details[open] summary::after { content: "\2212"; }
+details p { margin: 0 0 1.1rem; color: var(--muted); max-width: 38em; }
+
+.caution { display: flex; gap: 0.75rem; align-items: baseline; margin: 0; }
+.caution .dot { background: var(--attention); transform: translateY(0.05em); }
+
+footer { border-top: 1px solid var(--line); padding-block: 2rem 3rem; color: var(--muted); font-size: 0.9375rem; }
+footer ul { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin: 0 0 1rem; padding: 0; }
+footer p { margin: 0; }
 </style>
 </head>
 <body>
-<header>
-<p class="eyebrow">Free · Open source · Windows</p>
-<h1>Sync your Medal.tv clips between PCs, on your own storage</h1>
-<p class="lead">Medal Sync is a free Windows companion for <a href="https://medal.tv">Medal</a>.
-It records to a fast SSD cache, keeps your clip library on your own server or disk, and can back it up to
-OneDrive, Dropbox or Google Drive. Move between gaming PCs with one shared library, while each PC keeps its
-own Medal login and recording settings.</p>
-<div class="actions">
-<a class="button primary" href="https://github.com/Larson-Logan/medal-sync/releases/latest">Download for Windows</a>
-<a class="button" href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md">Getting started</a>
-<a class="button" href="https://github.com/Larson-Logan/medal-sync">Source on GitHub</a>
-</div>
+<header class="wrap masthead">
+<a class="brand display" href="./">
+<svg viewBox="0 0 32 32" aria-hidden="true">
+<defs><linearGradient id="mark" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7C3AED"/><stop offset="1" stop-color="#4338CA"/></linearGradient></defs>
+<rect width="32" height="32" rx="7" fill="url(#mark)"/>
+<g fill="none" stroke="#fff" stroke-width="2.4"><path d="M6.3 11.47A10.7 10.7 0 0 1 23.57 8.43"/><path d="M25.7 20.52A10.7 10.7 0 0 1 8.43 23.57"/></g>
+<g fill="#fff"><path d="M26.04 10.9 25.69 5.61 20.75 10.55Z"/><path d="M5.96 21.1 6.31 26.39 11.25 21.45Z"/><path d="M13.45 11.52v8.96L21.07 16Z"/></g>
+</svg>
+Medal Sync</a>
+<nav aria-label="Project"><a href="https://github.com/Larson-Logan/medal-sync">Source on GitHub</a></nav>
 </header>
+
 <main>
-<section aria-labelledby="features">
-<h2 id="features">What Medal Sync does</h2>
-<div class="grid">
-<div class="card"><h3>Shared clip library across PCs</h3><p>Play on your desktop today and your second PC tomorrow. One library, handed between PCs safely.</p></div>
-<div class="card"><h3>Records at SSD speed</h3><p>Medal writes to a virtual clip drive backed by a local SSD cache. Clips upload in the background.</p></div>
-<div class="card"><h3>Your storage, not a quota</h3><p>Keep clips on an SMB server or NAS, a local folder, or any rclone remote.</p></div>
-<div class="card"><h3>Cloud backup copies</h3><p>Send verified copies to OneDrive, Dropbox, Google Drive or several rclone destinations.</p></div>
-<div class="card"><h3>Verifies before handoff</h3><p>Uploads are checked before another PC can take over. Anything uncertain stops and waits for you.</p></div>
-<div class="card"><h3>Private data stays private</h3><p>Medal logins, provider credentials and full Medal databases are never copied to shared storage.</p></div>
+<section class="wrap hero" aria-labelledby="title">
+<div>
+<h1 id="title">Sync your Medal clips between gaming PCs</h1>
+<p class="lead">Medal Sync is a free, open-source Windows companion for <a href="https://medal.tv">Medal</a>.
+It keeps your clip library on your own NAS, disk or cloud drive and hands it from PC to PC.
+Each PC keeps its own Medal login and recording settings.</p>
+<div class="actions">
+<a class="button" href="https://github.com/Larson-Logan/medal-sync/releases/latest">Download for Windows</a>
+<a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md">Read the setup guide</a>
 </div>
+<p class="fine">Windows x64. MIT license. Not made by or affiliated with Medal.</p>
+</div>
+
+<figure class="handoff">
+<div class="windows" aria-hidden="true">
+<div class="window" id="desktop" data-state="ready">
+<div class="titlebar"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#4338CA"/><path d="M13.45 11.52v8.96L21.07 16Z" fill="#fff"/></svg>Medal Sync Status</div>
+<div class="window-body">
+<div class="row"><p class="device display">Desktop</p><span class="state"><span class="dot"></span><span class="label">Ready</span></span></div>
+<p class="next">Every copy is verified. Safe to switch PCs.</p>
+<p class="owner">Library: <strong class="where">handed to Laptop</strong></p>
+</div>
+</div>
+<div class="window" id="laptop" data-state="open">
+<div class="titlebar"><svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#4338CA"/><path d="M13.45 11.52v8.96L21.07 16Z" fill="#fff"/></svg>Medal Sync Status</div>
+<div class="window-body">
+<div class="row"><p class="device display">Laptop</p><span class="state"><span class="dot"></span><span class="label">Medal open</span></span></div>
+<p class="next">Same clips as the desktop, with this PC's login and settings.</p>
+<p class="owner">Library: <strong class="where">on this PC</strong></p>
+</div>
+</div>
+</div>
+<figcaption><span>Example: the desktop finishes uploading, verifies every copy, then the laptop opens Medal with the same library.</span><button class="replay" type="button" hidden>Play again</button></figcaption>
+</figure>
 </section>
 
-<section aria-labelledby="storage">
-<h2 id="storage">Choose where your Medal recordings live</h2>
+<section class="wrap section" aria-labelledby="storage">
+<h2 id="storage">Where your clips live</h2>
+<div class="section-body">
+<p>Medal records to a fast drive backed by your local SSD, and clips upload in the background. Pick where the library is kept.</p>
 <div class="table-wrap">
 <table>
-<thead><tr><th>Storage</th><th>How it works</th></tr></thead>
+<thead><tr><th scope="col">Storage</th><th scope="col">How it works</th><th scope="col">Between PCs</th></tr></thead>
 <tbody>
-<tr><td>Server with SSD cache</td><td>Record through a cached virtual drive; the collection lives on your SMB server or NAS.</td></tr>
-<tr><td>Local copy and server</td><td>Keep a complete collection on a local disk and upload it to the server before switching PCs.</td></tr>
-<tr><td>Local storage only</td><td>Keep media and coordination on one PC. No server needed.</td></tr>
-<tr><td>Cloud or personal-server primary</td><td>Use any rclone remote as primary storage, with a persistent local copy.</td></tr>
-<tr><td>Google Drive without a server</td><td>Keep a local recording copy; use Drive for media, library history and cross-PC ownership.</td></tr>
-<tr><td>Cloud copies (add-on)</td><td>Add OneDrive, Dropbox, Google Drive or other rclone destinations to any mode.</td></tr>
+<tr><td>Server with SSD cache</td><td>The collection lives on your SMB server or NAS.</td><td>Yes</td></tr>
+<tr><td>Local copy and server</td><td>A complete collection on a local disk, uploaded to the server before you switch.</td><td>Yes</td></tr>
+<tr><td>Google Drive</td><td>A local recording copy, with Drive holding the library. No server needed.</td><td>Yes</td></tr>
+<tr><td>Any rclone remote</td><td>A cloud or personal server as primary storage, with a local copy.</td><td>Yes</td></tr>
+<tr><td>Local storage only</td><td>Everything stays on one PC.</td><td>No</td></tr>
 </tbody>
 </table>
 </div>
-<p>The <a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/storage.md">storage guide</a> explains each mode and how to set it up.</p>
+<p>Any of these can also send verified backup copies to OneDrive, Dropbox, Google Drive or other rclone destinations.
+The <a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/storage.md">storage guide</a> covers setup for each.</p>
+</div>
 </section>
 
-<section aria-labelledby="how">
-<h2 id="how">How syncing Medal between PCs works</h2>
-<ol>
-<li>Start Medal through Medal Sync. It takes ownership of the library and mounts the clip drive.</li>
-<li>Medal records as usual. New clips upload in the background.</li>
-<li>When you quit Medal, Medal Sync finishes uploads, verifies every required copy and shows <strong>Ready</strong>.</li>
-<li>Another PC can now start Medal and pick up the same clip library.</li>
+<section class="wrap section" aria-labelledby="shared">
+<h2 id="shared">What moves between PCs</h2>
+<div class="section-body split">
+<div>
+<h3>Shared</h3>
+<ul>
+<li>Your clips</li>
+<li>Clip records in Medal's library</li>
+</ul>
+</div>
+<div>
+<h3>Stays on each PC</h3>
+<ul>
+<li>Your Medal login</li>
+<li>Microphone and encoder settings</li>
+<li>Storage and cloud sign-ins</li>
+<li>The full Medal database</li>
+</ul>
+</div>
+</div>
+</section>
+
+<section class="wrap section" aria-labelledby="switching">
+<h2 id="switching">Switching PCs</h2>
+<div class="section-body">
+<ol class="steps">
+<li><strong>Open Medal through Medal Sync.</strong><p>This PC takes the library and mounts the clip drive.</p></li>
+<li><strong>Record as usual.</strong><p>New clips upload in the background while you play.</p></li>
+<li><strong>Quit Medal and wait for Ready.</strong><p>Medal Sync finishes uploads and checks every copy on your storage before it lets go.</p></li>
+<li><strong>Open Medal on your other PC.</strong><p>It picks up the same library. If a handoff is interrupted, the first PC keeps the library and its clips and retries next time.</p></li>
 </ol>
-<p>If something is interrupted, the PC keeps ownership and its local clips so the next launch can retry.</p>
+</div>
 </section>
 
-<section aria-labelledby="faq">
+<section class="wrap section" aria-labelledby="faq">
 <h2 id="faq">Questions</h2>
-<details open><summary>Is Medal Sync free?</summary>
+<div class="section-body">
+<details><summary>Is Medal Sync free?</summary>
 <p>Yes. Medal Sync is free and open source under the MIT license. You only need your own storage: a local disk, an SMB share or NAS, or a cloud account you already have.</p></details>
 <details><summary>How do I sync Medal clips between two PCs?</summary>
-<p>Install Medal Sync on each PC and point them at the same library on an SMB share, NAS or Google Drive. Launch Medal through Medal Sync. When you quit Medal, it finishes uploads, verifies them and shows Ready; the other PC can then start Medal with the same clip library. Each PC keeps its own Medal login and recording settings.</p></details>
+<p>Install Medal Sync on each PC and point them at the same library on an SMB share, NAS or Google Drive. Open Medal through Medal Sync. When you quit Medal, it finishes uploads, verifies them and shows Ready; your other PC can then open Medal with the same clip library. Each PC keeps its own Medal login and recording settings.</p></details>
 <details><summary>Can I back up Medal.tv clips to Google Drive, OneDrive or Dropbox?</summary>
-<p>Yes. Medal Sync can send verified copies of your clips to OneDrive, Dropbox, Google Drive or any rclone destination. Google Drive can also be the main library without a server.</p></details>
+<p>Yes. Medal Sync can send verified copies of your clips to OneDrive, Dropbox, Google Drive or any rclone destination. Google Drive can also hold the main library without a server.</p></details>
 <details><summary>Can I store Medal clips on a NAS or home server?</summary>
-<p>Yes. Medal records to a fast virtual drive backed by a local SSD cache, and clips upload in the background to your SMB server or NAS.</p></details>
+<p>Yes. Medal records to a fast drive backed by a local SSD cache, and clips upload in the background to your SMB server or NAS.</p></details>
 <details><summary>Is Medal Sync made by Medal?</summary>
 <p>No. Medal Sync is an independent project and is not affiliated with Medal, Microsoft, Dropbox or Google.</p></details>
+</div>
 </section>
 
-<p class="note"><strong>Experimental software for Windows x64.</strong> Keep an independent backup of your clips.
-A synced library and a cache are not a backup.</p>
+<section class="wrap section" aria-labelledby="caution">
+<h2 id="caution">Before you start</h2>
+<div class="section-body">
+<p class="caution"><span class="dot" aria-hidden="true"></span><span>Medal Sync is experimental. Keep a separate backup of your clips: a synced library is not a backup.
+<a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md">The setup guide</a> walks through creating or joining a library.</span></p>
+</div>
+</section>
 </main>
-<footer>
-<p><a href="https://github.com/Larson-Logan/medal-sync">GitHub</a> ·
-<a href="https://github.com/Larson-Logan/medal-sync/releases/latest">Releases</a> ·
-<a href="https://github.com/Larson-Logan/medal-sync/blob/main/SUPPORT.md">Get help</a> ·
-<a href="https://github.com/Larson-Logan/medal-sync/blob/main/LICENSE">MIT license</a></p>
+
+<footer class="wrap">
+<ul>
+<li><a href="https://github.com/Larson-Logan/medal-sync/releases/latest">Releases</a></li>
+<li><a href="https://github.com/Larson-Logan/medal-sync">Source code</a></li>
+<li><a href="https://github.com/Larson-Logan/medal-sync/blob/main/SUPPORT.md">Get help</a></li>
+<li><a href="https://github.com/Larson-Logan/medal-sync/blob/main/LICENSE">MIT license</a></li>
+</ul>
 <p>Medal Sync is an independent project, not affiliated with Medal, Microsoft, Dropbox or Google.</p>
 </footer>
+
+<script>
+(() => {
+  // The page ships showing the finished handoff. With motion allowed, replay it from the start once.
+  const replay = document.querySelector('.replay');
+  const pcs = { desktop: document.getElementById('desktop'), laptop: document.getElementById('laptop') };
+  // Titles match the app's status panel.
+  const steps = [
+    { desktop: ['recording', 'Recording', 'Medal is recording a game.', 'on this PC'],
+      laptop: ['waiting', 'Waiting for another PC', 'Medal opens here when the desktop is Ready.', 'on Desktop'] },
+    { desktop: ['working', 'Uploading', 'Copying 3 new clips to your storage.', 'on this PC'] },
+    { desktop: ['working', 'Verifying', 'Checking every copy before letting go.', 'on this PC'] },
+    { desktop: ['ready', 'Ready', 'Every copy is verified. Safe to switch PCs.', 'handed to Laptop'] },
+    { laptop: ['working', 'Starting', 'Taking the library and mounting the clip drive.', 'on this PC'] },
+    { laptop: ['open', 'Medal open', "Same clips as the desktop, with this PC's login and settings.", 'on this PC'] },
+  ];
+  const show = step => {
+    for (const [name, value] of Object.entries(step)) {
+      const [state, label, next, where] = value, pc = pcs[name];
+      pc.dataset.state = state;
+      pc.querySelector('.label').textContent = label;
+      pc.querySelector('.next').textContent = next;
+      pc.querySelector('.where').textContent = where;
+    }
+  };
+  let timers = [];
+  const play = () => {
+    timers.forEach(clearTimeout);
+    show(steps[0]);
+    timers = steps.slice(1).map((step, i) => setTimeout(() => show(step), 900 + i * 1300));
+  };
+  replay.hidden = false;
+  replay.addEventListener('click', play);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  // On phones the windows sit below the fold, so wait until they are on screen.
+  const seen = new IntersectionObserver(entries => {
+    if (!entries.some(entry => entry.isIntersecting)) return;
+    seen.disconnect();
+    play();
+  }, { threshold: 0.6 });
+  seen.observe(pcs.desktop);
+})();
+</script>
 </body>
 </html>
