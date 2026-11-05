@@ -189,20 +189,15 @@ version that already has a release is refused. A hotfix carries fixes only:
 once `dev` holds a `feat` or breaking pull request, the
 [promotion check](#promote-dev-to-main) requires a new MINOR or MAJOR version.
 
-The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) was
-the three-part bridge `v1.3.0`, because update checks in 1.2.0 and earlier
-ignore four-part tags. It counts as `.00`; installs that update to it can then
-find every later release.
-
-Older installs only check the release marked Latest, and the first hotfix,
-`v1.3.0.01`, replaces the bridge as Latest. From then on, a 1.2.0 or
-earlier install that never took the bridge sees no update: the desktop check
-stays silent and the portable updater reports that it expected a stable
-release. Its user must download the newest setup from the
+The first release after 1.2.0 was the one-time three-part bridge `v1.3.0`,
+because update checks in 1.2.0 and earlier ignore four-part tags. It counts as
+`1.3.0.00`. Those older installs only check the release marked Latest, and
+`v1.3.0.01` replaced the bridge as Latest, so a 1.2.0 or earlier install that
+never took the bridge sees no update: the desktop check stays silent and the
+portable updater reports that it expected a stable release. Its user must
+download the newest setup from the
 [Releases page](https://github.com/Larson-Logan/medal-sync/releases) once;
-later updates are found normally. To give older installs time to take the
-bridge, leave a few days before promoting the first hotfix unless the fix is
-urgent.
+later updates are found normally.
 
 The [release workflow](../.github/workflows/release.yml) starts on its own for
 every push to `main`, or from **Run workflow** on the Actions tab for `main`;
@@ -254,7 +249,7 @@ Generated notes use [.github/release.yml](../.github/release.yml) to group PRs
 by their type labels. Label merged work accurately; notes include a catch-all
 for uncategorized changes and still require maintainer review.
 
-For a `.00` or bridge release, the run summary also lists any item still open in the
+For a `.00` release, the run summary also lists any item still open in the
 version's milestone. Because the app publishes the release, the
 [milestones workflow](../.github/workflows/milestones.yml) runs on it and
 closes that milestone once it is empty. Milestones are titled

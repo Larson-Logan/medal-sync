@@ -2,14 +2,13 @@
   <PropertyGroup>
     <VersionPrefix>1.4.0</VersionPrefix>
     <!-- Hotfix counter, the fourth part of the release version. The release
-         workflow sets it for each merge to main; local builds use 00. "none"
-         builds the one-time three-part bridge release for older updaters. -->
+         workflow sets it for each merge to main; local builds use 00. -->
     <MedalReleaseRevision Condition="'$(MedalReleaseRevision)' == ''">00</MedalReleaseRevision>
     <!-- Prerelease label, such as beta.3. The beta workflow sets it for each
          merge to dev, giving MAJOR.MINOR.PATCH.NN-beta.N; it is empty otherwise. -->
     <MedalPrerelease Condition="'$(MedalPrerelease)' == ''"></MedalPrerelease>
-    <Version Condition="'$(MedalReleaseRevision)' != 'none'">$(VersionPrefix).$(MedalReleaseRevision)</Version>
-    <Version Condition="'$(MedalReleaseRevision)' != 'none' and '$(MedalPrerelease)' != ''">$(Version)-$(MedalPrerelease)</Version>
+    <Version>$(VersionPrefix).$(MedalReleaseRevision)</Version>
+    <Version Condition="'$(MedalPrerelease)' != ''">$(Version)-$(MedalPrerelease)</Version>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>

@@ -22,7 +22,7 @@ on:
         type: boolean
         default: false
       revision:
-        description: Hotfix counter, or none for the legacy bridge release
+        description: Hotfix counter, such as 00 or 01
         type: string
         default: '00'
       prerelease:
