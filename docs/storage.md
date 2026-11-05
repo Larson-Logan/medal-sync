@@ -437,6 +437,11 @@ Keep these receipts private: they name media. Their absence is safe.
 
 ### Retry cloud copies while Ready
 
+Open the status panel and choose **Retry cloud copies** to retry every pending
+optional copy. The button is available only while Ready with copies pending
+and no retry running. The panel shows progress and the result; closing the
+panel keeps the retry running. A canceled retry keeps unfinished copies pending.
+
 With Medal quit and the library Ready, preview pending optional cloud copies:
 
 ```powershell

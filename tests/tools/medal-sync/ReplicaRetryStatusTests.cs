@@ -10,6 +10,45 @@ namespace MedalSync.Tests;
 public sealed class ReplicaRetryStatusTests
 {
     [Fact]
+    public void CloudRetryButtonNeedsReadyPendingCopiesAndNoLiveRetry()
+    {
+        using var fixture = new MedalFixture();
+        var state = new LocalState(fixture.PathFor("state"));
+        string library = new('a', 32);
+        var now = DateTimeOffset.UtcNow;
+        var journal = Ownership.Initial(library, "12345", now);
+        DesktopStatus Read() => DesktopStatus.Read(state, library, journal, null, false, DateTimeOffset.UtcNow);
+        Assert.False(Read().CanRetryCloudCopies);
+        StorageReplication.MarkPending(state, library, "cloud", now);
+        Assert.True(Read().CanRetryCloudCopies);
+        Assert.Contains("Choose Retry cloud copies", Read().Notice, StringComparison.Ordinal);
+        using (var telemetry = new ReplicaRetryStatus(state, library, 0))
+        {
+            telemetry.Start();
+            Assert.False(Read().CanRetryCloudCopies);
+            telemetry.Complete("Still pending.");
+            Assert.True(Read().CanRetryCloudCopies);
+        }
+        var owner = new DeviceIdentity(new string('b', 32), "Other PC");
+        journal = Ownership.Acquire(journal, owner, SessionCoordinator.NewId(), now);
+        Assert.False(Read().CanRetryCloudCopies);
+        Assert.False(DesktopStatus.Read(state, new string('c', 32), Ownership.Initial(new string('c', 32), "12345", now),
+            null, false, now).CanRetryCloudCopies);
+        Assert.False((new DesktopStatus(SessionPhase.Ready, "Ready", now, CanRetryCloudCopies: true)).At(now.AddMinutes(1)).CanRetryCloudCopies);
+    }
+
+    [Theory]
+    [InlineData(0, "Cloud copies verified.")]
+    [InlineData(3, "canceled or still pending")]
+    [InlineData(1, "needs action. Sign in again.")]
+    public void CloudRetryExitCodesDistinguishSuccessCancellationAndAction(int exitCode, string expected)
+    {
+        var result = new CloudRetryCommandResult(exitCode, "Earlier progress", "Sign in again.");
+        Assert.Contains(expected, result.Message, StringComparison.Ordinal);
+        if (exitCode == 3) Assert.DoesNotContain("needs action", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LocalLaunchCancelsRetryBeforeTakingTheGate()
     {
         if (!OperatingSystem.IsWindows()) return;

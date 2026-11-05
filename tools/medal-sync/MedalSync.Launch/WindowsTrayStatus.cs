@@ -19,6 +19,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private readonly Form _panel;
     private readonly TextBox _status;
     private readonly Button _retry;
+    private readonly Button _retryCloud;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly EventWaitHandle _open;
     private readonly EventWaitHandle _exit;
@@ -27,9 +28,12 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private DateTime _nextRead;
     private DesktopStatus _last = DesktopStatus.Unknown();
     private bool _finishing;
+    private bool _retryingCloud;
     private bool _ending;
     private readonly Func<DesktopStatus> _readStatus;
     private readonly Func<Task<FinishCommandResult>> _runFinish;
+    private readonly Func<Task<CloudRetryCommandResult>> _runCloudRetry;
+    private string? _cloudRetryResult;
     private string? _finishFailure;
     private string? _exitFailure;
 
@@ -85,10 +89,12 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     }
 
     internal WindowsTrayStatus(bool show, Func<DesktopStatus>? readStatus = null, string eventName = OpenEventName,
-        Func<Task<FinishCommandResult>>? runFinish = null, Func<bool>? operationRunning = null)
+        Func<Task<FinishCommandResult>>? runFinish = null, Func<bool>? operationRunning = null,
+        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null)
     {
         _readStatus = readStatus ?? SessionCommands.ReadDesktopStatus;
         _runFinish = runFinish ?? RunFinish;
+        _runCloudRetry = runCloudRetry ?? RunCloudRetry;
         _open = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _exit = new EventWaitHandle(false, EventResetMode.AutoReset, eventName + ".Exit");
         _operationRunning = operationRunning ?? SessionCommands.AnotherInstanceRunning;
@@ -114,6 +120,9 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         _retry = new Button { Text = "&Retry finish", AccessibleName = "Retry supported finish on this PC", AutoSize = true, Enabled = false };
         _retry.Click += async (_, _) => await RetryFinish();
         buttons.Controls.Add(_retry);
+        _retryCloud = new Button { Text = "Retry &cloud copies", AccessibleName = "Retry pending cloud copies while Ready", AutoSize = true, Enabled = false };
+        _retryCloud.Click += async (_, _) => await RetryCloudCopies();
+        buttons.Controls.Add(_retryCloud);
         var guide = new Button { Text = "Setup &guide", AutoSize = true };
         guide.Click += (_, _) => OpenGuide();
         buttons.Controls.Add(guide);
@@ -176,7 +185,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         var status = _last.At(DateTimeOffset.UtcNow);
         if (status.Phase is SessionPhase.Ready or SessionPhase.Active or SessionPhase.Waiting) _finishFailure = null;
         string? lastResult = _finishFailure ?? status.LastResult;
-        _retry.Enabled = !_finishing && status.CanRetry;
+        _retry.Enabled = !_finishing && !_retryingCloud && status.CanRetry;
+        _retryCloud.Enabled = !_finishing && !_retryingCloud && status.Phase == SessionPhase.Ready && status.CanRetryCloudCopies;
         _icon.Text = "Medal Sync: " + status.Title;
         var icon = _icons.For(status.Phase, status.Recording);
         if (!ReferenceEquals(_icon.Icon, icon)) _icon.Icon = icon;
@@ -186,6 +196,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
             + $"Storage copy: {status.Replica ?? "none currently reported"}\r\n"
             + $"Last confirmed: {status.ConfirmedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz") ?? "never"}"
             + (lastResult is null ? "" : $"\r\n\r\nLast finish result: {lastResult}")
+            + (_retryingCloud ? "\r\n\r\nCloud retry: Running. Unfinished copies remain pending."
+                : _cloudRetryResult is null ? "" : $"\r\n\r\nLast cloud retry result: {_cloudRetryResult}")
             + (_exitFailure is null ? "" : $"\r\n\r\nExit: {_exitFailure}")
             + (status.Notice is null ? "" : $"\r\n\r\nLatest notice: {status.Notice}");
         if (_status.Text != text) _status.Text = text;
@@ -194,7 +206,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private void TryExit()
     {
         if (_ending) return;
-        if (_finishing || _operationRunning())
+        if (_finishing || _retryingCloud || _operationRunning())
         {
             ShowPanel();
             _exitFailure = "Medal Sync is still supervising Medal or finishing a library operation. Quit Medal normally from its tray icon and wait for Ready, then choose Exit Medal Sync again. Uploads will continue safely.";
@@ -216,9 +228,10 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 
     private async Task RetryFinish()
     {
-        if (_ending || _finishing || !_last.At(DateTimeOffset.UtcNow).CanRetry) return;
+        if (_ending || _finishing || _retryingCloud || !_last.At(DateTimeOffset.UtcNow).CanRetry) return;
         _finishing = true;
         _retry.Enabled = false;
+        _retryCloud.Enabled = false;
         try
         {
             var result = await _runFinish();
@@ -233,15 +246,43 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 
     private static async Task<FinishCommandResult> RunFinish()
     {
+        var result = await RunCommand("finish");
+        return new(result.ExitCode, result.Output, result.Error);
+    }
+
+    private async Task RetryCloudCopies()
+    {
+        var status = _last.At(DateTimeOffset.UtcNow);
+        if (_ending || _finishing || _retryingCloud || status.Phase != SessionPhase.Ready || !status.CanRetryCloudCopies) return;
+        _retryingCloud = true;
+        _cloudRetryResult = null;
+        _retryCloud.Enabled = false;
+        _retry.Enabled = false;
+        try { _cloudRetryResult = (await _runCloudRetry()).Message; }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
+        {
+            _cloudRetryResult = "Could not start cloud retry. Copies remain pending; check the installation and retry while Ready.";
+        }
+        finally { _retryingCloud = false; _nextRead = default; }
+    }
+
+    private static async Task<CloudRetryCommandResult> RunCloudRetry()
+    {
+        var result = await RunCommand("replicate", "retry", "--apply");
+        return new(result.ExitCode, result.Output, result.Error);
+    }
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunCommand(params string[] arguments)
+    {
         var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "medal-sync.exe"))
             { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        start.ArgumentList.Add("finish");
-        using var process = Process.Start(start) ?? throw new IOException("Finish did not start.");
-        // Preserve the existing single-instance and finish guards in the child. No acceptance flags.
+        foreach (string argument in arguments) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start) ?? throw new IOException("The library operation did not start.");
+        // Preserve each command's existing interlock, shutdown and ownership guards. No acceptance flags.
         var output = FinishCommandResult.ReadTailAsync(process.StandardOutput);
         var error = FinishCommandResult.ReadTailAsync(process.StandardError);
         await Task.WhenAll(output, error, process.WaitForExitAsync());
-        return new(process.ExitCode, output.Result, error.Result);
+        return (process.ExitCode, output.Result, error.Result);
     }
 
     private void OpenGuide()

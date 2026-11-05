@@ -10,6 +10,17 @@ internal sealed record ProgressEnvelope(int Format, string LibraryId, string Acc
 
 internal sealed record DesktopNotice(string Message, DateTimeOffset At);
 
+internal sealed record CloudRetryCommandResult(int ExitCode, string Output, string Error)
+{
+    public string Message => ExitCode switch
+    {
+        0 => "Cloud copies verified.",
+        3 => "Cloud retry canceled or still pending. Unfinished copies remain pending; retry while Ready.",
+        _ => "Cloud retry needs action. " + (!string.IsNullOrWhiteSpace(Error) ? Error.Trim()
+            : !string.IsNullOrWhiteSpace(Output) ? Output.Trim() : "Check storage and retry while Ready."),
+    };
+}
+
 internal sealed record FinishCommandResult(int ExitCode, string Output, string Error)
 {
     public string? Failure => ExitCode == 0 ? null : !string.IsNullOrWhiteSpace(Error) ? Error.Trim()
@@ -34,7 +45,7 @@ internal sealed record FinishCommandResult(int ExitCode, string Output, string E
 
 internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, DateTimeOffset? ConfirmedAt,
     int? QueuedFiles = null, long? QueuedBytes = null, string? Replica = null, bool CanRetry = false, string? Notice = null,
-    string? LastResult = null, bool Recording = false)
+    string? LastResult = null, bool Recording = false, bool CanRetryCloudCopies = false)
 {
     public string Title => Phase switch
     {
@@ -71,6 +82,8 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Explicit unknown below. */ }
         var status = Resolve(journal, device ?? NoDevice, report, supervisorRunning, now);
         var retry = ReplicaRetryStatus.Read(state, libraryId, now);
+        var pending = StorageReplication.Pending(state, libraryId);
+        status = status with { CanRetryCloudCopies = status.Phase == SessionPhase.Ready && pending.Count > 0 && retry?.Running != true };
         if (status.Phase == SessionPhase.Ready && retry is not null)
             status = status with { Notice = $"Cloud retry (generation {retry.Generation}): {retry.Message}", Replica = retry.Target };
         try
@@ -79,8 +92,8 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
             if (status.Notice is null && now - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
-        if (status.Notice is null && StorageReplication.Pending(state, libraryId) is { Count: > 0 } pending)
-            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending. Run 'medal-sync replicate retry --apply' while Ready, or wait for the next finish." };
+        if (status.Notice is null && pending.Count > 0)
+            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending. Choose Retry cloud copies while Ready, run 'medal-sync replicate retry --apply', or wait for the next finish." };
         if (status.Notice is null && StorageCheckReport.Outstanding(state, libraryId) is { Count: > 0 } problems)
             status = status with { Notice = "Storage needs attention: " + string.Join(" ", problems.Select(p => p.Detail))
                 + " Run 'medal-sync storage check' after fixing it." };

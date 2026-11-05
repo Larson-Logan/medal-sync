@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add **Retry cloud copies** to the status panel while Ready with optional
+  copies pending. Progress and results stay visible, cancellation keeps copies
+  pending, and closing the panel keeps the guarded retry running.
 - Fix an interrupted `enroll --apply` (Ctrl+C, a closed window, a crash or a
   reboot) being given back as an aborted launch at the next start, which then
   suggested `launch --replace-local-library` and would have dropped this PC's
