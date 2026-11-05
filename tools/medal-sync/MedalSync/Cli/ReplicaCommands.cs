@@ -93,8 +93,7 @@ internal static class ReplicaCommands
             }
             var reviewed = Json.ReadFile<ReplicaPrunePlan>(input!, "Replica cleanup review");
             // No PC can start, finish or publish while the writer lock is held.
-            using var writer = store.AcquireWriterLock(TimeSpan.FromSeconds(10));
-            var result = prune.Apply(reviewed);
+            var result = ApplyPrune(prune, store, reviewed);
             output.WriteLine($"Moved {result.Moved} file(s) to {reviewed.Destination}/{result.TrashFolder}/" + (result.AlreadyMoved > 0 ? $" ({result.AlreadyMoved} were already there)" : "")
                 + $"; {Storage.StorageVolume.Gb(result.Bytes)} in this batch. Nothing was deleted. When you are sure, run "
                 + $"'medal-sync replica purge-trash --target {reviewed.Target}' to review deleting old trash.");
@@ -119,6 +118,8 @@ internal static class ReplicaCommands
         var prune = new ReplicaPrune(config, state, store, operation.Guard, new RcloneReplicaRemote(config, state, operation.Guard));
         try
         {
+            if (config.Replication!.Targets.Any(t => t.Name.Equals(target, StringComparison.OrdinalIgnoreCase) && t.Required))
+                output.WriteLine("This copy is required. Only old trash is deleted; referenced files are not touched. Applying a nonempty purge makes this PC's next handoff read every referenced file back.");
             // Hold the writer lock, as prune --apply does, so a prune resumed on another PC
             // cannot add files to a batch between choosing it and deleting it.
             using var writer = apply ? store.AcquireWriterLock(TimeSpan.FromSeconds(10)) : null;
@@ -145,6 +146,13 @@ internal static class ReplicaCommands
         });
         if (apply && !empty) output.WriteLine($"Deleted {deleted.Count} trash batch(es) permanently.");
         return 0;
+    }
+
+    internal static ReplicaPruneResult ApplyPrune(ReplicaPrune prune, CoordinationStore store, ReplicaPrunePlan plan,
+        TimeSpan? lockTimeout = null)
+    {
+        using var writer = store.AcquireWriterLock(lockTimeout ?? TimeSpan.FromSeconds(10));
+        return prune.Apply(plan);
     }
 
     private static (LocalState State, MedalSyncConfig Config, CoordinationStore Store) Open()

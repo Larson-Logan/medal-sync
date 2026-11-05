@@ -1,0 +1,200 @@
+name: Beta release Medal Sync
+# Runs on standard GitHub-hosted runners, which are free for this public
+# repository. Beta builds deliberately use no caches.
+#
+# Every merge to dev builds, verifies and publishes a GitHub prerelease of the
+# release that promoting dev to main would publish next. It is tagged
+# vMAJOR.MINOR.PATCH.NN-beta.N: MAJOR.MINOR.PATCH.NN is the next stable
+# version, chosen the same way as in release.yml, and N counts the betas of
+# that version from 1. For example, after v1.3.1.01 the betas are
+# v1.3.1.02-beta.1, -beta.2 and so on until v1.3.1.02 itself is released.
+#
+# Update checks never see betas: GitHub never marks a prerelease Latest, and
+# the updaters ignore prereleases and suffixed tags. A beta install is offered
+# the release it leads up to once that is published.
+#
+# Only administrators and the medal-sync-release GitHub App may create v* tags
+# (see .github/rulesets/release-tags.json), so only the publish step uses a
+# short-lived app token; everything else uses github.token.
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # One beta at a time, so two merges never take the same beta number. A newer
+  # queued merge replaces an older queued one; it contains the older changes.
+  # Separate from the release group, so a beta never replaces a queued release.
+  group: beta-release
+  cancel-in-progress: false
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  NUGET_XMLDOC_MODE: skip
+jobs:
+  plan:
+    name: Choose the beta version
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Write access is needed only to see existing drafts. No code is checked out.
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      revision: ${{ steps.plan.outputs.revision }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - name: Plan beta version
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          prefix="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/Directory.Build.props?ref=$SHA" \
+            | sed -n 's:.*<VersionPrefix>\([^<]*\)</VersionPrefix>.*:\1:p')"
+          if ! grep -Eqx '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)' <<<"$prefix"; then
+            echo "::error::VersionPrefix '$prefix' is not MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+
+          # Only the tip of dev gets a beta. A rerun for an older commit would
+          # otherwise publish older code under a newer beta number.
+          head="$(gh api "repos/$REPO/commits/dev" --jq .sha)"
+          if [ "$head" != "$SHA" ]; then
+            echo "release=false" >>"$GITHUB_OUTPUT"
+            echo "dev has moved on to $head, which gets the beta instead, so nothing was built." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # A rerun for a commit that already has a release, draft or published, does nothing.
+          existing="$(gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.target_commitish == env.SHA) | .html_url')"
+          if [ -n "$existing" ]; then
+            echo "release=false" >>"$GITHUB_OUTPUT"
+            echo "This commit already has a release, so nothing was built: $existing" >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          tags="$( {
+              gh api --paginate "repos/$REPO/releases" --jq '.[].tag_name'
+              gh api --paginate "repos/$REPO/git/matching-refs/tags/v$prefix." --jq '.[].ref | ltrimstr("refs/tags/")'
+            } )"
+          # The next stable version, as release.yml would choose it: one more than
+          # the highest hotfix counter released for VersionPrefix, or .00 when
+          # there is none yet. Beta tags do not count; a bridge release counts as 00.
+          used="$(awk -v p="v$prefix." '$0 == substr(p, 1, length(p) - 1) { print 0 } index($0, p) == 1 { n = substr($0, length(p) + 1); if (n ~ /^[0-9][0-9]+$/) print n + 0 }' <<<"$tags" \
+            | sort -n | tail -n 1)"
+          if [ -z "$used" ]; then
+            revision=00
+          else
+            revision="$(printf '%02d' $((used + 1)))"
+          fi
+          base="$prefix.$revision"
+          # One more than the highest beta of that version.
+          beta="$(awk -v p="v$base-beta." 'index($0, p) == 1 { n = substr($0, length(p) + 1); if (n ~ /^[1-9][0-9]*$/) print n + 0 }' <<<"$tags" \
+            | sort -n | tail -n 1)"
+          prerelease="beta.$(( ${beta:-0} + 1 ))"
+          version="$base-$prerelease"
+          {
+            echo "version=$version"
+            echo "revision=$revision"
+            echo "prerelease=$prerelease"
+            echo "release=true"
+          } >>"$GITHUB_OUTPUT"
+          echo "Publishing beta $version of the next release, $base." >>"$GITHUB_STEP_SUMMARY"
+
+  validate:
+    name: Validate beta
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    # Its checks job asks for actions: read, which a caller must grant. A beta
+    # run always takes every suite; it never reuses another run.
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/validate.yml
+    with:
+      release: true
+      revision: ${{ needs.plan.outputs.revision }}
+      prerelease: ${{ needs.plan.outputs.prerelease }}
+
+  release:
+    name: Publish tested beta
+    needs: [plan, validate]
+    runs-on: windows-latest
+    timeout-minutes: 10
+    # The beta itself is published with the app token, so github.token only reads.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download tested packages from this run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: .medal-sync-dist
+      - name: Verify planned asset names and checksums
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $names = @("medal-sync-$env:VERSION-setup-win-x64.exe", "medal-sync-$env:VERSION-win-x64.zip")
+          $expected = @($names) + @($names | ForEach-Object { "$_.sha256" })
+          $actual = @(Get-ChildItem -LiteralPath .medal-sync-dist -Force | ForEach-Object Name)
+          if (Compare-Object $expected $actual -CaseSensitive) { throw 'Release assets differ from the planned version or file list.' }
+          foreach ($name in $names) {
+            $path = Join-Path .medal-sync-dist $name
+            $sidecar = (Get-Content -LiteralPath "$path.sha256" -Raw).Trim()
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($sidecar -cne "$hash  $name") { throw "Release checksum verification failed: $name" }
+          }
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            .medal-sync-dist/medal-sync-*-setup-win-x64.exe
+            .medal-sync-dist/medal-sync-*-win-x64.zip
+      - name: Get a release app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+      - name: Publish GitHub prerelease
+        shell: pwsh
+        env:
+          # The app may create v* tags; github.token may not.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:VERSION
+          $tag = $env:TAG = "v$version"
+          # The stable release this beta leads up to.
+          $env:STABLE = 'v' + ($version -creplace '-beta\.[0-9]+$', '')
+          # Re-check just before creating, so a beta made meanwhile is never
+          # duplicated, and a release of the same version promoted from dev
+          # meanwhile never gets an older-looking beta after it.
+          $existing = gh api --paginate "repos/$env:GITHUB_REPOSITORY/releases" --jq '.[] | select(.tag_name == env.TAG or .tag_name == env.STABLE) | .html_url'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list releases.' }
+          if ($existing) { throw "A release for $tag or $env:STABLE already exists: $existing. Choose Run workflow on dev to take the next number." }
+          # Notes list everything on dev since the latest stable release.
+          $previous = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>$null
+          $notes = if ($LASTEXITCODE -eq 0 -and $previous) { @('--notes-start-tag', $previous) } else { @() }
+          $global:LASTEXITCODE = 0
+          $archive = ".medal-sync-dist/medal-sync-$version-win-x64.zip"
+          $setup = ".medal-sync-dist/medal-sync-$version-setup-win-x64.exe"
+          # Upload everything to a draft first, so a failed upload never leaves a
+          # published beta with missing files. Publishing creates the tag on
+          # this exact commit. A prerelease is never marked Latest.
+          $url = gh release create $tag $setup "$setup.sha256" $archive "$archive.sha256" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --draft --prerelease --latest=false --generate-notes @notes --title "Medal Sync $version"
+          if ($LASTEXITCODE -ne 0) { throw 'Draft prerelease creation failed; existing releases are never overwritten.' }
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { throw "Publishing failed. The draft is still available: $url" }
+          "Published Medal Sync beta $version`: $url" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY

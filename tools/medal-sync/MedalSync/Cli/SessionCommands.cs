@@ -92,6 +92,7 @@ internal static class SessionCommands
         Func<bool>? supervisorRunning = null)
     {
         var now = DateTimeOffset.UtcNow;
+        var cloudChecks = ReplicaCheckStatus.Read(state, config.LibraryId, now, config.Replication?.Targets ?? []);
         CoordinationStore store;
         OwnershipRecord journal;
         try
@@ -103,18 +104,22 @@ internal static class SessionCommands
         catch (IOException)
         {
             const string waiting = "Waiting for storage: the shared library's server cannot be reached right now. Clips and any session stay on this PC.";
-            output.WriteLine(json
-                ? StatusReport.Offline(config.LibraryId, waiting, StorageReplication.Pending(state, config.LibraryId),
-                    StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now).ToJson()
-                : waiting);
+            if (json)
+                output.WriteLine((StatusReport.Offline(config.LibraryId, waiting, StorageReplication.Pending(state, config.LibraryId),
+                    StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now) with { CloudCopies = cloudChecks }).ToJson());
+            else
+            {
+                output.WriteLine(waiting);
+                foreach (string message in cloudChecks.SelectMany(c => c.Messages())) output.WriteLine(message);
+            }
             return 3;
         }
         if (json)
         {
-            var desktop = DesktopStatus.Read(state, config.LibraryId, journal, device, (supervisorRunning ?? AnotherInstanceRunning)(), now);
+            var desktop = DesktopStatus.Read(state, config.LibraryId, journal, device, (supervisorRunning ?? AnotherInstanceRunning)(), now, cloudChecks);
             var report = StatusReport.Reached(config.LibraryId, journal, device, desktop, store.PendingRequests(now), store.StaleRequests(now),
                 StorageReplication.Pending(state, config.LibraryId), StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now)
-                with { ReplicaRetry = ReplicaRetryStatus.Read(state, config.LibraryId, now) };
+                with { ReplicaRetry = ReplicaRetryStatus.Read(state, config.LibraryId, now), CloudCopies = cloudChecks };
             output.WriteLine(report.ToJson());
             return 0;
         }
@@ -126,23 +131,19 @@ internal static class SessionCommands
             output.WriteLine($"Cloud copy '{replica.Name}' is pending since {replica.Since:yyyy-MM-dd HH:mm} UTC; retry while Ready with 'medal-sync replicate retry --apply', or on the next finish.");
         if (ReplicaRetryStatus.Read(state, config.LibraryId, now) is { } retry)
             output.WriteLine($"Cloud retry (generation {retry.Generation}): {retry.Message}");
+        foreach (string message in cloudChecks.SelectMany(c => c.Messages())) output.WriteLine(message);
         foreach (var item in StorageCheckReport.Outstanding(state, config.LibraryId))
             output.WriteLine($"Storage needs attention: {item.Detail} Run 'medal-sync storage check' after fixing it.");
         return 0;
     }
 
-    /// <summary>Read-only status client: never creates device identity, mount credentials or a handoff request.</summary>
-    internal static DesktopStatus ReadDesktopStatus()
-    {
-        var state = LocalState.ForCurrentUser();
-        var config = MedalSyncConfig.Load(state.ConfigPath);
-        var device = state.ExistingDevice();
-        if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
-        var store = CoordinationStore.Open(config);
-        var journal = store.ReadJournal();
-        _ = store.Generations.ReadManifest(journal.CommittedGeneration);
-        return DesktopStatus.Read(state, config.LibraryId, journal, device, AnotherInstanceRunning(), DateTimeOffset.UtcNow);
-    }
+    /// <summary>
+    /// Read-only status client: never creates device identity, mount credentials or a handoff request. It keeps the
+    /// open library between reads; see <see cref="DesktopStatusSource"/>.
+    /// </summary>
+    internal static DesktopStatus ReadDesktopStatus() => StatusView.Read();
+
+    private static readonly DesktopStatusSource StatusView = new(LocalState.ForCurrentUser, AnotherInstanceRunning);
 
     public static int MountPlanCommand(Arguments args, TextWriter output)
     {
@@ -284,10 +285,14 @@ internal static class SessionCommands
     /// windowless launcher shows them).
     /// </summary>
     public static int Launch(Arguments args, TextWriter output, Action<string>? notify = null,
-        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null)
+        Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
+        Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait = null)
     {
         bool replaceLocal = args.Flag("--replace-local-library");
         var wait = WaitSeconds(args.Value("--wait-for-server"));
+        var handoff = HandoffWait.ParseSeconds(args.Value("--wait-for-handoff"));
+        bool quiet = args.Flag("--no-switch-request");
+        if (quiet && handoff is not null) throw new UsageException("--no-switch-request cannot be combined with --wait-for-handoff, which always asks the other PC to switch.");
         string? link = args.Value("--medal-link");
         if (link is not null) link = MedalLink.Require(link);
         args.RequireAllUsed();
@@ -313,7 +318,7 @@ internal static class SessionCommands
         try
         {
             (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report,
-                StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null);
+                StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null, askOwnerToSwitch: !quiet);
             journal = store.ReadJournal();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -322,7 +327,7 @@ internal static class SessionCommands
             return WaitForStorage(context, output, status);
         }
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
-        var outcome = coordinator.Launch();
+        var outcome = LaunchOrWait(context, output, coordinator, handoff, shutdown, offerHandoffWait);
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
         // Recording can go ahead, but the user should learn now, not after the session, that the handoff will need them.
         if (outcome.Warning is { } warning && !shutdown.SuppressUi) Notify(notify, warning);
@@ -350,6 +355,67 @@ internal static class SessionCommands
         if (!shutdown.Ending) GuardStartup(context);
         Report(context, output, $"finish: {finished.Status}: {finished.Message}");
         return finished.Status is FinishStatus.Published or FinishStatus.Unchanged ? 0 : finished.Status == FinishStatus.Pending ? 3 : 1;
+    }
+
+    /// <summary>How long the desktop launcher's "wait and open when ready" choice keeps checking.</summary>
+    internal static readonly TimeSpan OfferedHandoffWait = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Waits for another PC only when asked: <c>--wait-for-handoff</c>, or the launcher's offer after a plain launch
+    /// found the library owned elsewhere. Otherwise this is the unchanged immediate launch. Ctrl+C stops a wait.
+    /// </summary>
+    private static LaunchOutcome LaunchOrWait(Context context, TextWriter output, SessionCoordinator coordinator, TimeSpan? handoff,
+        SessionShutdown shutdown, Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait)
+    {
+        if (handoff is { } timeout)
+        {
+            object? last = null;
+            return WaitWithCtrlC(cancelled => coordinator.LaunchWhenReleased(new HandoffWait(timeout, cancelled, update =>
+            {
+                // One line per change, not per check.
+                var key = (update.Owner, update.State, update.Fresh);
+                if (key.Equals(last)) return;
+                last = key;
+                Report(context, output, "launch: waiting: " + update.Describe());
+            })));
+        }
+        var outcome = coordinator.Launch();
+        if (outcome.Wait != LaunchWait.OwnedElsewhere || offerHandoffWait is null || shutdown.SuppressUi) return outcome;
+        var view = offerHandoffWait(new HandoffWaitOffer(outcome.Message, OfferedHandoffWait));
+        if (view is null || shutdown.SuppressUi)
+        {
+            view?.Dispose();
+            return outcome;
+        }
+        using (view)
+        {
+            context.Log.Write($"launch: waiting up to {HandoffWaitUpdate.Duration(OfferedHandoffWait)} for the other PC to hand off");
+            return WaitWithCtrlC(cancelled => coordinator.LaunchWhenReleased(
+                new HandoffWait(OfferedHandoffWait, () => view.Cancelled || cancelled(), view.Update)));
+        }
+    }
+
+    private static LaunchOutcome WaitWithCtrlC(Func<Func<bool>, LaunchOutcome> wait)
+    {
+        using var cancel = new CancellationTokenSource();
+        ConsoleCancelEventHandler stop = (_, e) =>
+        {
+            e.Cancel = true;
+            cancel.Cancel();
+        };
+        // The windowless launcher may have no console to register with; its waiting window has Cancel instead.
+        bool registered;
+        try
+        {
+            Console.CancelKeyPress += stop;
+            registered = true;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or PlatformNotSupportedException)
+        {
+            registered = false;
+        }
+        try { return wait(() => cancel.IsCancellationRequested); }
+        finally { if (registered) Console.CancelKeyPress -= stop; }
     }
 
     private static TimeSpan WaitSeconds(string? value)
@@ -413,6 +479,15 @@ internal static class SessionCommands
     {
         bool accept = args.Flag("--accept-library-changes");
         args.RequireAllUsed();
+        return FinishOwnSession(output, accept);
+    }
+
+    /// <summary>
+    /// The finish of this PC's unfinished session, as <c>finish</c> runs it; also run right after a cloud-primary
+    /// <c>enroll --apply</c> hands its session over. Exit 0 when Ready, 3 while pending, 1 when blocked.
+    /// </summary>
+    internal static int FinishOwnSession(TextWriter output, bool accept = false)
+    {
         var context = Load();
         using var instance = SingleInstance();
         var shutdown = new SessionShutdown(new SystemClock());
@@ -557,7 +632,7 @@ internal static class SessionCommands
 
     private static (SessionCoordinator, CoordinationStore, RcloneClipMount) Coordinator(Context context, bool acceptChanges,
         bool replaceLocal = false, Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
-        string? launchLink = null, Action<SessionProgress>? progress = null, Func<LaunchPreflight>? preflight = null)
+        string? launchLink = null, Action<SessionProgress>? progress = null, Func<LaunchPreflight>? preflight = null, bool askOwnerToSwitch = true)
     {
         var clock = new SystemClock();
         var store = CoordinationStore.Open(context.Config, () => shutdown?.RequireTime());
@@ -572,8 +647,12 @@ internal static class SessionCommands
             context.Config.StorageMode == StorageMode.Cloud ? context.Config.CaptureFolder : null);
         var checker = PrimaryStorage.Checker(context.Config, context.State, () => shutdown?.RequireTime());
         var options = new SessionOptions(context.Device, context.Config.Capture, context.Install.Versions,
-            TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal);
-        return (new SessionCoordinator(store, library, mount, new MedalProcess(context.Install, launchLink), checker, clock, options,
+            TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal)
+        {
+            EnrollmentFolder = EnrollmentOwnership.PendingFolder(context.State.Root),
+            AskOwnerToSwitch = askOwnerToSwitch,
+        };
+        return (new SessionCoordinator(store, library, mount, new MedalProcess(context.Install, launchLink, capture: context.Config.Capture), checker, clock, options,
             () => NativeBackupCompatibility.Prepare(context.Config, context.Install, context.State),
             reviewLibraryChanges is null ? null : review =>
             {

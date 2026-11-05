@@ -48,6 +48,15 @@ function Assert-Check([bool]$Condition, [string]$Message) {
 function Run-Setup {
     return (Start-Process -FilePath $setup -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru).ExitCode
 }
+# Windows can hold an executable for a moment after it exits (for example while antivirus scans it),
+# so a write right after running it may fail with a sharing violation. Retry for up to 10 seconds.
+function Invoke-WhenUnlocked([scriptblock]$Action) {
+    for ($attempt = 1; ; $attempt++) {
+        try { & $Action; return }
+        catch [System.IO.IOException] { if ($attempt -ge 20) { throw } }
+        Start-Sleep -Milliseconds 500
+    }
+}
 try {
     Assert-Check ((Run-Setup) -eq 0) 'isolated native installation succeeds'
     Assert-Check (Test-Path -LiteralPath $key) 'unique Installed apps registration exists'
@@ -80,10 +89,10 @@ try {
     Assert-Check ($LASTEXITCODE -eq 0) 'installed CLI validates the isolated candidate without accessing a live library'
     $sentinel = Join-Path $app 'unowned-user-file.txt'
     'preserve me' | Set-Content -LiteralPath $sentinel
-    Set-Content -LiteralPath (Join-Path $app 'bin/medal-sync.exe') -Value 'synthetic damaged executable'
+    Invoke-WhenUnlocked { Set-Content -LiteralPath (Join-Path $app 'bin/medal-sync.exe') -Value 'synthetic damaged executable' }
     Assert-Check ((Run-Setup) -eq 0) 'native in-place repair recovers a damaged CLI using the registered version'
     Assert-Check ((Get-FileHash -LiteralPath (Join-Path $app 'bin/medal-sync.exe')).Hash -eq (Get-FileHash -LiteralPath (Join-Path $payload 'medal-sync.exe')).Hash) 'repair restores the verified CLI bytes'
-    Remove-Item -LiteralPath (Join-Path $app 'bin/medal-sync.exe')
+    Invoke-WhenUnlocked { Remove-Item -LiteralPath (Join-Path $app 'bin/medal-sync.exe') }
     Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value '99.0.0'
     try { Assert-Check ((Run-Setup) -ne 0) 'native setup refuses a registered downgrade even when the CLI is missing' }
     finally { Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value $version }

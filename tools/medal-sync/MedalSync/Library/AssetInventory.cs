@@ -37,6 +37,9 @@ internal interface IFileProbe
     /// <param name="path">The file to inspect.</param>
     /// <param name="root">The allowed root; every directory between it and the file is checked for reparse points.</param>
     FileProbeResult Probe(WindowsPath path, WindowsPath root);
+
+    /// <summary>A probe for one pass over many files. It may answer from folder listings it reads once.</summary>
+    IFileProbe ForBatch() => this;
 }
 
 internal sealed record AssetReport(IReadOnlyList<AssetStatus> Items)
@@ -119,6 +122,7 @@ internal static class AssetInventory
     /// <summary>Checks each reference against the allowed roots and the filesystem.</summary>
     public static AssetReport Check(IEnumerable<AssetReference> references, IReadOnlyList<WindowsPath> allowedRoots, IFileProbe probe)
     {
+        probe = probe.ForBatch();
         var items = new List<AssetStatus>();
         foreach (var reference in references)
         {
@@ -171,5 +175,64 @@ internal sealed class FileSystemProbe : IFileProbe
         bool isDirectory = !file.Exists && Directory.Exists(path.Display);
         return new FileProbeResult(file.Exists || isDirectory, isDirectory, file.Exists ? file.Length : 0,
             file.Exists ? file.LastWriteTimeUtc : default, reparse);
+    }
+
+    public IFileProbe ForBatch() => new ListedFileSystemProbe(this);
+}
+
+/// <summary>
+/// The real filesystem for a pass over many files. Each folder is listed once and files are looked up in that
+/// listing, so a share costs one round trip per folder instead of several per file. Whatever a listing cannot
+/// answer for certain (a folder that cannot be listed, a name that is absent, ambiguous or a reparse point) is
+/// probed directly, so "missing" and "reparse point" always come from the filesystem itself.
+/// </summary>
+internal sealed class ListedFileSystemProbe(IFileProbe direct) : IFileProbe
+{
+    private static readonly EnumerationOptions AllEntries = new()
+    {
+        AttributesToSkip = 0,
+        IgnoreInaccessible = false,
+        RecurseSubdirectories = false,
+        ReturnSpecialDirectories = false,
+    };
+
+    /// <summary>Folder listings by path; null when the folder could not be listed. A null entry is an ambiguous name.</summary>
+    private readonly Dictionary<string, Dictionary<string, FileSystemInfo?>?> _folders = new(StringComparer.OrdinalIgnoreCase);
+
+    public FileProbeResult Probe(WindowsPath path, WindowsPath root)
+    {
+        if (path.Segments.Count <= root.Segments.Count || !path.IsWithin(root)) return direct.Probe(path, root);
+        var folder = root;
+        FileSystemInfo? entry = null;
+        foreach (string segment in path.Segments.Skip(root.Segments.Count))
+        {
+            if (List(folder) is not { } listing || !listing.TryGetValue(segment, out entry) || entry is null
+                || entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                return direct.Probe(path, root);
+            folder = folder.Append(segment);
+        }
+        return entry is FileInfo file
+            ? new FileProbeResult(true, false, file.Length, file.LastWriteTimeUtc, false)
+            : new FileProbeResult(true, true, 0, default, false);
+    }
+
+    private Dictionary<string, FileSystemInfo?>? List(WindowsPath folder)
+    {
+        if (_folders.TryGetValue(folder.Display, out var cached)) return cached;
+        Dictionary<string, FileSystemInfo?>? listing = new(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var item in new DirectoryInfo(folder.Display).EnumerateFileSystemInfos("*", AllEntries))
+            {
+                // Two names that differ only in case cannot be told apart here.
+                if (!listing.TryAdd(item.Name, item)) listing[item.Name] = null;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            listing = null;
+        }
+        _folders[folder.Display] = listing;
+        return listing;
     }
 }

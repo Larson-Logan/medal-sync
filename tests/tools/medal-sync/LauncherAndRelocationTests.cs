@@ -122,9 +122,9 @@ public sealed class LauncherAndRelocationTests : IDisposable
     }
 
     [Fact]
-    public void Launcher_WaitsLongerForTheServerAtSignIn()
+    public void Launcher_WaitsLongerForTheServerAtSignInAndDoesNotAskTheOwnerToSwitch()
     {
-        Assert.Equal(["launch", "--wait-for-server", "120"], Launcher.LaunchArguments(new LauncherRequest(true, null)));
+        Assert.Equal(["launch", "--wait-for-server", "120", "--no-switch-request"], Launcher.LaunchArguments(new LauncherRequest(true, null)));
         Assert.Equal(["launch", "--wait-for-server", "20"], Launcher.LaunchArguments(new LauncherRequest(false, null)));
         Assert.Equal(["launch", "--wait-for-server", "20", "--medal-link", "medal://x"],
             Launcher.LaunchArguments(new LauncherRequest(false, "medal://x")));
@@ -293,6 +293,45 @@ public sealed class LauncherAndRelocationTests : IDisposable
             if (shortcut is not null) Marshal.FinalReleaseComObject(shortcut);
             Marshal.FinalReleaseComObject(shell);
         }
+    }
+
+    [Fact]
+    public void StartupEntries_RememberOnlyAnUnchangedShortcutAndRepairItOnceMedalRewritesIt()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string path = _fixture.PathFor("Medal Rewritten.lnk");
+        string launcher = _fixture.PathFor("medal-sync-launch.exe");
+        string medal = @"C:\Medal\current\Medal.exe";
+        object shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", throwOnError: true)!)!;
+        string Target()
+        {
+            object link = ((dynamic)shell).CreateShortcut(path);
+            try { return (string)((dynamic)link).TargetPath; }
+            finally { Marshal.FinalReleaseComObject(link); }
+        }
+        try
+        {
+            StartupEntries.RetargetShortcut(path, launcher);
+            Assert.False(StartupEntries.RepairChangedShortcut(path, launcher));
+            Assert.False(StartupEntries.RepairChangedShortcut(path, launcher));
+
+            // Medal recreates its shortcut: the remembered bytes no longer match, so it is checked and repaired.
+            StartupEntries.RetargetShortcut(path, medal);
+            Assert.True(StartupEntries.RepairChangedShortcut(path, launcher));
+            Assert.Equal(launcher, Target(), ignoreCase: true);
+            Assert.False(StartupEntries.RepairChangedShortcut(path, launcher));
+            Assert.False(StartupEntries.RepairChangedShortcut(path, launcher));
+
+            // A result for one launcher is never reused for another.
+            string moved = _fixture.PathFor("moved", StartupEntries.LauncherFile);
+            Assert.True(StartupEntries.RepairChangedShortcut(path, moved));
+            Assert.Equal(moved, Target(), ignoreCase: true);
+
+            StartupEntries.RetargetShortcut(path, medal);
+            Assert.True(StartupEntries.RepairChangedShortcut(path, moved));
+            Assert.Equal(moved, Target(), ignoreCase: true);
+        }
+        finally { Marshal.FinalReleaseComObject(shell); }
     }
 
     private sealed class StepClock : IClock

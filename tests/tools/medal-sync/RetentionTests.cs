@@ -289,6 +289,37 @@ public sealed class RetentionTests : IDisposable
     }
 
     [Fact]
+    public void KeptLibraryBackupsAreRemovedOnlyByAReviewedRetention()
+    {
+        Commit(_me, Now.AddDays(-300));
+        string Kept(string name, int ageDays)
+        {
+            string folder = Path.Combine(_state.BackupDirectory, DatabaseBackup.KeptPrefix + name);
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, "medal-library.db"), "synthetic");
+            Directory.SetCreationTimeUtc(folder, Now.AddDays(-ageDays).UtcDateTime);
+            return folder;
+        }
+        string oldest = Kept("old", 200);
+        string withinAge = Kept("within-age", 60); // Newer than KeepDays.
+        string recent = Kept("recent", 3);         // The newest Keep folder(s).
+        // The automatic prune of ordinary backups never looks inside these folders.
+        Assert.Empty(DatabaseBackup.Prune(_state.BackupDirectory, MedalFixture.AccountId, keep: 1));
+
+        var plan = Retention().Plan(new RetentionPolicy(1, 90, 30));
+        var kept = plan.Items.Where(i => i.Kind == Platform.Retention.KeptLibrary).Select(i => i.Name).ToArray();
+        Assert.Equal(new[] { "Backups/" + DatabaseBackup.KeptPrefix + "old" }, kept);
+        string review = Platform.Retention.Render(plan);
+        Assert.Contains("kept by --replace-local-library, repair or relocate", review, StringComparison.Ordinal);
+        Assert.Contains("never shared", review, StringComparison.Ordinal);
+
+        Retention().Apply(plan);
+        Assert.False(Directory.Exists(oldest));
+        Assert.True(Directory.Exists(withinAge));
+        Assert.True(Directory.Exists(recent));
+    }
+
+    [Fact]
     public void Plan_WarnsWhenAPcLastPublishedWithAVersionThatDoesNotUnderstandPrunedHistory()
     {
         long older = Commit(_other, Now.AddDays(-300));

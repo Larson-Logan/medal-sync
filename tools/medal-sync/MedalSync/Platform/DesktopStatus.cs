@@ -10,6 +10,17 @@ internal sealed record ProgressEnvelope(int Format, string LibraryId, string Acc
 
 internal sealed record DesktopNotice(string Message, DateTimeOffset At);
 
+internal sealed record CloudRetryCommandResult(int ExitCode, string Output, string Error)
+{
+    public string Message => ExitCode switch
+    {
+        0 => "Cloud copies verified.",
+        3 => "Cloud retry canceled or still pending. Unfinished copies remain pending; retry while Ready.",
+        _ => "Cloud retry needs action. " + (!string.IsNullOrWhiteSpace(Error) ? Error.Trim()
+            : !string.IsNullOrWhiteSpace(Output) ? Output.Trim() : "Check storage and retry while Ready."),
+    };
+}
+
 internal sealed record FinishCommandResult(int ExitCode, string Output, string Error)
 {
     public string? Failure => ExitCode == 0 ? null : !string.IsNullOrWhiteSpace(Error) ? Error.Trim()
@@ -34,11 +45,11 @@ internal sealed record FinishCommandResult(int ExitCode, string Output, string E
 
 internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, DateTimeOffset? ConfirmedAt,
     int? QueuedFiles = null, long? QueuedBytes = null, string? Replica = null, bool CanRetry = false, string? Notice = null,
-    string? LastResult = null)
+    string? LastResult = null, bool Recording = false, bool CanRetryCloudCopies = false)
 {
     public string Title => Phase switch
     {
-        SessionPhase.Active => "Recording / Active",
+        SessionPhase.Active => Recording ? "Recording" : "Medal open",
         SessionPhase.Waiting => "Waiting for another PC",
         SessionPhase.RecoveryNeeded => "Recovery needed",
         SessionPhase.Unknown => "Unknown / unreachable",
@@ -64,13 +75,15 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
     /// while a supervisor runs is an explicit Unknown, never Ready.
     /// </summary>
     internal static DesktopStatus Read(LocalState state, string libraryId, OwnershipRecord journal, DeviceIdentity? device,
-        bool supervisorRunning, DateTimeOffset now)
+        bool supervisorRunning, DateTimeOffset now, IReadOnlyList<CloudCopyCheckStatus>? cloudChecks = null)
     {
         ProgressEnvelope? report = null;
         try { report = Json.ReadFile<ProgressEnvelope>(Path.Combine(state.Root, "desktop-status.json"), "Desktop progress"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Explicit unknown below. */ }
         var status = Resolve(journal, device ?? NoDevice, report, supervisorRunning, now);
         var retry = ReplicaRetryStatus.Read(state, libraryId, now);
+        var pending = StorageReplication.Pending(state, libraryId);
+        status = status with { CanRetryCloudCopies = status.Phase == SessionPhase.Ready && pending.Count > 0 && retry?.Running != true };
         if (status.Phase == SessionPhase.Ready && retry is not null)
             status = status with { Notice = $"Cloud retry (generation {retry.Generation}): {retry.Message}", Replica = retry.Target };
         try
@@ -79,11 +92,13 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
             if (status.Notice is null && now - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
-        if (status.Notice is null && StorageReplication.Pending(state, libraryId) is { Count: > 0 } pending)
-            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending. Run 'medal-sync replicate retry --apply' while Ready, or wait for the next finish." };
         if (status.Notice is null && StorageCheckReport.Outstanding(state, libraryId) is { Count: > 0 } problems)
             status = status with { Notice = "Storage needs attention: " + string.Join(" ", problems.Select(p => p.Detail))
                 + " Run 'medal-sync storage check' after fixing it." };
+        var checkNotice = string.Join(" ", (cloudChecks ?? ReplicaCheckStatus.Read(state, libraryId, now)).SelectMany(c => c.Messages()));
+        if (status.Notice is null && checkNotice.Length > 0) status = status with { Notice = checkNotice };
+        if (status.Notice is null && pending.Count > 0)
+            status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending. Choose Retry cloud copies while Ready, run 'medal-sync replicate retry --apply', or wait for the next finish." };
         return status;
     }
 
@@ -98,7 +113,9 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         var progress = fresh ? report?.Progress : null;
         if (journal.Owner is { } owner && owner.DeviceId != device.DeviceId)
             return new(journal.State == OwnershipState.RecoveryRequired ? SessionPhase.RecoveryNeeded : SessionPhase.Waiting,
-                $"Quit Medal and finish the handoff on {owner.DisplayName}. Reopen Medal here after that PC is Ready.", now);
+                Ownership.IsFinishing(journal.State)
+                    ? $"{owner.DisplayName} is finishing its uploads and hands off the library by itself. Open Medal here after it is Ready."
+                    : $"Quit Medal and finish the handoff on {owner.DisplayName}. Reopen Medal here after that PC is Ready.", now);
         if (journal.State == OwnershipState.Clean)
         {
             // An operation may be preparing to acquire ownership. Never flash Ready during startup.
@@ -124,7 +141,8 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         }
         if (progress is null || report is null || progress.SessionId != journal.SessionId) return Unknown(report?.ConfirmedAt);
         if (!Enum.IsDefined(progress.Phase) || progress.Phase is SessionPhase.Ready or SessionPhase.Waiting) return Unknown(report.ConfirmedAt);
-        return new(progress.Phase, progress.NextAction, report.ConfirmedAt, progress.QueuedFiles, progress.QueuedBytes, progress.Replica);
+        return new(progress.Phase, progress.NextAction, report.ConfirmedAt, progress.QueuedFiles, progress.QueuedBytes, progress.Replica,
+            Recording: progress.Phase == SessionPhase.Active && progress.Recording);
     }
 }
 
@@ -168,11 +186,81 @@ internal sealed class DesktopStatusPublisher : IDisposable
             try
             {
                 _report = _report with { ConfirmedAt = DateTimeOffset.UtcNow };
-                AtomicFile.Replace(_path, Json.Serialize(_report));
+                // Progress is rewritten every few seconds and a reader treats an unreadable file as unknown, so it is
+                // not forced to disk each time. An outcome is kept as advice after the supervisor exits, so it is.
+                AtomicFile.Replace(_path, Json.Serialize(_report), durable: _report.Progress.IsOutcome);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Advisory only. */ }
         }
     }
 
     public void Dispose() => _heartbeat.DisposeAsync().AsTask().GetAwaiter().GetResult();
+}
+
+/// <summary>
+/// The status view's reader, called every few seconds for as long as the view runs. While config.json is unchanged
+/// it keeps the parsed configuration and the open journal store, so a read costs only the journal and the local
+/// status files. Opening the store again on every read is what costs: in cloud mode it starts rclone twice (for the
+/// sign-in token and the Drive folder) and makes two extra Drive requests. The cloud connection, with its token and
+/// folder, is kept even while opening fails, so an outage costs one failed request per read. Generations never change
+/// once published, so the committed manifest is checked once per generation. An outage keeps everything; any other
+/// failure drops the store and the connection, so the next read opens the library afresh.
+/// </summary>
+internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> supervisorRunning,
+    Func<MedalSyncConfig, CloudCoordination>? connect = null)
+{
+    private readonly object _gate = new();
+    private byte[]? _configBytes;
+    private MedalSyncConfig? _config;
+    private CloudCoordination? _cloud;
+    private CoordinationStore? _store;
+    private long? _checkedGeneration;
+
+    public DesktopStatus Read()
+    {
+        lock (_gate)
+        {
+            var local = state();
+            var config = Config(local.ConfigPath);
+            var device = local.ExistingDevice();
+            if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
+            OwnershipRecord journal;
+            try
+            {
+                _store ??= Open(config);
+                journal = _store.ReadJournal();
+                if (_checkedGeneration != journal.CommittedGeneration)
+                {
+                    _ = _store.Generations.ReadManifest(journal.CommittedGeneration);
+                    _checkedGeneration = journal.CommittedGeneration;
+                }
+            }
+            catch (Exception ex) when (ex is not IOException)
+            {
+                Forget();
+                throw;
+            }
+            var now = DateTimeOffset.UtcNow;
+            return DesktopStatus.Read(local, config.LibraryId, journal, device, supervisorRunning(), now,
+                ReplicaCheckStatus.Read(local, config.LibraryId, now, config.Replication?.Targets ?? []));
+        }
+    }
+
+    private CoordinationStore Open(MedalSyncConfig config) => config.StorageMode != StorageMode.Cloud
+        ? CoordinationStore.Open(config)
+        : CoordinationStore.OpenCloud(config, _cloud ??= (connect ?? (c => CloudCoordination.For(c)))(config));
+
+    private MedalSyncConfig Config(string path)
+    {
+        byte[] bytes = Json.ReadBytes(path);
+        if (_config is not null && _configBytes is not null && bytes.AsSpan().SequenceEqual(_configBytes)) return _config;
+        Forget();
+        (_config, _configBytes) = (null, null);
+        // Parsed from its own read: if the file changes in between, the next read sees different bytes and loads again.
+        var config = MedalSyncConfig.Load(path);
+        (_config, _configBytes) = (config, bytes);
+        return config;
+    }
+
+    private void Forget() => (_store, _cloud, _checkedGeneration) = (null, null, null);
 }

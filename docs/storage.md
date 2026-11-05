@@ -113,7 +113,10 @@ drive fetches up to 256 MiB ahead of the player into the cache, so most clips
 download completely soon after playback starts and a slow or distant link
 (a VPN, tunnel or another network) does not run out after a few seconds.
 Played clips stay in the cache for `mount.cacheMaxAgeSeconds` after they are
-closed. If the connection to the server is slower than the clip's bitrate,
+closed (an hour for new configurations; raise an older configuration's `300`
+to keep clips you replay on the SSD). The drive recognizes a cached clip by its
+size and modification time, so opening or seeking in one never re-reads the
+whole file from the server first. If the connection to the server is slower than the clip's bitrate,
 let the clip load for a moment before playing, or play it again once cached.
 
 ## Keep a local copy and upload to the server
@@ -224,11 +227,11 @@ device. An existing journal is never reinitialized.
 On the other PC, configure `--library-id` with the first PC's ID, the same
 `--cloud-journal-id`, Drive folder and capture folder. Choose separate local
 media/cache/history folders and authorize rclone on that PC. **Do not run init
-or enroll again.** Launch Medal through Medal Sync. An empty library joins
+again.** Launch Medal through Medal Sync. An empty library joins
 automatically; existing unshared clips refuse replacement and remain protected.
-Export and preserve them before choosing the existing explicit
-`launch --replace-local-library` workflow. There is no automatic union of
-unshared libraries in cloud mode.
+To keep them, merge them with `enroll` instead
+([enroll into an rclone primary](#enroll-a-pc-with-existing-clips-into-an-rclone-primary)).
+`launch --replace-local-library` sets them aside instead (a backup is kept).
 
 Launch restores only library tables, backs up the database, and updates the
 capture-folder setting to the configured virtual drive when necessary; other
@@ -272,9 +275,29 @@ A PC that still points at the old primary refuses to start if the library
 needs clips that are missing there and locally. Nothing is lost. The old
 primary is never modified or deleted; remove it yourself once every PC uses the new one.
 
-Enrollment copies, spike promotion and persistent media refresh (`refresh-media`)
-work on folder primaries only. Cloud mode supports first-PC relocation into its
-persistent local copy before initialization; other rclone primaries refuse relocation.
+Spike promotion and persistent media refresh (`refresh-media`) work on folder
+primaries only. Cloud mode supports first-PC relocation into its persistent
+local copy before initialization; other rclone primaries refuse relocation.
+
+### Enroll a PC with existing clips into an rclone primary
+
+`enroll` works with an rclone primary such as `onedrive:MedalSync` or
+`sftp-home:Media/Videos`, and in cloud mode. The preview reviews the same
+lossless union as with an SMB primary. It also lists the primary and this PC's
+local copy: a file already on the primary at an enrollment destination is a
+conflict, and so is a local-copy file with different bytes. If the primary
+cannot be reached, the preview waits (exit 3) and changes nothing.
+
+`enroll --apply` copies this PC's files into its persistent local copy
+(`localCopyRoot`) instead of a share. It first downloads committed clips this
+PC lacks, as a launch would. It then restores the merged library and hands its
+still-owned session to the normal finish, which runs right away. Enrollment
+itself never publishes: only that finish uploads and byte-verifies every
+referenced clip on the primary, publishes the union and releases ownership. If
+the primary is offline at that finish, the usual pending wait applies. This PC
+keeps the library and its clips, and the switch finishes when storage is back.
+`enroll recover` works as for an SMB primary until the session is handed to
+finish; after that, it only runs the finish.
 
 ## Add OneDrive, Dropbox or Google Drive
 
@@ -434,6 +457,11 @@ Keep these receipts private: they name media. Their absence is safe.
 
 ### Retry cloud copies while Ready
 
+Open the status panel and choose **Retry cloud copies** to retry every pending
+optional copy. The button is available only while Ready with copies pending
+and no retry running. The panel shows progress and the result; closing the
+panel keeps the retry running. A canceled retry keeps unfinished copies pending.
+
 With Medal quit and the library Ready, preview pending optional cloud copies:
 
 ```powershell
@@ -486,11 +514,29 @@ handoff reads every file back there, and an optional target is queued for
 `replicate retry`. A check never counts as the verification a handoff needs.
 Exit codes: 0 passed, 1 missing or different files, 3 incomplete or canceled.
 
+`status --json` lists the last check for each configured copy, including required
+copies. Text status and the status panel report failed and incomplete checks.
+A failed check reports missing and
+different counts and explains that the next handoff reads every referenced file
+back. Incomplete checks show the cause and next step; sign-in failures ask you
+to sign in again. A newer incomplete attempt does not hide earlier unresolved
+damage. Notices yield to higher-priority panel notices, including active retry
+progress.
+
+A passing check clears the warning. A later successful handoff clears it only
+for the targets named in this library's verification receipt; a handoff that
+deferred that copy does not clear it. Results remain historical in JSON and
+`replica history`. Checks for other libraries are ignored. Diagnostics include
+tokenized targets, results, counts and coarse ages, without target names, paths,
+remotes, provider errors or clip details. Status and diagnostics only read these
+local records; text/JSON status and diagnostics retain them while shared storage
+is offline.
+
 ### Clean up a cloud copy
 
 Files the library no longer references stay at a cloud copy, as does version
 history when `replication.conflictPolicy` is `version`. Cleanup is a reviewed,
-two-step operation for optional targets only:
+two-step operation for optional or required targets:
 
 ```powershell
 medal-sync replica prune --target offsite --out C:\Private\offsite-cleanup.json
@@ -505,7 +551,8 @@ uncommitted generation from that period, the storage marker, database folders
 or anything that is not clip media. Version history under
 `.medal-sync-history/` is planned only with `--history-older-than DAYS`, and
 only whole, dated attempts. The review file names private paths: keep it on
-this PC.
+this PC. For a required copy, the review identifies it as required and confirms
+that referenced files are not touched.
 
 Cleanup refuses duplicate or case-conflicting paths, unsafe names, links and
 unreadable listing entries before saving a review or changing the destination.
@@ -526,8 +573,14 @@ being purged. Each invocation lists only `.medal-sync-trash/`, once. With
 batches marked `kept` remain even if they cross the age limit during reporting.
 A missing trash folder is empty. Age counts from the move, not the review, so
 applying an old review still gets the full wait. Apply writes an empty `.medal-sync-moved-<time>`
-marker into the batch for this; batches without one are kept. Required targets
-are refused.
+marker into the batch for this; batches without one are kept.
+
+Applying cleanup to a required copy drops this PC's incremental verification
+receipt before moving files, even if the move is interrupted. Applying a
+nonempty trash purge drops it too. This PC's next handoff reads every referenced
+file back at that destination before releasing ownership. Other PCs' private
+receipts are unchanged; cleanup protects the referenced files they verify.
+Cleaning an rclone primary is not supported by these commands.
 
 ### Check sign-in before recording
 
@@ -693,10 +746,12 @@ It always keeps the committed head, its `--keep` newest committed ancestors,
 anything from the last `--keep-days` days, the newest committed generation each
 PC published and the highest-numbered generation folder. Uncommitted attempts
 and interrupted `.staging-*` folders are kept for `--grace-days`. On this PC it
-keeps the newest `--keep` accepted-change reviews, media refresh backups and
-aborted-start folders plus any from the last `--keep-days` days; aborted-start
-evidence is kept while its cache still holds files. Clip media and the library
-database are never touched.
+keeps the newest `--keep` accepted-change reviews, media refresh backups,
+aborted-start folders and kept library backups (`Backups/kept-library-*`, from
+`launch --replace-local-library`, `repair` and `relocate`) plus any from the
+last `--keep-days` days; aborted-start evidence is kept while its cache still
+holds files. A kept library backup can hold entries that were never shared, and
+the review says so. Clip media and the live library database are never touched.
 
 Apply refuses unless the library is exactly as reviewed. It holds the journal
 writer lock and the single-instance lock, so no PC can start meanwhile. It first

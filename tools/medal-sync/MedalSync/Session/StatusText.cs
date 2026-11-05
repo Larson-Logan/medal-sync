@@ -14,7 +14,7 @@ internal static class StatusText
             OwnershipState.RecoveryRequired => "Recovery needed",
             _ when !mine => "Waiting for the other PC",
             OwnershipState.Starting => "Starting",
-            OwnershipState.Active => "Recording/Active",
+            OwnershipState.Active => "Active (Medal open)",
             OwnershipState.Draining => "Uploading",
             OwnershipState.Publishing => "Switching PC",
             _ => journal.State.ToString(),

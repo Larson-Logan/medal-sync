@@ -4,7 +4,8 @@
 programs. Every merge to `main` publishes a release tagged
 `vMAJOR.MINOR.PATCH.NN`, where `NN` is a hotfix counter: `.00` when the merge
 changes `VersionPrefix`, otherwise one more than the last release of that
-version.
+version. Every merge to `dev` also publishes a beta of the next release, such
+as `v1.3.1.02-beta.1`; see [beta releases](#beta-releases).
 [Versions and schemas](versioning.md) explains which part to raise and how file
 formats and Medal schemas are versioned.
 
@@ -12,7 +13,8 @@ Record user-visible changes under `## Unreleased` in `CHANGELOG.md` as they
 merge to `dev`. Before promoting, rename that heading on `dev` to the release
 the promotion will publish, such as `## 1.4.0 — DATE` for a new version or
 `## 1.3.0.01 — DATE` for a hotfix, and start a new empty `## Unreleased`
-above it. The release workflow does not edit the changelog.
+above it. The release workflow does not edit the changelog; the
+[promotion check](#promote-dev-to-main) refuses a promotion that skips this.
 
 ## Build locally
 
@@ -85,9 +87,6 @@ of the merged branch, because the squash commit replaces the original commits. D
 testing; branches need not be up to date to merge, and validation tests the
 merge result.
 
-To promote, open a pull request from `dev` to `main` and merge it once
-`validate` is green. Its title is free-form, and the title check labels it
-`promotion` so release notes skip it. Fix anything it finds on `dev` first.
 The branch and tag rules are kept in
 [.github/rulesets](../.github/rulesets); see
 [security maintenance](security-maintenance.md#branches-tags-and-actions).
@@ -104,6 +103,33 @@ add `--apply` to delete the branch. Local clones should set
 `git config fetch.prune true` to discard deleted remote-tracking references on
 fetch; local topic branches and worktrees require separate cleanup after
 checking for unmerged commits and local edits.
+
+### Promote dev to main
+
+To promote, open a pull request from `dev` to `main` and merge it once
+`validate` is green. Its title is free-form, and the title check labels it
+`promotion` so release notes skip it. Fix anything it finds on `dev` first.
+
+On every pull request into `main`, validation runs the
+[promotion check](../scripts/check-promotion.py) before any suite. It compares
+the `dev` commit with `main` and fails when:
+
+- a squashed pull request in the promotion has a breaking title (`type!:`)
+  and `VersionPrefix` does not raise MAJOR, or a `feat` title and it does not
+  raise MINOR;
+- `VersionPrefix` is lower than on `main`, or already released;
+- `CHANGELOG.md` still has entries under `## Unreleased`, or its newest
+  heading does not name the release this promotion publishes, such as
+  `## 1.4.0 — DATE` for a new version or `## 1.4.0.01 — DATE` for a hotfix.
+  A release with only internal changes still needs a heading that says so.
+
+The check chooses the version as the release workflow does and names it in
+the run summary. Preview it before opening the promotion:
+
+```powershell
+git fetch origin main dev --tags
+python scripts/check-promotion.py --main origin/main --dev origin/dev
+```
 
 ## GitHub pipeline
 
@@ -159,7 +185,9 @@ Every promotion to `main` is a release. To start a new version, raise
 then promote `dev` to `main`; that release is `.00`. To ship a hotfix, merge
 the fix to `dev` and promote it without touching `VersionPrefix`; it is
 released as the next number, such as `.01`. Changing `VersionPrefix` to a
-version that already has a release is refused.
+version that already has a release is refused. A hotfix carries fixes only:
+once `dev` holds a `feat` or breaking pull request, the
+[promotion check](#promote-dev-to-main) requires a new MINOR or MAJOR version.
 
 The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) was
 the three-part bridge `v1.3.0`, because update checks in 1.2.0 and earlier
@@ -234,10 +262,39 @@ closes that milestone once it is empty. Milestones are titled
 
 Releases are published without a manual review. `validate` on the promotion
 pull request gates `main`, and the release run's own uncached validation of
-every suite gates publishing. Drafts and prereleases are invisible
-to automatic update checks. A published stable setup is advertised on the
+every suite gates publishing. Drafts are invisible to automatic update
+checks, and prereleases are too unless a PC opts in to
+[betas](#beta-releases). A published stable setup is advertised on the
 next desktop launch; installation stays
 explicit and verifies Ready status. Publisher code signing is not configured.
 
 Repository visibility, branch/tag rules and vulnerability reporting remain
 separate GitHub settings. No build or test deploys onto a live library.
+
+## Beta releases
+
+The [beta workflow](../.github/workflows/beta.yml) publishes every push to
+`dev` as a GitHub prerelease of the release that promoting `dev` would publish
+next, tagged `vMAJOR.MINOR.PATCH.NN-beta.N`, such as `v1.3.1.02-beta.3`.
+[Versions and schemas](versioning.md#betas) explains the numbering. It can also
+be started from **Run workflow** on the Actions tab for `dev`; it never builds
+another branch.
+
+It works like the release workflow. Runs never overlap, and a queued newer push
+replaces an older one; it uses its own concurrency group, so a beta never
+replaces a queued release. It does nothing when the commit is no longer the tip
+of `dev` or already has a release. Otherwise it passes the beta label to the
+full validation workflow, which checks the commit is on `dev`, builds both
+packages with that version and no caches and runs every suite. The publish job
+then verifies, attests and uploads the tested files to a draft with notes since
+the latest stable release, and publishes it with the same app token, marked as a
+prerelease and never as Latest. It refuses to publish when that beta, or the
+release it leads up to, already exists, so a beta never follows its own
+release; choose **Run workflow** on `dev` to take the next number.
+
+Because each push to `dev` is validated twice, once by validation itself and
+once for its beta, both on free standard runners, a beta appears about as soon
+as the push's own validation finishes. Publishing a beta never closes a
+milestone, and the release workflow ignores betas when it chooses the next
+hotfix number. Release notes for a stable release start at the previous stable
+release, never at a beta. Betas are never deleted automatically.

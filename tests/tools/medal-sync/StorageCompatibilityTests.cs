@@ -279,6 +279,20 @@ public sealed class StorageCompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void AtomicReplaceWithoutFlushStillReplacesInOneStep()
+    {
+        string path = _fixture.PathFor("desktop-status.json");
+        File.WriteAllText(path, "old");
+
+        AtomicFile.Replace(path, "new"u8, durable: false);
+        AtomicFile.Replace(_fixture.PathFor("created.json"), "first"u8, durable: false);
+
+        Assert.Equal("new", File.ReadAllText(path));
+        Assert.Equal("first", File.ReadAllText(_fixture.PathFor("created.json")));
+        Assert.DoesNotContain(Directory.EnumerateFiles(_fixture.PathFor()), f => f.EndsWith(".tmp", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AtomicReplaceStillReportsALockThatDoesNotClear()
     {
         if (!OperatingSystem.IsWindows()) return;

@@ -14,6 +14,9 @@ internal sealed record ReleaseAsset(string Version, string Name, string Url, str
 internal static partial class ReleaseUpdate
 {
     internal const string LatestUrl = "https://api.github.com/repos/Larson-Logan/medal-sync/releases/latest";
+    // Recent releases, newest first, for PCs that opted in to betas. The newest version is always among
+    // them: a beta leads up to a version not yet released, and that release follows its betas.
+    internal const string RecentUrl = "https://api.github.com/repos/Larson-Logan/medal-sync/releases?per_page=10";
     internal static readonly TimeSpan LaunchTimeout = TimeSpan.FromSeconds(2);
 
     // vMAJOR.MINOR.PATCH.NN, where NN is the two-digit hotfix counter. Releases
@@ -21,20 +24,82 @@ internal static partial class ReleaseUpdate
     [GeneratedRegex(@"\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0[0-9]|[1-9][0-9]+))?\z")]
     private static partial Regex StableTag();
 
+    // vMAJOR.MINOR.PATCH.NN-beta.N, a beta from dev of the release it leads up to.
+    [GeneratedRegex(@"\Av(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0[0-9]|[1-9][0-9]+)-beta\.[1-9][0-9]*\z")]
+    private static partial Regex BetaTag();
+
+    // Any build version: a release, or a beta MAJOR.MINOR.PATCH.NN-beta.N.
+    [GeneratedRegex(@"\A([0-9]+(\.[0-9]+){2,3})(-beta\.([1-9][0-9]*))?\z")]
+    private static partial Regex BuildPattern();
+
+    /// <summary>Orders builds by their numbers, then each beta before its release, then betas by number.</summary>
+    private readonly record struct BuildVersion(Version Numbers, int Beta) : IComparable<BuildVersion>
+    {
+        public int CompareTo(BuildVersion other)
+        {
+            int order = Numbers.CompareTo(other.Numbers);
+            return order != 0 ? order : Beta.CompareTo(other.Beta);
+        }
+
+        public static bool TryParse(string value, out BuildVersion version)
+        {
+            version = default;
+            var match = BuildPattern().Match(value);
+            if (!match.Success || !Version.TryParse(match.Groups[1].Value, out var numbers)) return false;
+            // A release sorts after every beta of it.
+            int beta = int.MaxValue;
+            if (match.Groups[4].Success && !int.TryParse(match.Groups[4].ValueSpan, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out beta)) return false;
+            version = new(numbers, beta);
+            return true;
+        }
+    }
+
+    /// <summary>True when <paramref name="available"/> is newer than the installed build. A beta is older than its release.</summary>
+    internal static bool IsNewer(string available, string installed) =>
+        BuildVersion.TryParse(available, out var candidate) && BuildVersion.TryParse(installed, out var current)
+        && candidate.CompareTo(current) > 0;
+
     internal static string? AvailableVersion(string json, string installed)
     {
         var asset = PublishedAsset(json);
-        return asset is not null && Version.TryParse(installed, out var current)
-            && Version.Parse(asset.Version) > current ? asset.Version : null;
+        return asset is not null && IsNewer(asset.Version, installed) ? asset.Version : null;
     }
 
+    /// <summary>One release from the latest-release endpoint. Only a published stable release qualifies.</summary>
     internal static ReleaseAsset? PublishedAsset(string json, bool requireSetup = false)
     {
         using var document = JsonDocument.Parse(json);
-        var release = document.RootElement;
-        if (release.GetProperty("draft").GetBoolean() || release.GetProperty("prerelease").GetBoolean()) return null;
+        return PublishedAsset(document.RootElement, requireSetup, allowBeta: false);
+    }
+
+    /// <summary>
+    /// The newest qualifying release in a list of releases, for a PC that opted in to betas: a published stable
+    /// release or a published beta prerelease, whichever version is newer.
+    /// </summary>
+    internal static ReleaseAsset? NewestAsset(string json, bool requireSetup = false)
+    {
+        using var document = JsonDocument.Parse(json);
+        ReleaseAsset? newest = null;
+        BuildVersion newestVersion = default;
+        foreach (var release in document.RootElement.EnumerateArray())
+        {
+            var asset = PublishedAsset(release, requireSetup, allowBeta: true);
+            if (asset is null || !BuildVersion.TryParse(asset.Version, out var version)) continue;
+            if (newest is null || version.CompareTo(newestVersion) > 0) (newest, newestVersion) = (asset, version);
+        }
+        return newest;
+    }
+
+    private static ReleaseAsset? PublishedAsset(JsonElement release, bool requireSetup, bool allowBeta)
+    {
+        if (release.GetProperty("draft").GetBoolean()) return null;
         string? tag = release.GetProperty("tag_name").GetString();
-        if (tag is null || !StableTag().IsMatch(tag) || !Version.TryParse(tag[1..], out _)) return null;
+        if (tag is null) return null;
+        // A stable tag must be a full release, and a beta tag a prerelease that this PC opted in to.
+        bool qualifies = release.GetProperty("prerelease").GetBoolean()
+            ? allowBeta && BetaTag().IsMatch(tag) : StableTag().IsMatch(tag);
+        if (!qualifies || !BuildVersion.TryParse(tag[1..], out _)) return null;
         string setupName = $"medal-sync-{tag[1..]}-setup-win-x64.exe";
         bool hasSetup = release.GetProperty("assets").EnumerateArray().Any(a => a.GetProperty("name").GetString() == setupName);
         if (requireSetup && !hasSetup) return null;
@@ -50,18 +115,38 @@ internal static partial class ReleaseUpdate
         return new ReleaseAsset(tag[1..], assetName, assetUrl, digest[7..], size);
     }
 
-    internal static async Task<string?> CheckAsync(HttpClient client, string installed, CancellationToken cancellationToken)
-    {
-        var asset = await LatestAsync(client, cancellationToken).ConfigureAwait(false);
-        return asset is not null && Version.TryParse(installed, out var current)
-            && Version.Parse(asset.Version) > current ? asset.Version : null;
-    }
+    /// <summary>
+    /// Whether this PC opted in to betas with <c>betaUpdates</c> in config.json. Update checks also run before
+    /// configuration, so a missing or unreadable configuration means stable releases only.
+    /// </summary>
+    internal static bool BetaUpdatesEnabled() => BetaUpdatesEnabled(Config.LocalState.ForCurrentUser().ConfigPath);
 
-    internal static async Task<ReleaseAsset?> LatestAsync(HttpClient client, CancellationToken cancellationToken, bool requireSetup = false)
+    internal static bool BetaUpdatesEnabled(string configPath)
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, LatestUrl);
+            return File.Exists(configPath) && Config.MedalSyncConfig.Load(configPath).BetaUpdates;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException
+            or MedalSyncException or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    internal static async Task<string?> CheckAsync(HttpClient client, string installed, CancellationToken cancellationToken, bool betas = false)
+    {
+        var asset = await LatestAsync(client, cancellationToken, betas: betas).ConfigureAwait(false);
+        return asset is not null && IsNewer(asset.Version, installed) ? asset.Version : null;
+    }
+
+    /// <summary>The newest published release or, with <paramref name="betas"/>, the newest release or beta.</summary>
+    internal static async Task<ReleaseAsset?> LatestAsync(HttpClient client, CancellationToken cancellationToken,
+        bool requireSetup = false, bool betas = false)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, betas ? RecentUrl : LatestUrl);
             request.Headers.UserAgent.ParseAdd("MedalSync-Launcher");
             request.Headers.Accept.ParseAdd("application/vnd.github+json");
             request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
@@ -71,7 +156,8 @@ internal static partial class ReleaseUpdate
             // Bound both declared and actual response size before parsing.
             if (response.Content.Headers.ContentLength > 1024 * 1024) return null;
             await response.Content.LoadIntoBufferAsync(1024 * 1024, cancellationToken).ConfigureAwait(false);
-            return PublishedAsset(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false), requireSetup);
+            string json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            return betas ? NewestAsset(json, requireSetup) : PublishedAsset(json, requireSetup);
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException
             or InvalidOperationException or KeyNotFoundException or FormatException or ArgumentException or OverflowException)
@@ -84,7 +170,8 @@ internal static partial class ReleaseUpdate
         Action<long, long>? progress, CancellationToken cancellationToken)
     {
         // Validate even when called independently of discovery. No caller-selected executable URL or filename.
-        if (!StableTag().IsMatch("v" + asset.Version) || !Version.TryParse(asset.Version, out _)
+        if (!(StableTag().IsMatch("v" + asset.Version) || BetaTag().IsMatch("v" + asset.Version))
+            || !BuildVersion.TryParse(asset.Version, out _)
             || !asset.IsSetup || asset.Url != $"https://github.com/Larson-Logan/medal-sync/releases/download/v{asset.Version}/{asset.Name}"
             || asset.Sha256.Length != 64 || asset.Sha256.Any(c => !char.IsAsciiHexDigit(c))
             || asset.Size is < 1 or > 500 * 1024 * 1024)
@@ -158,7 +245,7 @@ internal static partial class ReleaseUpdate
         return null;
     }
 
-    [GeneratedRegex(@"\Amedal-sync-([0-9]+(\.[0-9]+){2,3})-setup-win-x64\.exe\z")]
+    [GeneratedRegex(@"\Amedal-sync-([0-9]+(\.[0-9]+){2,3}(-beta\.[1-9][0-9]*)?)-setup-win-x64\.exe\z")]
     private static partial Regex SetupFile();
 
     /// <summary>
@@ -167,7 +254,7 @@ internal static partial class ReleaseUpdate
     /// </summary>
     internal static int CleanupDownloads(string root, string installed)
     {
-        if (!Version.TryParse(installed, out var current) || !Directory.Exists(root)) return 0;
+        if (!BuildVersion.TryParse(installed, out var current) || !Directory.Exists(root)) return 0;
         int removed = 0;
         try
         {
@@ -180,7 +267,7 @@ internal static partial class ReleaseUpdate
                     var files = folder.GetFiles();
                     bool installedOnly = files.All(file => !file.Attributes.HasFlag(FileAttributes.ReparsePoint)
                         && SetupFile().Match(file.Name) is { Success: true } match
-                        && Version.TryParse(match.Groups[1].Value, out var version) && version <= current);
+                        && BuildVersion.TryParse(match.Groups[1].Value, out var version) && version.CompareTo(current) <= 0);
                     if (!installedOnly) continue;
                     foreach (var file in files) file.Delete();
                     folder.Delete();
@@ -196,10 +283,11 @@ internal static partial class ReleaseUpdate
     public static void NotifyAtLaunch(Action<string> notify)
     {
         if (OperatingSystem.IsWindows()) CleanupDownloads(DownloadsRoot(), ToolInfo.Version);
+        bool betas = BetaUpdatesEnabled();
         using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
         using var client = new HttpClient(handler) { Timeout = LaunchTimeout };
         using var timeout = new CancellationTokenSource(LaunchTimeout);
-        string? version = CheckAsync(client, ToolInfo.Version, timeout.Token).GetAwaiter().GetResult();
+        string? version = CheckAsync(client, ToolInfo.Version, timeout.Token, betas).GetAwaiter().GetResult();
         if (version is not null)
             notify($"Medal Sync {version} is available. Choose Check for updates in the Medal Sync tray menu. It downloads the verified update and installs it for you after you quit Medal.");
     }

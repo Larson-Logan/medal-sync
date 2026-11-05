@@ -127,6 +127,7 @@ public sealed class ReplicationTests : IDisposable
         var check = ReplicationPlan.Arguments("check", @"E:\Clips", "onedrive:MedalSync/id", "list", "credentials");
         Assert.Contains("--download", check);
         Assert.Contains("--one-way", check);
+        Assert.All(new[] { copy, check }, arguments => Assert.Contains("--use-mmap", arguments));
         Assert.Throws<ArgumentException>(() => ReplicationPlan.Arguments("sync", "source", "target", "list", "config"));
     }
 

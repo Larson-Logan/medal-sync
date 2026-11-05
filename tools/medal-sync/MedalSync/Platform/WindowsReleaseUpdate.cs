@@ -28,13 +28,14 @@ internal static class WindowsReleaseUpdate
         using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var asset = ReleaseUpdate.LatestAsync(client, timeout.Token, requireSetup: true).GetAwaiter().GetResult();
+        bool betas = ReleaseUpdate.BetaUpdatesEnabled();
+        var asset = ReleaseUpdate.LatestAsync(client, timeout.Token, requireSetup: true, betas).GetAwaiter().GetResult();
         if (asset is null)
         {
             ui.Show($"Could not check for Medal Sync updates. You have version {ToolInfo.Version}.\n\nCheck your connection and try again. A private repository, rate limit or missing published Windows setup can also prevent this check.\n\nReleases:\n{Releases}");
             return 1;
         }
-        if (Version.Parse(asset.Version) <= Version.Parse(ToolInfo.Version))
+        if (!ReleaseUpdate.IsNewer(asset.Version, ToolInfo.Version))
         {
             ui.Show($"Medal Sync {ToolInfo.Version} is up to date. No newer published Windows setup is available.");
             return 0;
@@ -141,14 +142,14 @@ internal static class WindowsReleaseUpdate
 
     private static bool WaitWithDialog(Func<UpdateReadiness> readiness, string version)
     {
-        IProgressDialog? dialog = null;
+        IShellProgressDialog? dialog = null;
         try
         {
             return WaitUntilReady(readiness, state =>
             {
                 if (dialog is null)
                 {
-                    dialog = CreateProgressDialog();
+                    dialog = ShellProgressDialog.Create();
                     dialog.SetTitle("Medal Sync update");
                     dialog.SetCancelMsg("Postponing the update. The verified installer is kept.", IntPtr.Zero);
                     dialog.StartProgressDialog(IntPtr.Zero, null, 0x4 | 0x20, IntPtr.Zero); // PROGDLG_NOTIME | PROGDLG_MARQUEEPROGRESS
@@ -243,7 +244,7 @@ internal static class WindowsReleaseUpdate
 
     internal static string Download(ReleaseAsset asset, string directory, HttpClient client)
     {
-        var dialog = CreateProgressDialog();
+        var dialog = ShellProgressDialog.Create();
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         try
         {
@@ -276,23 +277,5 @@ internal static class WindowsReleaseUpdate
             dialog.StopProgressDialog();
             Marshal.FinalReleaseComObject(dialog);
         }
-    }
-
-    private static IProgressDialog CreateProgressDialog() =>
-        (IProgressDialog)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("F8383852-FCD3-11D1-A6B9-006097DF5BD4"), true)!)!;
-
-    // Shell's native progress dialog owns its window and message pump independently of the tray view.
-    [ComImport, Guid("EBBC7C04-315E-11D2-B62F-006097DF5BD4"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IProgressDialog
-    {
-        void StartProgressDialog(IntPtr parent, [MarshalAs(UnmanagedType.IUnknown)] object? enableModeless, uint flags, IntPtr reserved);
-        void StopProgressDialog();
-        void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string title);
-        void SetAnimation(IntPtr instance, uint resource);
-        [PreserveSig] [return: MarshalAs(UnmanagedType.Bool)] bool HasUserCancelled();
-        void SetProgress(uint completed, uint total);
-        void SetProgress64(ulong completed, ulong total);
-        void SetLine(uint line, [MarshalAs(UnmanagedType.LPWStr)] string text, [MarshalAs(UnmanagedType.Bool)] bool compactPath, IntPtr reserved);
-        void SetCancelMsg([MarshalAs(UnmanagedType.LPWStr)] string message, IntPtr reserved);
     }
 }

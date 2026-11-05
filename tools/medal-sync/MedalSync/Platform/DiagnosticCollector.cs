@@ -90,6 +90,7 @@ internal static class DiagnosticCollector
         {
             PendingCloudCopies = StorageReplication.Pending(state, config.LibraryId).Select(p => p.Name).ToArray(),
             LastVerifiedAt = StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId),
+            CloudCopyChecks = ReplicaCheckStatus.Read(state, config.LibraryId, now, config.Replication?.Targets ?? []),
         };
         // Like status: a PC that never started a session has no identity, and none is created here.
         DeviceIdentity? device = null;
@@ -106,7 +107,7 @@ internal static class DiagnosticCollector
             {
                 Journal = journal,
                 PendingSwitchRequests = store.PendingRequests(now).Count,
-                Phase = DesktopStatus.Read(state, config.LibraryId, journal, device, supervisorRunning(), now).Phase,
+                Phase = DesktopStatus.Read(state, config.LibraryId, journal, device, supervisorRunning(), now, facts.CloudCopyChecks).Phase,
             };
         }
         catch (Exception ex) when (Expected(ex)) { facts = facts with { JournalError = ex }; }

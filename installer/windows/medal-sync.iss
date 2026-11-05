@@ -10,6 +10,12 @@
 #ifndef StorageDependencies
   #error StorageDependencies must name the verified pinned storage dependency directory
 #endif
+; Beta builds are MAJOR.MINOR.PATCH.NN-beta.N. Windows file versions are numbers only.
+#if Pos("-", AppVersion) > 0
+  #define NumericVersion Copy(AppVersion, 1, Pos("-", AppVersion) - 1)
+#else
+  #define NumericVersion AppVersion
+#endif
 
 #ifdef IsolatedTestId
   #ifndef IsolatedTestRoot
@@ -78,7 +84,7 @@ Uninstallable=yes
 ; Tells Explorer and new terminals to reload PATH after setup or uninstall changes it.
 ChangesEnvironment=yes
 UninstallLogMode=append
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#NumericVersion}
 
 [Messages]
 ConfirmUninstall=Remove %1 and its program shortcuts?%n%nYour settings, device identity, recordings, cache and backups will be kept. WinFsp and existing portable installations will also be kept.
@@ -250,18 +256,23 @@ begin
 end;
 
 // Releases are MAJOR.MINOR.PATCH.NN; installations before 1.3.0.00 registered
-// MAJOR.MINOR.PATCH, which packs as revision 0.
+// MAJOR.MINOR.PATCH, which packs as revision 0. A beta, MAJOR.MINOR.PATCH.NN-beta.N,
+// packs as the release it leads up to, so that release installs over it.
 function PackVersion(const Value: String; var Packed: Int64): Boolean;
 var
-  I, Dots: Integer;
+  I, Dots, Suffix: Integer;
+  Numbers: String;
 begin
+  Numbers := Value;
+  Suffix := Pos('-', Numbers);
+  if Suffix > 0 then Numbers := Copy(Numbers, 1, Suffix - 1);
   Dots := 0;
-  for I := 1 to Length(Value) do
-    if Value[I] = '.' then Dots := Dots + 1;
+  for I := 1 to Length(Numbers) do
+    if Numbers[I] = '.' then Dots := Dots + 1;
   if Dots = 2 then
-    Result := StrToVersion(Value + '.0', Packed)
+    Result := (Suffix = 0) and StrToVersion(Numbers + '.0', Packed)
   else
-    Result := (Dots = 3) and StrToVersion(Value, Packed);
+    Result := (Dots = 3) and StrToVersion(Numbers, Packed);
 end;
 
 function WinFspInstalled(): Boolean;
@@ -391,7 +402,7 @@ begin
      (CompareText(RemoveBackslashUnlessRoot(RegisteredDir), RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) = 0) and
      PackVersion(InstalledVersion, Installed) and
      PackVersion('{#AppVersion}', Target) then begin
-    if ComparePackedVersion(Installed, Target) = 0 then
+    if (ComparePackedVersion(Installed, Target) = 0) and (InstalledVersion = '{#AppVersion}') then
       Operation := 'Repair Medal Sync {#AppVersion}'
     else
       Operation := 'Upgrade Medal Sync ' + InstalledVersion + ' to {#AppVersion}';

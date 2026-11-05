@@ -2,11 +2,16 @@ using Microsoft.Data.Sqlite;
 
 namespace MedalSync.Library;
 
+/// <param name="KeepBackup">
+/// The library being replaced may hold entries that exist nowhere else (<c>launch --replace-local-library</c>,
+/// <c>repair</c>, <c>relocate</c>). Its backup then goes to a folder that is never pruned automatically.
+/// </param>
 internal sealed record RestoreOptions(
     string ExpectedAccountId,
     string BackupDirectory,
     int BackupsToKeep = 10,
-    bool AllowEmptyReplacement = false);
+    bool AllowEmptyReplacement = false,
+    bool KeepBackup = false);
 
 internal sealed record RestoreResult(bool Changed, string? BackupPath, string Digest, int Contents, int DeletedContents, int Counts);
 
@@ -58,7 +63,9 @@ internal static class LibraryRestorer
                 $"The snapshot has no library entries but this PC has {currentContents}. An empty snapshot is never applied implicitly. Nothing was changed.");
         }
 
-        string backup = DatabaseBackup.Create(connection, options.BackupDirectory, options.ExpectedAccountId, now);
+        string backup = options.KeepBackup
+            ? DatabaseBackup.CreateKept(connection, options.BackupDirectory, options.ExpectedAccountId, now)
+            : DatabaseBackup.Create(connection, options.BackupDirectory, options.ExpectedAccountId, now);
         using (var write = connection.BeginTransaction(deferred: false))
         {
             string devices = LibraryDatabase.DeviceSettingsDigest(connection, write);

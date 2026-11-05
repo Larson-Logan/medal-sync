@@ -33,20 +33,94 @@ function New-Install([string]$Name) {
     foreach ($name in @('config.json', 'device.json')) { Set-Content -LiteralPath (Join-Path $root $name) -Value '{"sentinel":"preserve"}' -NoNewline }
     return $root
 }
+# A real CLI is a separate process, so it sees this script's own lock as held. Probe from another thread to match.
+Add-Type -TypeDefinition @'
+using System.Threading;
+public static class MedalTestMutex
+{
+    public static bool HeldElsewhere(string name)
+    {
+        bool held = false;
+        var probe = new Thread(() =>
+        {
+            using var mutex = new Mutex(false, name);
+            try { if (mutex.WaitOne(0)) mutex.ReleaseMutex(); else held = true; }
+            catch (AbandonedMutexException) { mutex.ReleaseMutex(); }
+        });
+        probe.Start();
+        probe.Join();
+        return held;
+    }
+
+    public static bool Exists(string name)
+    {
+        if (!Mutex.TryOpenExisting(name, out var mutex)) return false;
+        mutex.Dispose();
+        return true;
+    }
+
+    /// <summary>Holds the lock on another thread, as a running supervisor would, until the returned event is set.</summary>
+    public static ManualResetEvent HoldElsewhere(string name)
+    {
+        var release = new ManualResetEvent(false);
+        var taken = new ManualResetEvent(false);
+        new Thread(() =>
+        {
+            using var mutex = new Mutex(false, name);
+            mutex.WaitOne();
+            taken.Set();
+            release.WaitOne();
+            mutex.ReleaseMutex();
+        }) { IsBackground = true }.Start();
+        taken.WaitOne();
+        return release;
+    }
+}
+'@
 try {
-    # These module-local probes prevent any live process or library access.
+    # These module-local probes prevent any live process or library access. Isolated lock names keep
+    # the tests away from a real Medal Sync on this PC; the fake CLI follows the real CLI's lock rules.
     & $module {
+        $id = [guid]::NewGuid().ToString('N')
+        $script:SetupMutexName = "Local\MedalSync.Test.Setup.$id"
+        $script:InstanceMutexName = "Local\MedalSync.Test.Instance.$id"
+        $script:StatusViewMutexName = "Local\MedalSync.Test.StatusView.$id"
         function script:Get-Process { return $null }
         function script:Restore-MedalStartup { $script:StartupRestored = $true }
-        $script:TestJournal = '{"format":1,"state":"CLEAN","owner":null,"sessionId":null}'
+        $script:TestJournal = '{"state":"CLEAN","owner":null,"sessionId":null}'
         $script:TestSmokeFailure = $false
-        function script:Invoke-MedalBinary([string]$Path, [string[]]$Arguments) {
-            if ($Arguments[0] -eq 'status') { return $script:TestJournal }
-            $version = Get-Content -LiteralPath $Path -Raw
-            if ($script:TestSmokeFailure -and $version -eq '0.2.0') { throw 'Synthetic smoke failure.' }
-            return "medal-sync $version; synthetic"
+        $script:TestCommands = [Collections.Generic.List[string]]::new()
+        function script:Invoke-MedalProcess([string]$Path, [string[]]$Arguments) {
+            $command = if ($Arguments[0] -ceq 'setup') { "setup $($Arguments[1])" } else { $Arguments[0] }
+            $script:TestCommands.Add($command)
+            # CommandRunner.Dispatch: only version, setup check and diagnostics run while setup is open.
+            if ($command -cnotin @('version', 'setup check', 'diagnostics') -and [MedalTestMutex]::Exists($script:SetupMutexName)) {
+                return [pscustomobject]@{ ExitCode=1; Output=@() }
+            }
+            switch ($command) {
+                'version' {
+                    $version = Get-Content -LiteralPath $Path -Raw
+                    if ($script:TestSmokeFailure -and $version -eq '0.2.0') { throw 'Synthetic smoke failure.' }
+                    return [pscustomobject]@{ ExitCode=0; Output=@("medal-sync $version; synthetic") }
+                }
+                'setup check' {
+                    if ($Arguments.Count -ne 4 -or $Arguments[2] -cne '--state-root') { return [pscustomobject]@{ ExitCode=2; Output=@() } }
+                    $root = $Arguments[3]
+                    $journal = $script:TestJournal | ConvertFrom-Json
+                    # SetupMaintenance.RequireReady with SessionCommands.AnotherInstanceRunning.
+                    $message = if ([MedalTestMutex]::HeldElsewhere($script:InstanceMutexName)) { 'Quit Medal normally and wait for Ready (synthetic supervisor).' }
+                        elseif (@(Get-ChildItem -LiteralPath (Join-Path $root 'sessions') -Filter '*.json' -ErrorAction SilentlyContinue).Count -gt 0) { 'An unfinished local session is retained (synthetic).' }
+                        elseif ($journal.state -cne 'CLEAN' -or $null -ne $journal.owner -or $null -ne $journal.sessionId) { 'The shared library is not Ready (synthetic).' }
+                        else { $null }
+                    if ($message) { return [pscustomobject]@{ ExitCode=1; Output=@($message) } }
+                    return [pscustomobject]@{ ExitCode=0; Output=@('Ready for program installation.') }
+                }
+                default { return [pscustomobject]@{ ExitCode=2; Output=@() } }
+            }
         }
     }
+    # Every operation runs while holding the setup lock, as update-medal-sync.ps1 -Apply does.
+    Enter-MedalMaintenance
     $package = New-Package
     $zip = Zip-Package $package 'valid'
     Test-Case 'Normalize bare release versions to exact stable GitHub tags' {
@@ -76,8 +150,11 @@ try {
 </Project>
 '@ | Set-Content -LiteralPath (Join-Path $props 'Directory.Build.props')
         $saved = $env:MedalReleaseRevision
+        # A beta validation run sets MedalPrerelease for the whole job; this test is about stable builds.
+        $savedPrerelease = $env:MedalPrerelease
         try {
             $env:MedalReleaseRevision = $null
+            $env:MedalPrerelease = $null
             Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.00') 'Local builds must use counter 00.'
             $env:MedalReleaseRevision = '07'
             Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.07') 'Release builds must use the workflow counter.'
@@ -85,7 +162,31 @@ try {
             Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2') 'The bridge release must use three parts.'
             $env:MedalReleaseRevision = '7'
             Refuses { Get-MedalBuildVersion $props } '*two or more digits*'
-        } finally { $env:MedalReleaseRevision = $saved }
+        } finally { $env:MedalReleaseRevision = $saved; $env:MedalPrerelease = $savedPrerelease }
+    }
+    Test-Case 'Beta builds add the prerelease label to the release they lead up to' {
+        $props = Join-Path $scratch 'beta-props'
+        $null = New-Item -ItemType Directory -Path $props
+        '<Project><PropertyGroup><VersionPrefix>1.4.2</VersionPrefix><MedalReleaseRevision>00</MedalReleaseRevision></PropertyGroup></Project>' |
+            Set-Content -LiteralPath (Join-Path $props 'Directory.Build.props')
+        $savedRevision = $env:MedalReleaseRevision
+        $savedPrerelease = $env:MedalPrerelease
+        try {
+            $env:MedalReleaseRevision = '03'
+            $env:MedalPrerelease = 'beta.12'
+            Assert-True ((Get-MedalBuildVersion $props) -ceq '1.4.2.03-beta.12') 'Beta builds must append the label.'
+            foreach ($label in @('beta.0', 'beta', 'rc.1', 'beta.01', 'Beta.1')) {
+                $env:MedalPrerelease = $label
+                Refuses { Get-MedalBuildVersion $props } '*must be beta.N*'
+            }
+            $env:MedalPrerelease = 'beta.1'
+            $env:MedalReleaseRevision = 'none'
+            Refuses { Get-MedalBuildVersion $props } '*hotfix counter*'
+        } finally { $env:MedalReleaseRevision = $savedRevision; $env:MedalPrerelease = $savedPrerelease }
+        foreach ($value in @('1.0.0', '1.0.0.01', '1.0.0.01-beta.1', '1.0.0.100-beta.20')) { Assert-MedalBuildVersion $value }
+        foreach ($value in @('1.0.0-beta.1', '1.0.0.01-beta.0', '1.0.0.01-rc.1', '1.0.0.1-beta.1', 'v1.0.0.01-beta.1')) { Refuses { Assert-MedalBuildVersion $value } '*version*' }
+        # The portable updater stays stable-only.
+        Refuses { Assert-MedalVersion '1.0.0.01-beta.1' } '*stable version*'
     }
     Test-Case 'Keep the hotfix counter when normalizing release tags' {
         & $module {
@@ -158,10 +259,14 @@ try {
     Test-Case 'Reject all non-Ready and unknown ownership states' {
         $root = New-Install 'busy'
         foreach ($state in @('ACTIVE', 'DRAINING', 'PUBLISHING', 'RECOVERY_REQUIRED', 'STARTING', 'unknown')) {
-            & $module { param($State) $script:TestJournal = "{`"format`":1,`"state`":`"$State`",`"owner`":null,`"sessionId`":null}" } $state
-            Refuses { Install-MedalRelease $root $package.path $package.manifest } '*must be Ready*'
+            & $module { param($State) $script:TestJournal = "{`"state`":`"$State`",`"owner`":null,`"sessionId`":null}" } $state
+            Refuses { Install-MedalRelease $root $package.path $package.manifest } '*not Ready*'
         }
-        & $module { $script:TestJournal = '{"format":1,"state":"CLEAN","owner":null,"sessionId":null}' }
+        foreach ($journal in @('{"state":"CLEAN","owner":"PC-2","sessionId":null}', '{"state":"CLEAN","owner":null,"sessionId":"s-1"}')) {
+            & $module { param($Journal) $script:TestJournal = $Journal } $journal
+            Refuses { Install-MedalRelease $root $package.path $package.manifest } '*not Ready*'
+        }
+        & $module { $script:TestJournal = '{"state":"CLEAN","owner":null,"sessionId":null}' }
         $null = New-Item -ItemType Directory -Path (Join-Path $root 'sessions')
         '{}' | Set-Content -LiteralPath (Join-Path $root 'sessions/pending.json')
         Refuses { Install-MedalRelease $root $package.path $package.manifest } '*Unfinished local session*'
@@ -235,10 +340,10 @@ try {
     }
     Test-Case 'Uninstall refuses pending sessions and remaining startup references' {
         $root = New-Install 'uninstall-busy'
-        & $module { $script:TestJournal = '{"format":1,"state":"ACTIVE","owner":null,"sessionId":null}' }
-        Refuses { Uninstall-MedalRelease $root } '*must be Ready*'
+        & $module { $script:TestJournal = '{"state":"ACTIVE","owner":null,"sessionId":null}' }
+        Refuses { Uninstall-MedalRelease $root } '*not Ready*'
         & $module {
-            $script:TestJournal = '{"format":1,"state":"CLEAN","owner":null,"sessionId":null}'
+            $script:TestJournal = '{"state":"CLEAN","owner":null,"sessionId":null}'
             function script:Restore-MedalStartup { throw 'Synthetic remaining startup reference.' }
         }
         Refuses { Uninstall-MedalRelease $root } '*remaining startup reference*'
@@ -251,8 +356,65 @@ try {
         Refuses { Uninstall-MedalRelease (New-Install 'active-uninstall') } '*Quit Medal*'
         & $module { function script:Get-Process { return $null } }
     }
+    Test-Case 'Updates check readiness with setup check before taking the session lock, then release it' {
+        $root = New-Install 'lock-order'
+        & $module { $script:TestCommands.Clear() }
+        $null = Install-MedalRelease $root $package.path $package.manifest
+        $commands = & $module { @($script:TestCommands) }
+        Assert-True ($commands -ccontains 'setup check') 'Readiness was not checked with setup check.'
+        Assert-True ($commands -cnotcontains 'status') 'status refuses while setup is open; it must not be used.'
+        Assert-True (-not [MedalTestMutex]::HeldElsewhere((& $module { $script:InstanceMutexName }))) 'Session lock left held after update.'
+        $uninstall = New-Install 'lock-order-uninstall'
+        $null = Uninstall-MedalRelease $uninstall
+        $null = Install-MedalFresh $uninstall $package.path $package.manifest
+        Assert-True (-not [MedalTestMutex]::HeldElsewhere((& $module { $script:InstanceMutexName }))) 'Session lock left held after reinstall.'
+    }
+    Test-Case 'A running supervisor refuses update, uninstall and reinstall' {
+        $root = New-Install 'supervised'
+        $release = [MedalTestMutex]::HoldElsewhere((& $module { $script:InstanceMutexName }))
+        try {
+            Refuses { Install-MedalRelease $root $package.path $package.manifest } '*Quit Medal normally*'
+            Refuses { Uninstall-MedalRelease $root } '*Quit Medal normally*'
+            Assert-True ((Get-Content -LiteralPath (Join-Path $root 'bin/medal-sync.exe') -Raw) -eq '0.1.0') 'Changed programs while supervised.'
+        } finally { $null = $release.Set() }
+        $fresh = Join-Path $scratch 'supervised-fresh'
+        $release = [MedalTestMutex]::HoldElsewhere((& $module { $script:InstanceMutexName }))
+        try { Refuses { Install-MedalFresh $fresh $package.path $package.manifest } '*session or another installer*' }
+        finally { $null = $release.Set() }
+    }
+    Test-Case 'Operations refuse without the setup lock' {
+        Exit-MedalMaintenance
+        try {
+            Refuses { Install-MedalRelease (New-Install 'unlocked') $package.path $package.manifest } '*setup lock*'
+            Refuses { Uninstall-MedalRelease (New-Install 'unlocked-uninstall') } '*setup lock*'
+            Refuses { Install-MedalFresh (Join-Path $scratch 'unlocked-fresh') $package.path $package.manifest } '*setup lock*'
+        } finally { Enter-MedalMaintenance }
+        Refuses { Enter-MedalMaintenance } '*already holds the setup lock*'
+    }
+    Test-Case 'Only the status view open asks to exit it' {
+        $view = [Threading.Mutex]::new($false, (& $module { $script:StatusViewMutexName }))
+        try {
+            & $module { function script:Get-Process([string[]]$Name) { if ($Name -contains 'medal-sync-launch') { return 'synthetic launcher' } } }
+            Refuses { Install-MedalRelease (New-Install 'view-update') $package.path $package.manifest } '*status view is still open*'
+            Refuses { Uninstall-MedalRelease (New-Install 'view-uninstall') } '*status view is still open*'
+            Refuses { Install-MedalFresh (Join-Path $scratch 'view-fresh') $package.path $package.manifest } '*status view is still open*'
+            # A second launcher is a supervisor or a starting launch, and Medal may still be open.
+            & $module { function script:Get-Process([string[]]$Name) { if ($Name -contains 'medal-sync-launch') { return @('view', 'supervisor') } } }
+            Refuses { Install-MedalRelease (New-Install 'view-supervised') $package.path $package.manifest } '*Quit Medal*'
+            & $module { function script:Get-Process([string[]]$Name) { if ($Name -contains 'Medal') { return 'synthetic Medal' } elseif ($Name -contains 'medal-sync-launch') { return 'view' } } }
+            Refuses { Install-MedalRelease (New-Install 'view-medal') $package.path $package.manifest } '*Quit Medal*'
+        } finally {
+            $view.Dispose()
+            & $module { function script:Get-Process { return $null } }
+        }
+        # The same lone launcher without the view's mutex is not the view.
+        & $module { function script:Get-Process([string[]]$Name) { if ($Name -contains 'medal-sync-launch') { return 'synthetic launcher' } } }
+        try { Refuses { Install-MedalRelease (New-Install 'launcher-only') $package.path $package.manifest } '*Quit Medal*' }
+        finally { & $module { function script:Get-Process { return $null } } }
+    }
     Write-Output "PASS: $script:passed release/updater tests"
 } finally {
+    Exit-MedalMaintenance
     if ([IO.Path]::GetDirectoryName($scratch) -ne [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetTempPath())) { throw 'Unexpected test scratch path.' }
     Remove-Item -LiteralPath $scratch -Recurse -Force
 }

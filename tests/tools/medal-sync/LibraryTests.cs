@@ -315,6 +315,35 @@ public sealed class LibraryTests : IDisposable
     }
 
     [Fact]
+    public void Restore_AKeptBackupOutlivesLaterOrdinaryRestores()
+    {
+        // This PC has an entry that was never shared; a shared snapshot replaces it with KeepBackup.
+        string destination = _fixture.CreateLibrary("second-pc");
+        MedalFixture.AddContent(destination, "never-shared", video: @"M:\Clips\Clips\offline.mp4");
+        string shared = _fixture.CreateLibrary("first-pc");
+        MedalFixture.AddContent(shared, "shared-0", video: @"M:\Clips\Clips\shared-0.mp4");
+        var replaced = LibraryRestorer.Restore(destination, LibraryDatabase.ReadSnapshot(shared, MedalFixture.AccountId),
+            Options() with { KeepBackup = true }, Now);
+        string kept = replaced.BackupPath!;
+        Assert.StartsWith(DatabaseBackup.KeptPrefix, Path.GetFileName(Path.GetDirectoryName(kept)), StringComparison.Ordinal);
+        Assert.Equal(Options().BackupDirectory, Path.GetDirectoryName(Path.GetDirectoryName(kept)));
+
+        // Then more ordinary restores than the prune keeps, each a newer shared library.
+        for (int i = 1; i <= 11; i++)
+        {
+            MedalFixture.AddContent(shared, $"shared-{i}", video: $@"M:\Clips\Clips\shared-{i}.mp4");
+            Assert.True(LibraryRestorer.Restore(destination, LibraryDatabase.ReadSnapshot(shared, MedalFixture.AccountId),
+                Options(), Now.AddMinutes(i)).Changed);
+        }
+
+        Assert.Equal(10, DatabaseBackup.List(Options().BackupDirectory, MedalFixture.AccountId).Count);
+        Assert.True(File.Exists(kept));
+        DatabaseBackup.Verify(kept);
+        Assert.Contains(LibraryDatabase.ReadSnapshot(kept, MedalFixture.AccountId).Table("contents").Rows,
+            r => r.Any(c => c is TextCell { Value: "never-shared" }));
+    }
+
+    [Fact]
     public void Prune_KeepsOnlyTheNewestBackups()
     {
         string library = _fixture.CreateLibrary("first-pc");

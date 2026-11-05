@@ -61,7 +61,7 @@ shows it too.
 | Command | What it does |
 | --- | --- |
 | `medal-sync-launch.exe` | Checks storage and ownership, starts Medal, supervises the session and hands off after Medal exits. Waits up to 20 seconds for the server. Offers the configuration wizard when Medal Sync is not set up. |
-| `medal-sync-launch.exe --at-sign-in` | The same, as used by Medal's startup entry. Waits up to 2 minutes for the server, and exits quietly when Medal Sync is not set up. |
+| `medal-sync-launch.exe --at-sign-in` | The same, as used by Medal's startup entry. Waits up to 2 minutes for the server, and exits quietly when Medal Sync is not set up. When another PC owns the library it sends no switch request, so that PC is not interrupted. |
 | `medal-sync-launch.exe medal://...` | Opens a Medal link through the same checks, or passes it to the running session. |
 | `medal-sync-launch.exe --configure` | Opens the configuration wizard. |
 | `medal-sync-launch.exe --status` | Opens the status panel. |
@@ -105,15 +105,15 @@ library, for example a copy.
 | `config create ... --out FILE [--apply]` | Previews, then creates, a new configuration file. Options are listed below. |
 | `storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]` | Allocates one pre-generated Google Drive journal ID for a new cloud library. Prints only the ID; creates no Drive file. Reuse it with `config create --storage-mode cloud --cloud-journal-id ID` on every PC. |
 | `init [--apply]` | Creates a new shared library from this PC as generation 0. Every clip must already be on primary storage; cloud mode instead uploads and verifies the persistent local copy first. Only for a new library; never run it against an existing journal. |
-| `enroll --out DIR [--apply]` | Adds this PC to an existing library. The preview writes a review of the merged library to `DIR`; apply uses that exact review. |
-| `enroll recover --out DIR [--apply]` | Restores the merged library and this PC's original device settings from an interrupted enrollment's review. Run `finish` afterwards. |
+| `enroll --out DIR [--apply]` | Adds this PC to an existing library. The preview writes a review of the merged library to `DIR`; apply uses that exact review. With an rclone primary, files go to the persistent local copy and apply ends by running `finish`, which uploads, verifies and publishes; exit 3 means the primary is unreachable (see [enroll into an rclone primary](storage.md#enroll-a-pc-with-existing-clips-into-an-rclone-primary)). |
+| `enroll recover --out DIR [--rollback] [--apply]` | Handles two cases. See [enrollment recovery](#enrollment-recovery). |
 | `storage init-primary [--apply]` | Marks a new, empty primary folder or rclone remote for this library, so you can [switch primaries](storage.md#switch-primaries). Needs `replication.localCopyRoot` and a Ready library. |
 | `replicate retry [--target NAME] [--apply]` | Previews pending optional cloud copies of the committed generation while Ready. `--apply` copies and verifies from this PC's persistent copy, otherwise primary storage, without taking ownership. Launch, shutdown or a changed journal/configuration cancels unfinished work. Exit 3 means canceled or still pending. See [retry cloud copies](storage.md#retry-cloud-copies-while-ready). |
 | `replica verify [--target NAME] [--apply]` | Previews, then reads back every file of the committed generation at each cloud copy while Ready. Never copies, replaces or deletes. Exit 1 means missing or different files, 3 incomplete. See [check cloud copies](storage.md#check-cloud-copies-on-demand). |
 | `replica history [--target NAME] [--json]` | Shows past checks per cloud copy: counts only, the last complete and last passing result. Read-only. |
-| `replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]` | Reviews unreferenced media and, if asked, old version history at an optional cloud copy. Writes a private review file. |
-| `replica prune --in FILE --apply` | Moves exactly the reviewed files into the copy's `.medal-sync-trash` folder. Refuses if anything changed since the review. See [clean up a cloud copy](storage.md#clean-up-a-cloud-copy). |
-| `replica purge-trash --target NAME [--older-than D] [--apply]` | Lists only the trash subtree once. With `--apply`, permanently deletes exactly the batches marked `deleting`, whose files were moved at least `D` days ago (default 7). |
+| `replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]` | Reviews unreferenced media and, if asked, old version history at an optional or required cloud copy. Writes a private review file; referenced files are protected. |
+| `replica prune --in FILE --apply` | Moves exactly the reviewed files into the copy's `.medal-sync-trash` folder. Refuses if anything changed since the review. A required copy loses this PC's incremental receipt so its next handoff reads every referenced file back. See [clean up a cloud copy](storage.md#clean-up-a-cloud-copy). |
+| `replica purge-trash --target NAME [--older-than D] [--apply]` | Lists only the trash subtree once at an optional or required copy. With `--apply`, permanently deletes exactly the batches marked `deleting`, whose files were moved at least `D` days ago (default 7). A nonempty required-copy purge drops this PC's incremental receipt too. |
 | `retention --out FILE [--keep N] [--keep-days D] [--grace-days G]` | Reviews old generations and this PC's old recovery folders to remove. Read-only. |
 | `retention --in FILE --apply` | Removes exactly the reviewed folders while every PC stays Ready. See [retention](storage.md#retention). |
 
@@ -144,13 +144,43 @@ Each option maps to a field in `config.json`; see the
 
 | Command | What it does |
 | --- | --- |
-| `launch [--wait-for-server SECONDS] [--medal-link URL] [--replace-local-library]` | Starts Medal through Medal Sync and supervises it until it exits, then hands off. `--wait-for-server` is 0 to 600 seconds. The desktop launcher normally runs this for you. |
+| `launch [--wait-for-server SECONDS] [--wait-for-handoff SECONDS \| --no-switch-request] [--medal-link URL] [--replace-local-library]` | Starts Medal through Medal Sync and supervises it until it exits, then hands off. `--wait-for-server` is 0 to 600 seconds. Without `--wait-for-handoff`, launch returns at once (exit 3) when another PC owns the library, after sending that PC a switch request unless `--no-switch-request` is given (the sign-in launcher uses it). With it (1 to 3600 seconds), launch keeps one switch request and checks back until that PC releases the library, then starts normally; timeout, Ctrl+C or Windows shutdown withdraws only that request and starts nothing. The desktop launcher normally runs this for you. |
 | `finish [--accept-library-changes]` | Finishes this PC's interrupted session: drains uploads, verifies storage, publishes and releases ownership. Exit 3 means storage is still unavailable. `--accept-library-changes` approves the clip removals that finish listed; review them first. |
+
+### Enrollment recovery
+
+`enroll recover --out DIR` previews; add `--apply` with Medal quit to act. It
+handles two cases, and refuses anything else without changing it:
+
+- **An interrupted `enroll --apply`.** The process was stopped (Ctrl+C, closed
+  window, crash or reboot) or failed while this PC held the library for the
+  enrollment. Launch and finish refuse to give that ownership back and name
+  `DIR`. `apply.json` there says where it stopped: `prepared`, `copying`,
+  `copied`, `restored`, `capture-configured` or, with an rclone primary,
+  `handing-off`. Without `--rollback`, recovery finishes the enrollment: copies
+  already on the server (or, with an rclone primary, in the local copy) with
+  the same bytes are reused, then the merged library is restored and published.
+  With an rclone primary it is handed to `finish` instead of published. With
+  `--rollback`, it puts back this PC's original library and capture folder and
+  gives the library back. Files already copied stay where they are. Once an
+  rclone-primary enrollment has handed its session to finish (`handed-off`),
+  recovery cannot roll it back; with `--apply` it runs that finish. An
+  apply that stopped at `prepared` never took the library; prepare a fresh
+  preview in a new folder instead. Never use `launch --replace-local-library`
+  for this; it would drop this PC's own clips from Medal.
+- **Medal's native backup put the pre-enrollment shared library back** after
+  enrollment published, while this PC still holds its draining session.
+  Recovery restores the merged library and this PC's original device settings.
+  Run `finish` afterwards.
 
 `launch --replace-local-library` is only for a PC whose Medal library has
 changes that were never shared, usually because Medal was opened without Medal
 Sync. Launch refuses such a library and names this option. Keep a copy first
-with `snapshot export`; the replacement also keeps a backup.
+with `snapshot export`; the replacement also keeps a backup of the whole
+database in `Backups/kept-library-TIME-ID/` under this PC's state root, and
+prints its path. Ordinary launch backups are pruned to the newest 10; kept
+backups, from this option, `repair` and `relocate`, are never removed
+automatically. Only a reviewed [retention](storage.md#retention) removes them.
 
 ## Recover
 
@@ -158,10 +188,10 @@ Read [recovery rules](getting-started.md#recovery-rules) before using these.
 
 | Command | What it does |
 | --- | --- |
-| `recover-start --session ID [--apply]` | Keeps the login of an orphaned older session when its cache is empty. |
+| `recover-start --session ID [--apply]` | Keeps the login of an orphaned older session when its cache is empty, or removes the leftover cache and login of a finished session whose cleanup failed. |
 | `refresh-media --out FILE` | Reviews differences between the persistent local copy and primary storage. See [review and refresh persistent local media](storage.md#review-and-refresh-persistent-local-media). |
 | `refresh-media --in FILE --apply [--accept-unknown-media]` | Applies that exact review, keeping a backup of every replaced file. |
-| `repair --checkpoint FILE [--db DB] [--apply]` | Puts back clips Medal dropped since a snapshot, when their files still exist. Takes a database backup first. |
+| `repair --checkpoint FILE [--db DB] [--apply]` | Puts back clips Medal dropped since a snapshot, when their files still exist. Takes a database backup first and keeps it until a reviewed retention removes it. |
 | `relocate --from DIR [--config FILE] [--apply]` | Copies library files left outside the capture folder to the server's clip folder, verifies them and repoints the library. The originals stay. SMB primary only. |
 | `abandon --session ID --reason TEXT [--apply]` | Gives up a session whose PC is lost and returns the library to the last published generation. Unpublished clips stay on that PC and must be reconciled by hand. |
 

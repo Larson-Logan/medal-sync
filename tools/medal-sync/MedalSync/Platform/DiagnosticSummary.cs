@@ -48,6 +48,7 @@ internal sealed record DiagnosticFacts
     public SessionPhase? Phase { get; init; }
     public IReadOnlyList<string> PendingCloudCopies { get; init; } = [];
     public DateTimeOffset? LastVerifiedAt { get; init; }
+    public IReadOnlyList<CloudCopyCheckStatus> CloudCopyChecks { get; init; } = [];
 
     /// <summary>Other values that must never appear: computer and user names, state and program folders.</summary>
     public IReadOnlyList<string> Private { get; init; } = [];
@@ -228,13 +229,32 @@ internal static partial class DiagnosticSummary
     {
         if (facts.Config is null) return new JsonObject { ["status"] = "not-configured" };
         if (facts.PendingCloudCopies.Count > 0) refusals.Add("cloud-copy-pending");
+        if (facts.CloudCopyChecks.Any(c => c.Failed)) refusals.Add("cloud-copy-check-failed");
+        if (facts.CloudCopyChecks.Any(c => c.Incomplete)) refusals.Add("cloud-copy-check-incomplete");
         return new JsonObject
         {
             ["status"] = "ok",
             ["pendingCloudCopies"] = new JsonArray([.. facts.PendingCloudCopies.Select(n => JsonValue.Create(tokens.For("target", n)))]),
             ["lastVerifiedAgo"] = facts.LastVerifiedAt is { } verified ? Age(facts.Now - verified) : "never",
+            ["cloudCopyChecks"] = new JsonArray([.. facts.CloudCopyChecks.Select(c => new JsonObject
+            {
+                ["target"] = tokens.For("target", c.Name),
+                ["needsAttention"] = c.NeedsAttention,
+                ["lastCheck"] = Check(c.LastCheck, facts.Now),
+                ["lastComplete"] = Check(c.LastComplete, facts.Now),
+            })]),
         };
     }
+
+    private static JsonObject? Check(CloudCopyCheck? check, DateTimeOffset now) => check is null ? null : new JsonObject
+    {
+        ["result"] = check.Result is ReplicaAudit.Passed or ReplicaAudit.Failed or ReplicaAudit.Incomplete ? check.Result : "unrecognized",
+        ["reason"] = check.Reason is null ? null : ReplicaCheckStatus.Reasons.Contains(check.Reason, StringComparer.Ordinal) ? check.Reason : "unrecognized",
+        ["finishedAgo"] = Age(now - check.FinishedAt),
+        ["generation"] = check.Generation,
+        ["planned"] = check.Planned, ["checked"] = check.Checked, ["matched"] = check.Matched,
+        ["missing"] = check.Missing, ["mismatched"] = check.Mismatched, ["unknown"] = check.Unknown, ["bytes"] = check.Bytes,
+    };
 
     /// <summary>Prints the report; with a path, first saves exactly those bytes to a new file and never replaces one.</summary>
     public static int Write(string report, string? path, TextWriter output)

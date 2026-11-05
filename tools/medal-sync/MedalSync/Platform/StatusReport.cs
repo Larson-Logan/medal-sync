@@ -36,6 +36,7 @@ internal sealed record StatusReport(
     public const int CurrentFormat = 1;
 
     public ReplicaRetryReport? ReplicaRetry { get; init; }
+    public IReadOnlyList<CloudCopyCheckStatus> CloudCopies { get; init; } = [];
 
     public const string Reachable = "reachable";
 
@@ -56,7 +57,7 @@ internal sealed record StatusReport(
         return new(CurrentFormat, libraryId, Reachable, null,
             new(journal.State, journal.Owner?.DisplayName, mine, journal.SessionId, journal.CommittedGeneration, journal.Revision,
                 journal.UpdatedAt, journal.Reason),
-            desktop.Phase, desktop.Title, desktop.NextAction, safe, requests, CloudCopies(cloudCopies), lastVerifiedAt, now);
+            desktop.Phase, desktop.Title, desktop.NextAction, safe, requests, PendingCopies(cloudCopies), lastVerifiedAt, now);
     }
 
     /// <summary>The journal cannot be read. Local facts are still reported; nothing about ownership is guessed.</summary>
@@ -65,13 +66,13 @@ internal sealed record StatusReport(
     {
         var desktop = DesktopStatus.StorageOffline(now);
         return new(CurrentFormat, libraryId, Unreachable, message, null, desktop.Phase, desktop.Title, desktop.NextAction,
-            SafeToSwitch: false, HandoffRequests: null, CloudCopies(cloudCopies), lastVerifiedAt, now);
+            SafeToSwitch: false, HandoffRequests: null, PendingCopies(cloudCopies), lastVerifiedAt, now);
     }
 
     private static StatusHandoffRequest Request(HandoffRequest request, bool stale, DateTimeOffset now) =>
         new(request.Device.DisplayName, request.RequestedAt, Math.Max(0, (long)(now - request.RequestedAt).TotalSeconds), stale);
 
-    private static StatusCloudCopy[] CloudCopies(IReadOnlyList<PendingReplica> pending) =>
+    private static StatusCloudCopy[] PendingCopies(IReadOnlyList<PendingReplica> pending) =>
         pending.Select(p => new StatusCloudCopy(p.Name, p.Since, p.LastAttempt)).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToArray();
 
     /// <summary>

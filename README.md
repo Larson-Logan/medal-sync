@@ -4,13 +4,16 @@
 [![Latest release](https://img.shields.io/github/v/release/Larson-Logan/medal-sync?label=release)](https://github.com/Larson-Logan/medal-sync/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Your Medal recordings, on your storage.** Medal Sync is a Windows companion
+**Free, open-source Medal.tv clip library sync and backup for Windows.**
+
+**Your Medal recordings, on your storage.** Medal Sync is a free Windows companion
 for [Medal](https://medal.tv) that records to a fast SSD cache, keeps your clip
 library on your own server or disk, and can copy it to OneDrive, Dropbox or
 Google Drive. Move between gaming PCs with one shared library, while each PC
 keeps its own Medal login and recording settings.
 
 **[Download for Windows](https://github.com/Larson-Logan/medal-sync/releases/latest)** ·
+[Website](https://larson-logan.github.io/medal-sync/) ·
 [Getting started](docs/getting-started.md) ·
 [Storage guide](docs/storage.md) ·
 [Commands](docs/commands.md) ·
@@ -106,6 +109,29 @@ Before updating or uninstalling, quit Medal, wait for **Ready**, then choose
 Windows **Installed apps**. A portable ZIP is also available for advanced use.
 See [installation, updates and removal](docs/updates.md) for checksum
 verification and recovery.
+
+## Questions
+
+**Is Medal Sync free?** Yes. It is free and open source under the
+[MIT license](LICENSE). You only need your own storage: a local disk, an SMB
+share or NAS, or a cloud account you already have.
+
+**How do I sync Medal clips between two PCs?** Install Medal Sync on each PC
+and point them at the same library on an SMB share, NAS or Google Drive.
+Launch Medal through Medal Sync. When you quit Medal, it finishes uploads,
+verifies them and shows **Ready**; the other PC can then start Medal with the
+same clip library. Each PC keeps its own Medal login and recording settings.
+
+**Can I back up Medal.tv clips to Google Drive, OneDrive or Dropbox?** Yes.
+Add verified cloud copies to any storage mode, or use
+[Google Drive without a server](docs/storage.md#google-drive-without-a-server)
+as the main library.
+
+**Can I keep Medal clips on a NAS or home server?** Yes. Medal records to an
+SSD-backed clip drive and clips upload in the background to your SMB share.
+See the [storage guide](docs/storage.md).
+
+**Is this made by Medal?** No. Medal Sync is an independent project.
 
 ## Limits
 

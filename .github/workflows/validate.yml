@@ -7,7 +7,8 @@ name: Medal Sync validation
 # can affect. Every push to dev runs every suite. Only dev merges into main, and
 # a promotion's merge result is exactly the dev commit's tree, so a promotion
 # reuses that commit's passing push run, or runs every suite itself. The release
-# workflow runs every suite again, without caches, before it publishes.
+# workflow runs every suite again, without caches, before it publishes, and
+# the beta workflow does the same for each dev commit it publishes as a beta.
 on:
   push:
     branches: [dev]
@@ -24,23 +25,29 @@ on:
         description: Hotfix counter, or none for the legacy bridge release
         type: string
         default: '00'
+      prerelease:
+        description: Beta label such as beta.3 for a beta built from dev, or empty for a release from main
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
   # A newer run replaces a running one for the same pull request, or for dev
-  # pushes: the newer dev commit contains the older one. Calls from release use
-  # their own group, so they never contend with standalone validation or with
-  # the caller's release concurrency group.
+  # pushes: the newer dev commit contains the older one. Calls from the release
+  # and beta workflows use their own group, so they never contend with
+  # standalone validation or with the caller's concurrency group.
   group: >-
-    validate-${{ github.workflow }}-${{ github.event.pull_request.number
+    validate-${{ github.workflow }}-${{ (inputs.release && github.run_id)
+    || github.event.pull_request.number
     || (github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'dev')
     || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev') }}
+  cancel-in-progress: ${{ !inputs.release && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev')) }}
 env:
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
   NUGET_XMLDOC_MODE: skip
   MedalReleaseRevision: ${{ inputs.revision || '00' }}
+  MedalPrerelease: ${{ inputs.prerelease || '' }}
 jobs:
   checks:
     name: Repository checks
@@ -95,6 +102,12 @@ jobs:
           echo "$ACTIONLINT_SHA256  $archive" | sha256sum --check --strict
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
+      # A promotion is a release: it must raise VersionPrefix as far as its
+      # pull request types need, and name that release in the changelog.
+      # Runs before the wait for dev's validation, so it fails fast.
+      - name: Check the promotion's version and changelog
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: python scripts/check-promotion.py --main HEAD^1 --dev HEAD^2
       - name: Choose the Windows suites from the source inventory
         id: scope
         env:
@@ -184,11 +197,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Import-Module ./scripts/storage/medal-sync/MedalSync.Update.psm1
           $version = Get-MedalBuildVersion (Get-Location).Path
-          git merge-base --is-ancestor HEAD origin/main
-          if ($LASTEXITCODE -ne 0) { throw 'Release commit must be on main.' }
+          # Releases come from main; betas, which carry a prerelease label, from dev.
+          $branch = if ($env:MedalPrerelease) { 'dev' } else { 'main' }
+          git merge-base --is-ancestor HEAD "origin/$branch"
+          if ($LASTEXITCODE -ne 0) { throw "Release commit must be on $branch." }
           $tagged = git rev-parse --verify --quiet "refs/tags/v$version^{commit}"
           if ($tagged -and $tagged -ne (git rev-parse HEAD)) {
-            throw "Tag v$version already exists on another commit. Rerun the workflow to take the next hotfix number."
+            throw "Tag v$version already exists on another commit. Rerun the workflow to take the next number."
           }
           $global:LASTEXITCODE = 0
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0

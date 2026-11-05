@@ -22,12 +22,21 @@ internal sealed class AppIcons : IDisposable
         using var small = new Icon(Window, size);
         using var plain = small.ToBitmap();
         foreach (var phase in Enum.GetValues<SessionPhase>()) _tray[phase] = WithDot(plain, size, DotColor(phase));
+        _open = WithDot(plain, size, OpenColor);
     }
+
+    private readonly Icon _open;
 
     /// <summary>Every size of the icon, for window title bars and Alt+Tab.</summary>
     public Icon Window { get; }
 
     public Icon For(SessionPhase phase) => _tray.TryGetValue(phase, out var icon) ? icon : _tray[SessionPhase.Unknown];
+
+    /// <summary>The active phase is red only while Medal records a game; open but idle has its own dot.</summary>
+    public Icon For(SessionPhase phase, bool recording) => phase == SessionPhase.Active && !recording ? _open : For(phase);
+
+    /// <summary>Medal is open but not recording: still not safe to switch, but nothing is being captured.</summary>
+    internal static readonly Color OpenColor = Color.FromArgb(168, 85, 247);
 
     public static Icon LoadApplicationIcon()
     {
@@ -36,7 +45,10 @@ internal sealed class AppIcons : IDisposable
         return new Icon(stream);
     }
 
-    /// <summary>Green when it is safe to switch, red while recording, blue while working, gray while waiting, amber when attention is needed.</summary>
+    /// <summary>
+    /// Green when it is safe to switch, red while recording (purple, <see cref="OpenColor"/>, when Medal is open but idle),
+    /// blue while working, gray while waiting, amber when attention is needed.
+    /// </summary>
     internal static Color DotColor(SessionPhase phase) => phase switch
     {
         SessionPhase.Ready => Color.FromArgb(34, 197, 94),
@@ -80,6 +92,7 @@ internal sealed class AppIcons : IDisposable
     public void Dispose()
     {
         foreach (var icon in _tray.Values) icon.Dispose();
+        _open.Dispose();
         Window.Dispose();
     }
 }

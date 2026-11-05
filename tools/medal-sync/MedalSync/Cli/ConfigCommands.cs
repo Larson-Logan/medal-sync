@@ -56,7 +56,7 @@ internal static class ConfigCommands
         if (!Directory.Exists(Path.GetDirectoryName(target))) throw new UnsafeOperationException("The output parent directory must already exist.");
         var config = new MedalSyncConfig(1, library ?? Guid.NewGuid().ToString("N"), account, coordination, remote, capture, cache,
             rclone ?? DefaultRclonePath(),
-            new MountConfig(5, 20, 20, 300, 30, 1000, 2, spike ? 53683 : MountConfig.DefaultControlPort), 4,
+            new MountConfig(5, 20, 20, 3600, 30, 1000, 2, spike ? 53683 : MountConfig.DefaultControlPort), 4,
             spike || folder is null ? [] : [new SyncExclusion(folder, pattern)])
         {
             StorageMode = mode == "cloud" ? StorageMode.Cloud : mode == "local" ? StorageMode.Local : StorageMode.Server,

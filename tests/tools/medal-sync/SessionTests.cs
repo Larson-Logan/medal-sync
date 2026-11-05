@@ -9,7 +9,7 @@ using MedalSync.Util;
 
 namespace MedalSync.Tests;
 
-public sealed class SessionTests : IDisposable
+public sealed partial class SessionTests : IDisposable
 {
     private const string LibraryId = "0123456789abcdef0123456789abcdef";
     private static readonly DeviceIdentity FirstPc = new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "First PC");
@@ -48,6 +48,10 @@ public sealed class SessionTests : IDisposable
         public Action? OnLaunch { get; set; }
 
         public bool IsRunning() => Running;
+
+        public Func<bool>? Recording { get; set; }
+
+        public bool IsRecording() => Recording?.Invoke() ?? false;
 
         public void Launch()
         {
@@ -155,7 +159,26 @@ public sealed class SessionTests : IDisposable
             return StopResult;
         }
 
-        public void Forget(string session) => Forgotten.Add(session);
+        public List<long> ForgottenGenerations { get; } = [];
+
+        public Exception? ForgetFailure { get; set; }
+
+        public int FinishedCleanups { get; private set; }
+
+        public List<string> FinishedLeft { get; } = [];
+
+        public void Forget(string session, long generation)
+        {
+            Forgotten.Add(session);
+            ForgottenGenerations.Add(generation);
+            if (ForgetFailure is not null) throw ForgetFailure;
+        }
+
+        public IReadOnlyList<string> CleanupFinished()
+        {
+            FinishedCleanups++;
+            return FinishedLeft;
+        }
 
         public void RetainAbortedStart(string session)
         {
@@ -203,13 +226,17 @@ public sealed class SessionTests : IDisposable
     private Pc Computer(DeviceIdentity device, string machine, bool acceptChanges = false, bool replaceLocal = false, string? database = null, Action? prepareNativeBackup = null,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null,
         ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null, SpacePressureMonitor? space = null,
-        Func<LaunchPreflight>? preflight = null)
+        Func<LaunchPreflight>? preflight = null, string? enrollmentFolder = null, bool askOwnerToSwitch = true)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
         var mount = new FakeMount();
         var options = new SessionOptions(device, WindowsPath.Parse(@"M:\Clips"), Versions,
-            TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal);
+            TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(10), acceptChanges, replaceLocal)
+        {
+            EnrollmentFolder = enrollmentFolder,
+            AskOwnerToSwitch = askOwnerToSwitch,
+        };
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
         return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space, preflight));
     }
@@ -232,6 +259,74 @@ public sealed class SessionTests : IDisposable
         var other = Computer(SecondPc, "second");
         Assert.Equal(LaunchStatus.Blocked, other.Coordinator.Launch().Status);
         Assert.Equal(before, _store.ReadJournal());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnInterruptedEnrollmentIsNeverGivenBackByLaunchOrFinish(bool caughtFailure)
+    {
+        // A local-only clip: giving the start back would lead to the --replace-local-library refusal.
+        string db = _fixture.CreateLibrary("first");
+        MedalFixture.AddContent(db, "local-only", video: @"C:\Recordings\local-only.mp4");
+        string folder = _fixture.PathFor("enrollment-review");
+        var pc = Computer(FirstPc, "first", database: db, enrollmentFolder: folder);
+        string session = SessionCoordinator.NewId();
+        // As enroll --apply takes ownership; a killed apply stays STARTING, a caught failure becomes RECOVERY_REQUIRED.
+        _store.Update(r => Ownership.Acquire(r, FirstPc, session, _clock.Now) with { Reason = EnrollmentOwnership.Reason(session) }, TimeSpan.FromSeconds(1));
+        if (caughtFailure)
+            _store.Update(r => Ownership.RequireRecovery(r, FirstPc, session, EnrollmentOwnership.Reason(session) + " stopped", _clock.Now), TimeSpan.FromSeconds(1));
+        var before = _store.ReadJournal();
+        string digest = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId).Digest();
+
+        var launched = pc.Coordinator.Launch();
+        var finished = pc.Coordinator.Finish(session);
+
+        foreach (string message in new[] { launched.Message, finished.Message })
+        {
+            Assert.Contains(folder, message, StringComparison.Ordinal);
+            Assert.Contains("apply.json", message, StringComparison.Ordinal);
+            Assert.Contains("enroll recover", message, StringComparison.Ordinal);
+            Assert.Contains("Do not use 'launch --replace-local-library'", message, StringComparison.Ordinal);
+        }
+        Assert.Equal(LaunchStatus.Blocked, launched.Status);
+        Assert.Equal(FinishStatus.Blocked, finished.Status);
+        Assert.Equal(before, _store.ReadJournal());
+        Assert.Empty(pc.Mount.RetainedAbortedStarts);
+        Assert.Empty(pc.Mount.Starts);
+        Assert.Equal(0, pc.Medal.Launches);
+        Assert.Equal(digest, LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId).Digest());
+
+        // Another PC only waits; it never takes over a half-finished enrollment.
+        var other = Computer(SecondPc, "second");
+        Assert.NotEqual(LaunchStatus.Started, other.Coordinator.Launch().Status);
+        Assert.Equal(before.Revision, _store.ReadJournal().Revision);
+    }
+
+    [Fact]
+    public void AnInterruptedEnrollmentRefusalStillExplainsWithoutARecordedFolder()
+    {
+        string session = SessionCoordinator.NewId();
+        _store.Update(r => Ownership.Acquire(r, FirstPc, session, _clock.Now) with { Reason = EnrollmentOwnership.Reason(session) }, TimeSpan.FromSeconds(1));
+        var outcome = Computer(FirstPc, "first").Coordinator.Launch();
+        Assert.Equal(LaunchStatus.Blocked, outcome.Status);
+        Assert.Contains("the folder you passed to 'enroll --out'", outcome.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PendingEnrollmentFolderIsReadOnlyForItsSession()
+    {
+        string root = _fixture.PathFor("state");
+        string session = SessionCoordinator.NewId();
+        Assert.Null(EnrollmentOwnership.PendingFolder(root));
+        EnrollmentOwnership.WritePending(root, session, @"C:\Private\enroll");
+        Assert.Equal(@"C:\Private\enroll", EnrollmentOwnership.PendingFolder(root));
+        Assert.Equal(@"C:\Private\enroll", EnrollmentOwnership.PendingFolder(root, session));
+        Assert.Null(EnrollmentOwnership.PendingFolder(root, SessionCoordinator.NewId()));
+        File.WriteAllText(Path.Combine(root, "enrollment-pending.json"), "{");
+        Assert.Null(EnrollmentOwnership.PendingFolder(root));
+        EnrollmentOwnership.ClearPending(root);
+        Assert.Null(EnrollmentOwnership.PendingFolder(root));
     }
 
     [Fact]
@@ -462,6 +557,34 @@ public sealed class SessionTests : IDisposable
         Assert.True(pc.Medal.Running);
         Assert.True(pc.Mount.IsRunning);
         Assert.Empty(pc.Mount.Forgotten);
+        Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void SupervisionReportsRecordingOnlyWhileMedalRecordsAGame()
+    {
+        var reports = new List<SessionProgress>();
+        var pc = Computer(FirstPc, "first", progress: reports.Add);
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        int polls = 0;
+        // Idle, then a game, then a failing check: a check that cannot run never claims recording.
+        pc.Medal.Recording = () => polls switch
+        {
+            < 2 => false,
+            < 4 => true,
+            _ => throw new IOException("clip drive is slow"),
+        };
+        using var cancel = new CancellationTokenSource();
+        _clock.OnSleep = () => { if (++polls == 6) cancel.Cancel(); };
+
+        Assert.Equal(FinishStatus.Pending, pc.Coordinator.Supervise(session, _ => { }, cancel.Token).Status);
+
+        var active = reports.Where(r => r.Phase == SessionPhase.Active).ToList();
+        Assert.False(active[0].Recording);
+        Assert.Contains("Medal is open", active[0].NextAction, StringComparison.Ordinal);
+        Assert.Contains(active, r => r.Recording && r.NextAction.Contains("recording a game", StringComparison.Ordinal));
+        Assert.False(active[^1].Recording);
         Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
     }
 
@@ -1576,6 +1699,41 @@ public sealed class SessionTests : IDisposable
         var started = replacing.Coordinator.Launch();
         AssertStarted(started);
         Assert.Contains("backed up to", started.Message, StringComparison.Ordinal);
+        Assert.Contains(SessionCoordinator.KeptBackupNote, started.Message, StringComparison.Ordinal);
+        // The backup holds the only copy of the unshared entry, so it is kept apart from the pruned backups.
+        string kept = Assert.Single(Directory.EnumerateFiles(_fixture.PathFor("second", "backups"), "*.db", SearchOption.AllDirectories));
+        Assert.Contains(kept, started.Message, StringComparison.Ordinal);
+        Assert.StartsWith(DatabaseBackup.KeptPrefix, Path.GetFileName(Path.GetDirectoryName(kept)), StringComparison.Ordinal);
+        Assert.Empty(DatabaseBackup.List(_fixture.PathFor("second", "backups"), MedalFixture.AccountId));
+        Assert.Contains(LibraryDatabase.ReadSnapshot(kept, MedalFixture.AccountId).Table("contents").Rows,
+            r => r.Any(c => c is TextCell { Value: "recorded-without-medal-sync" }));
+    }
+
+    [Fact]
+    public void Finish_PublishesWhenTheCacheCannotBeRemovedAndLaterRunsRetryIt()
+    {
+        var pc = Computer(FirstPc, "first");
+        AssertStarted(pc.Coordinator.Launch());
+        Assert.Equal(1, pc.Mount.FinishedCleanups);
+        string session = _store.ReadJournal().SessionId!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        pc.Mount.ForgetFailure = new IOException("Synthetic: a backup client holds a cached clip.");
+        pc.Mount.FinishedLeft.Add("Finished session x: still held.");
+
+        var finished = pc.Coordinator.Finish(session);
+
+        Assert.Equal(FinishStatus.Published, finished.Status);
+        Assert.Equal(new[] { finished.Generation }, pc.Mount.ForgottenGenerations);
+        Assert.Contains("could not be removed yet", finished.Message, StringComparison.Ordinal);
+        Assert.Contains("does not block setup", finished.Message, StringComparison.Ordinal);
+        Assert.Contains("still held", finished.Message, StringComparison.Ordinal);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal(2, pc.Mount.FinishedCleanups);
+
+        pc.Mount.ForgetFailure = null;
+        AssertStarted(pc.Coordinator.Launch());
+        Assert.Equal(3, pc.Mount.FinishedCleanups);
     }
 
     [Fact]

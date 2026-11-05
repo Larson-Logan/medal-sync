@@ -446,7 +446,8 @@ public sealed class CliAndConfigTests : IDisposable
         var secret = state.SessionSecret(session, DateTimeOffset.UnixEpoch);
         Assert.Equal(secret, state.SessionSecret(session, DateTimeOffset.UnixEpoch.AddDays(1)));
         Assert.Equal(48, secret.Password.Length);
-        state.ForgetSession(session);
+        state.RetireSession(session, new string('a', 32), _fixture.PathFor("cache", session), 1, DateTimeOffset.UnixEpoch);
+        state.ForgetFinished(session);
         Assert.NotEqual(secret.Password, state.SessionSecret(session, DateTimeOffset.UnixEpoch).Password);
         Assert.Throws<ArgumentException>(() => state.SessionSecret(@"..\escape", DateTimeOffset.UnixEpoch));
     }
@@ -495,13 +496,13 @@ public sealed class CliAndConfigTests : IDisposable
         Assert.Equal("Ready", StatusText.Label(journal, me));
         var active = journal with { State = OwnershipState.Active, Owner = other, SessionId = new string('1', 32) };
         Assert.Equal("Waiting for the other PC", StatusText.Label(active, me));
-        Assert.Equal("Recording/Active", StatusText.Label(active, other));
+        Assert.Equal("Active (Medal open)", StatusText.Label(active, other));
         Assert.Equal("Uploading", StatusText.Label(active with { State = OwnershipState.Draining }, other));
         Assert.Equal("Recovery needed", StatusText.Label(active with { State = OwnershipState.RecoveryRequired }, me));
         Assert.StartsWith("Recovery needed:", StatusText.For(active, other, clipDrivePresent: false), StringComparison.Ordinal);
         Assert.Contains("still owns generation", StatusText.For(active, other, clipDrivePresent: false), StringComparison.Ordinal);
         Assert.StartsWith("Waiting for the other PC:", StatusText.For(active, me, clipDrivePresent: false), StringComparison.Ordinal);
-        Assert.StartsWith("Recording/Active:", StatusText.For(active, other, clipDrivePresent: true), StringComparison.Ordinal);
+        Assert.StartsWith("Active (Medal open):", StatusText.For(active, other, clipDrivePresent: true), StringComparison.Ordinal);
         Assert.StartsWith("Ready:", StatusText.For(journal, me, clipDrivePresent: false), StringComparison.Ordinal);
     }
 

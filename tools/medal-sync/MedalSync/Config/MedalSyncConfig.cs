@@ -70,6 +70,13 @@ internal sealed record MedalSyncConfig(
     /// <summary>Optional persistent local storage and required media replicas.</summary>
     public ReplicationConfig? Replication { get; init; }
 
+    /// <summary>
+    /// Opt in to beta releases from dev in update checks on this PC. Off by default, and left out of the file
+    /// when off, so configurations that never opt in stay readable by versions without this field.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool BetaUpdates { get; init; }
+
     public string MountRemote => Replication?.LocalCopyRoot ?? Remote;
 
     /// <summary>The persistent clip collection on this PC: <c>localCopyRoot</c>, or local mode's storage folder. Null when recordings only pass through the cache.</summary>

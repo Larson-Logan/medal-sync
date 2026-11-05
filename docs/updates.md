@@ -74,6 +74,14 @@ limits and missing or malformed releases continue normal launch. When an update
 is available, the launch notice points you to **Check for updates**. Nothing
 installs until you ask for it.
 
+Update checks offer only stable releases unless this PC opts in to betas: add
+`"betaUpdates": true` to its [configuration](configuration.md#top-level-fields).
+Each PC opts in on its own. An opted-in PC is offered the newest of the latest
+releases and [betas](versioning.md#betas), which are built from `dev` before a
+release and are less tested. Before configuration, and whenever the
+configuration cannot be read, checks offer stable releases only. The portable
+lifecycle tool never installs betas.
+
 Choose **Check for updates** in the status panel or tray menu, or **Check for
 Medal Sync updates** in the Start menu. It also works before configuration or
 enrollment, and reports unavailable checks separately from an up-to-date
@@ -156,6 +164,21 @@ and receipts under the state root's `updates` directory.
 Applying a portable change also blocks native setup and new library operations
 for the duration of the transaction. Bare release versions such as `1.3.0.01` and
 full tags such as `v1.3.0.01` both resolve to the exact stable release tag.
+
+Before it changes programs, the updater asks the installed `medal-sync.exe` the
+same question Windows setup does (`setup check --state-root`): Medal and
+supervision must be stopped, no session login may be retained, and the library
+must be Ready with no owner or session. Every release answers this, so older
+installs update the same way. Quit Medal normally, wait for Ready, then choose
+**Exit Medal Sync** in the status panel or tray menu first. If only the status
+view is still open, the updater and setup say so.
+
+Earlier copies of the updater stopped with
+`Medal Sync check failed: status --json.` for every configured install,
+including `-Uninstall -Apply` and `-Install -Apply` over retained state, and
+changed nothing. The fix is in the updater script, not the installed programs:
+copy `update-medal-sync.ps1`, `MedalSync.Update.psm1` and `set-medal-startup.ps1`
+from the new release's ZIP and run that copy.
 
 Use the native setup and Windows uninstaller for Program Files installations;
 the portable script refuses a native installation layout.

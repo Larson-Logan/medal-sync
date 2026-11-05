@@ -25,6 +25,8 @@ internal static class Program
         bool disconnected = false;
         int reads = 0;
         int finishes = 0;
+        int cloudRetries = 0;
+        Task<CloudRetryCommandResult> cloudRetryTask = Task.FromResult(new CloudRetryCommandResult(0, "", ""));
         FinishCommandResult finishResult = new(1, "finish: Blocked: Removed clips need review. Run audit and repair before retrying.", "");
         DesktopStatus Read()
         {
@@ -37,24 +39,32 @@ internal static class Program
         }
         bool operationRunning = true;
         using var view = new WindowsTrayStatus(true, Read, @"Local\MedalSync.DesktopTest." + Guid.NewGuid().ToString("N"),
-            () => { finishes++; return Task.FromResult(finishResult); }, () => operationRunning);
+            () => { finishes++; return Task.FromResult(finishResult); }, () => operationRunning,
+            () => { cloudRetries++; return cloudRetryTask; });
         var panel = Field<Form>(view, "_panel");
         var status = Field<TextBox>(view, "_status");
         var retry = Field<Button>(view, "_retry");
+        var retryCloud = Field<Button>(view, "_retryCloud");
         var icon = Field<NotifyIcon>(view, "_icon");
         var icons = Field<AppIcons>(view, "_icons");
         foreach (SessionPhase phase in Enum.GetValues<SessionPhase>())
         {
-            lock (gate) current = new(phase, "Synthetic next action " + phase, DateTimeOffset.UtcNow, 3, 1024, "synthetic-replica", phase == SessionPhase.RecoveryNeeded);
+            lock (gate) current = new(phase, "Synthetic next action " + phase, DateTimeOffset.UtcNow, 3, 1024, "synthetic-replica", phase == SessionPhase.RecoveryNeeded,
+                CanRetryCloudCopies: true);
             Until(view, () => status.Text.Contains("Next action: Synthetic next action " + phase + "\r\n", StringComparison.Ordinal));
             Check(status.Text.Contains("Queued files: 3", StringComparison.Ordinal), "Queue files are readable");
             Check(status.Text.Contains("Queued bytes: 1024", StringComparison.Ordinal), "Queue bytes are readable");
             Check(status.Text.Contains("synthetic-replica", StringComparison.Ordinal), "Replica is readable");
             Check(status.Text.Contains("Last confirmed:", StringComparison.Ordinal), "Confirmation time is readable");
             Check(retry.Enabled == (phase == SessionPhase.RecoveryNeeded), "Only supported recovery enables retry");
-            Check(ReferenceEquals(icon.Icon, icons.For(phase)), "The tray shows the Medal Sync icon with this state's dot");
+            Check(retryCloud.Enabled == (phase == SessionPhase.Ready), "Only Ready can enable retrying cloud copies");
+            Check(ReferenceEquals(icon.Icon, icons.For(phase, recording: false)), "The tray shows the Medal Sync icon with this state's dot");
             Check(icon.Text == "Medal Sync: " + new DesktopStatus(phase, "", null).Title, "The tooltip names the state, so color is never the only cue");
         }
+        lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
+        Until(view, () => status.Text.Contains("Next action: Synthetic recording\r\n", StringComparison.Ordinal));
+        Check(icon.Text == "Medal Sync: Recording" && ReferenceEquals(icon.Icon, icons.For(SessionPhase.Active)), "Only a recording session shows the red recording dot");
+        Check(!ReferenceEquals(icons.For(SessionPhase.Active, recording: false), icons.For(SessionPhase.Active)), "Medal open without a game has its own dot");
         CheckIcons(icons, panel);
         Check(status.ReadOnly && status.TabStop && status.AccessibleName!.Contains("next action", StringComparison.Ordinal), "Status supports keyboard and accessibility APIs");
         Check(panel.CancelButton is Button, "Escape closes the panel");
@@ -86,8 +96,40 @@ internal static class Program
         exit.PerformClick();
         Until(view, () => status.Text.Contains("Uploads will continue safely.", StringComparison.Ordinal));
         Check(!Field<bool>(view, "_ending") && panel.Visible && icon.Visible, "Exit explains active supervision and keeps it running");
+        lock (gate) current = new(SessionPhase.Ready, "No pending copies", DateTimeOffset.UtcNow);
+        Until(view, () => status.Text.Contains("No pending copies", StringComparison.Ordinal));
+        Check(!retryCloud.Enabled, "No pending copy disables cloud retry");
+        var cloudCompletion = new TaskCompletionSource<CloudRetryCommandResult>();
+        cloudRetryTask = cloudCompletion.Task;
+        lock (gate) current = current with { CanRetryCloudCopies = true };
+        Until(view, () => retryCloud.Enabled);
+        retryCloud.PerformClick();
+        Until(view, () => status.Text.Contains("Cloud retry: Running", StringComparison.Ordinal));
+        retryCloud.PerformClick();
+        Check(cloudRetries == 1 && !retryCloud.Enabled && !retry.Enabled, "A running child disables duplicate retries and finish");
+        operationRunning = false;
+        exit.PerformClick();
+        Check(!Field<bool>(view, "_ending"), "Exit keeps a cloud retry child running");
+        panel.Close();
+        Check(!panel.Visible && !cloudCompletion.Task.IsCompleted, "Closing the panel leaves the retry running");
+        lock (gate) current = current with { Notice = "Cloud retry: Copying selected clips." };
+        Until(view, () => status.Text.Contains("Copying selected clips", StringComparison.Ordinal));
+        cloudCompletion.SetResult(new(3, "Canceled by local launch", ""));
+        Until(view, () => status.Text.Contains("canceled or still pending", StringComparison.Ordinal));
+        Check(!status.Text.Contains("needs action", StringComparison.Ordinal), "Cancellation keeps copies pending without reporting a failure");
+        panel.Show();
+        foreach (int code in new[] { 0, 1 })
+        {
+            cloudRetryTask = Task.FromResult(new CloudRetryCommandResult(code, "", "Sign in again."));
+            Until(view, () => retryCloud.Enabled);
+            retryCloud.PerformClick();
+            Until(view, () => status.Text.Contains(code == 0 ? "Cloud copies verified." : "needs action. Sign in again.", StringComparison.Ordinal));
+        }
+        Check(cloudRetries == 3, "Each retry exposes the child's success or action result");
         _ = SendMessageW(panel.Handle, 0x11, IntPtr.Zero, IntPtr.Zero);
         Check(Field<bool>(view, "_ending"), "Shutdown suppresses further interactive actions even for a hidden panel");
+        retryCloud.PerformClick();
+        Check(cloudRetries == 3, "Shutdown cannot launch another cloud retry");
         // A view is disposable without invoking any session, rclone or library operation.
         Console.WriteLine($"PASS: {_assertions} native desktop assertions with a fake supervisor");
         return 0;
@@ -97,7 +139,7 @@ internal static class Program
     {
         Check(ReferenceEquals(panel.Icon, icons.Window), "The status window uses the Medal Sync icon");
         Check(new[] { SessionPhase.Ready, SessionPhase.Active, SessionPhase.Uploading, SessionPhase.Waiting, SessionPhase.RecoveryNeeded }
-            .Select(AppIcons.DotColor).Distinct().Count() == 5, "Ready, recording, working, waiting and attention have distinct dots");
+            .Select(AppIcons.DotColor).Append(AppIcons.OpenColor).Distinct().Count() == 6, "Ready, recording, Medal open, working, waiting and attention have distinct dots");
         // System.Drawing's size matching ignores 256 px entries (stored as 0), so read the icon file's own directory.
         using (var stream = typeof(AppIcons).Assembly.GetManifestResourceStream("MedalSync.Launch.medal-sync.ico")!)
         using (var reader = new BinaryReader(stream))

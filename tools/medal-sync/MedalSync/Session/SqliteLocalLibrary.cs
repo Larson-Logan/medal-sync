@@ -11,9 +11,10 @@ internal sealed class SqliteLocalLibrary(string databasePath, string accountId, 
 
     public LibrarySnapshot Read() => LibraryDatabase.ReadSnapshot(databasePath, AccountId);
 
-    public RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false)
+    public RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false, bool keepBackup = false)
     {
-        var result = LibraryRestorer.Restore(databasePath, snapshot, new RestoreOptions(AccountId, backupDirectory, AllowEmptyReplacement: allowEmptyReplacement), clock.Now);
+        var result = LibraryRestorer.Restore(databasePath, snapshot,
+            new RestoreOptions(AccountId, backupDirectory, AllowEmptyReplacement: allowEmptyReplacement, KeepBackup: keepBackup), clock.Now);
         if (cloudCaptureFolder is not null && CaptureFolder() is { } current
             && !Util.WindowsPath.Parse(current).Equals(Util.WindowsPath.Parse(cloudCaptureFolder)))
         {

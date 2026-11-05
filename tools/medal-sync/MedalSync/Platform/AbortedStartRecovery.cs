@@ -3,12 +3,17 @@ using MedalSync.Coordination;
 
 namespace MedalSync.Platform;
 
-/// <summary>Conservative recovery for older Clean journals whose empty-cache startup login was orphaned.</summary>
-internal sealed class AbortedStartRecovery(MedalSyncConfig config, LocalState state, CoordinationStore store, Action requireIdle)
+/// <summary>
+/// Conservative recovery for older Clean journals whose empty-cache startup login was orphaned, and for a published
+/// session whose cache or login could not be removed when it finished.
+/// </summary>
+internal sealed class AbortedStartRecovery(MedalSyncConfig config, LocalState state, CoordinationStore store, Action requireIdle,
+    Action<string>? deleteDirectory = null)
 {
     public string Run(string session, bool apply)
     {
         if (!CoordinationStore.IsValidId(session)) throw new InvalidDataException("A session ID is 32 lowercase hex characters.");
+        if (state.FinishedSessionIds().Contains(session)) return Finished(session, apply);
         string cache = config.SessionCacheDirectory(session);
         string login = Path.Combine(state.Root, "sessions", session + ".json");
         void RequireSafe()
@@ -28,5 +33,28 @@ internal sealed class AbortedStartRecovery(MedalSyncConfig config, LocalState st
         RequireSafe();
         string recovery = state.RetainAbortedStart(session, config.LibraryId, cache, DateTimeOffset.UtcNow, legacyEmptyCache: true);
         return $"Orphaned startup login retained at {recovery}. No cache, library or journal was deleted or published. Retry setup readiness.";
+    }
+
+    /// <summary>Its receipt records that its uploads were verified and its generation committed, so its leftovers are safe to remove.</summary>
+    private string Finished(string session, bool apply)
+    {
+        requireIdle();
+        if (state.IsEmptyFinished(session))
+        {
+            if (!apply) return $"Preview only: only an empty folder is left of finished session {session}. Add --apply to remove it.";
+            state.ForgetFinished(session);
+            return $"Removed the empty folder left by finished session {session}.";
+        }
+        var receipt = state.ReadFinished(session);
+        if (receipt.LibraryId != config.LibraryId)
+            throw new UnsafeOperationException("That finished session belongs to another library's configuration; it was kept.");
+        if (!apply)
+            return $"Preview only: session {session} finished and generation {receipt.Generation} was committed, but its SSD cache or login was not removed. "
+                + "Add --apply to remove them. This does not block setup.";
+        var left = FinishedSessionCleanup.Retry(state, config.LibraryId, config.SessionCacheDirectory, deleteDirectory: deleteDirectory);
+        if (left.FirstOrDefault(l => l.Contains(session, StringComparison.Ordinal)) is { } problem)
+            throw new UnsafeOperationException($"{problem} Close any program using the cache folder and retry.");
+        return $"Removed the leftover SSD cache and login of finished session {session} (generation {receipt.Generation})."
+            + (left.Count == 0 ? "" : $" {left.Count} other finished session(s) are still left: {left[0]}");
     }
 }

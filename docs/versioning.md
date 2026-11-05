@@ -27,21 +27,53 @@ counts as `.00`, and its hotfixes continue at `.01`. See the
 
 | Part | Raised when |
 | --- | --- |
-| `MAJOR` | A PC on the new version can no longer share a library with a PC on the previous major version, a documented file `format` changes, a documented command or option is removed, or a documented output field changes meaning. |
-| `MINOR` | New commands, options, settings or output fields; newly supported Medal builds or schemas; behavior changes that keep existing configurations and libraries working. |
+| `MAJOR` | A PC on the new version can no longer share a library with a PC on the previous major version, a documented file `format` changes, a documented command or option is removed, or a documented output field changes meaning. Required when a promotion includes a breaking (`type!:`) pull request. |
+| `MINOR` | New commands, options, settings or output fields; newly supported Medal builds or schemas; behavior changes that keep existing configurations and libraries working. Required when a promotion includes a `feat` pull request. |
 | `PATCH` | Fixes and documentation only, with no new options or fields. |
 | `NN` | Automatically, for each merge to `main` that does not change `VersionPrefix`. |
 
 Only stable tags count. Automatic update checks ignore drafts, prereleases and
 any tag that is not exactly `v` followed by three numbers without leading
-zeros, optionally followed by a two-digit (or longer) counter. The installed
+zeros, optionally followed by a two-digit (or longer) counter, unless the PC
+opted in to [betas](#betas). The installed
 version is compared numerically, so `1.10.0.00` is newer than `1.9.0.00`,
-`1.3.0.10` is newer than `1.3.0.09`, and `1.3.0.00` is newer than `1.3.0`. `medal-sync version` prints the installed version together with the
-supported Medal schema.
+`1.3.0.10` is newer than `1.3.0.09`, and `1.3.0.00` is newer than `1.3.0`. An
+installed beta is offered the release it leads up to, or any newer one: a PC on
+`1.3.1.02-beta.3` is offered `1.3.1.02`. `medal-sync version` prints the
+installed version together with the supported Medal schema.
 
 Undocumented output is not a contract. For example, `status --json` printed the
 raw ownership journal before 1.1.0; it now prints the documented status
 document, so that change shipped in a minor release.
+
+### Betas
+
+Every merge to `dev` is also published as a beta of the release that promoting
+`dev` would publish next. Betas use `MAJOR.MINOR.PATCH.NN-beta.N` and are tagged
+`vMAJOR.MINOR.PATCH.NN-beta.N`, for example `v1.3.1.02-beta.3`:
+
+- `MAJOR.MINOR.PATCH.NN` is that next release: `VersionPrefix` on `dev`, and
+  one more than the highest `NN` already released for it, or `.00` when it has
+  none yet. Betas never raise `NN` themselves.
+- `N` counts the betas of that release from 1. Once it is released, the next
+  merge to `dev` starts the betas of the release after it, again at `beta.1`.
+
+So after `v1.3.1.01`, merges to `dev` publish `v1.3.1.02-beta.1`,
+`v1.3.1.02-beta.2` and so on; promoting `dev` then releases `v1.3.1.02`, and
+the next merge to `dev` publishes `v1.3.1.03-beta.1`. Raising `VersionPrefix`
+to `1.4.0` on `dev` moves the betas to `v1.4.0.00-beta.1`. A beta sorts before
+its release, as in [Semantic Versioning](https://semver.org/#spec-item-11).
+
+Betas are GitHub prereleases and are never marked Latest, so update checks
+ignore them unless a PC opts in with `"betaUpdates": true` in its
+[configuration](configuration.md#top-level-fields). An opted-in PC is offered
+whichever is newer, the latest beta or the latest release. The programs, setup,
+portable ZIP and `release.json` carry the full beta version; Windows file
+version properties hold only the four numbers. Setup treats a beta as the
+release it leads up to, so that release installs over it. The portable updater
+refuses beta packages. To try a single beta without opting in, download its
+setup from the [Releases page](https://github.com/Larson-Logan/medal-sync/releases). See
+[beta releases](releases.md#beta-releases) for how they are built.
 
 ## File formats
 

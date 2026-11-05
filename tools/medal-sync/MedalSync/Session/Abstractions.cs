@@ -11,6 +11,12 @@ internal interface IMedalProcess
     /// <summary>True while any Medal process (UI, tray, recorder, encoder) is alive.</summary>
     bool IsRunning();
 
+    /// <summary>
+    /// True while Medal is recording a game. Medal's recorder runs whenever Medal is open, so this is read from
+    /// its replay buffer instead. Advisory: it only changes the status shown, never ownership or uploads.
+    /// </summary>
+    bool IsRecording() => false;
+
     /// <summary>Starts Medal normally, as the user, without elevation.</summary>
     void Launch();
 }
@@ -30,8 +36,11 @@ internal interface ILocalLibrary
 
     LibrarySnapshot Read();
 
-    /// <summary>Empty replacement requires a checked committed history or explicit replacement review.</summary>
-    RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false);
+    /// <summary>
+    /// Empty replacement requires a checked committed history or explicit replacement review.
+    /// <paramref name="keepBackup"/> keeps the backup out of the automatic prune; see <see cref="RestoreOptions.KeepBackup"/>.
+    /// </summary>
+    RestoreResult Restore(LibrarySnapshot snapshot, bool allowEmptyReplacement = false, bool keepBackup = false);
 
     /// <summary>Medal's configured capture root (<c>ClipFolder</c>), or null when unset.</summary>
     string? CaptureFolder();
@@ -64,8 +73,14 @@ internal interface IClipMount
     /// <summary>Stops gracefully. False when it is still running afterwards.</summary>
     bool Stop();
 
-    /// <summary>Removes a finished, fully uploaded session's cache folder and control login.</summary>
-    void Forget(string session);
+    /// <summary>
+    /// Removes a finished, fully uploaded session's cache folder and control login, after recording that
+    /// <paramref name="generation"/> is committed so a failed delete leaves a recognizably safe leftover.
+    /// </summary>
+    void Forget(string session, long generation);
+
+    /// <summary>Retries removal left by an earlier failed <see cref="Forget"/>. Returns what is still left; never blocks.</summary>
+    IReadOnlyList<string> CleanupFinished() => [];
 
     /// <summary>Retains a verified stopped pre-launch session's login and cache as recovery evidence, without deleting bytes.</summary>
     void RetainAbortedStart(string session);
@@ -137,4 +152,14 @@ internal sealed record SessionOptions(
     TimeSpan DrainTimeout,
     TimeSpan PollInterval,
     bool AcceptLibraryChanges = false,
-    bool ReplaceLocalLibrary = false);
+    bool ReplaceLocalLibrary = false)
+{
+    /// <summary>The review folder of this PC's interrupted <c>enroll --apply</c>, when one is recorded; named in its refusal.</summary>
+    public string? EnrollmentFolder { get; init; }
+
+    /// <summary>
+    /// Whether a plain launch that finds the library owned elsewhere asks that PC to switch. False when Windows started
+    /// Medal at sign-in: nobody here asked for Medal yet, so the owner is not interrupted. An explicit wait always asks.
+    /// </summary>
+    public bool AskOwnerToSwitch { get; init; } = true;
+}

@@ -49,6 +49,7 @@ internal static class Program
             TestIncrementalAndReadyRetry(rclone);
             TestReplicaAuditAndPrune(rclone);
             TestCloudPrimary(rclone);
+            CloudEnrollment.Run(rclone, Check);
             CloudHandoff.Run(rclone, Check, testMount: args.Contains("--mount"));
             TestInterruptedTransfer(rclone);
             if (args.Contains("--mount"))

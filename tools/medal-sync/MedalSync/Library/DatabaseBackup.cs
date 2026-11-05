@@ -12,6 +12,21 @@ internal static class DatabaseBackup
     private const string Prefix = "medal-library-";
     private const string StampFormat = "yyyyMMdd'T'HHmmssfff'Z'";
 
+    /// <summary>
+    /// Folders holding a backup that may be the only copy of entries that were never shared. <see cref="Prune"/> only
+    /// looks at files directly in the backup folder, so these are never pruned; only a reviewed retention removes them.
+    /// </summary>
+    public const string KeptPrefix = "kept-library-";
+
+    /// <summary>Like <see cref="Create"/>, in a new <see cref="KeptPrefix"/> folder of its own.</summary>
+    public static string CreateKept(SqliteConnection source, string directory, string accountId, DateTimeOffset now)
+    {
+        string stamp = now.UtcDateTime.ToString(StampFormat, CultureInfo.InvariantCulture);
+        string folder = Path.Combine(directory, $"{KeptPrefix}{stamp}-{Guid.NewGuid().ToString("N")[..8]}");
+        if (Directory.Exists(folder)) throw new IOException($"Backup folder '{folder}' already exists.");
+        return Create(source, folder, accountId, now);
+    }
+
     public static string Create(SqliteConnection source, string directory, string accountId, DateTimeOffset now)
     {
         Directory.CreateDirectory(directory);

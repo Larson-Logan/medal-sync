@@ -37,6 +37,55 @@ public sealed class DesktopStatusTests
         Assert.False(status.CanRetry);
     }
 
+    [Theory]
+    [InlineData(false, "Medal open")]
+    [InlineData(true, "Recording")]
+    public void ActiveSaysRecordingOnlyWhileMedalRecords(bool recording, string title)
+    {
+        var report = Report(SessionPhase.Active);
+        report = report with { Progress = report.Progress with { Recording = recording } };
+
+        var status = DesktopStatus.Resolve(Journal, Me, report, true, Now);
+
+        Assert.Equal(SessionPhase.Active, status.Phase);
+        Assert.Equal(recording, status.Recording);
+        Assert.Equal(title, status.Title);
+    }
+
+    [Fact]
+    public void RecordingIsIgnoredOutsideTheActivePhase()
+    {
+        var report = Report(SessionPhase.Uploading);
+        report = report with { Progress = report.Progress with { Recording = true } };
+
+        Assert.False(DesktopStatus.Resolve(Journal, Me, report, true, Now).Recording);
+    }
+
+    [Fact]
+    public void ReplayBufferSegmentsShowWhetherMedalIsRecording()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "medal-sync-recording-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var now = DateTime.UtcNow;
+            Assert.False(MedalRecording.IsRecording(folder, now));
+            Directory.CreateDirectory(folder);
+            Assert.False(MedalRecording.IsRecording(folder, now));
+            string segment = Path.Combine(folder, "buffer-vbuf-1.0.bin");
+            File.WriteAllBytes(segment, new byte[16]);
+            Assert.True(MedalRecording.IsRecording(folder, DateTime.UtcNow));
+            // A leftover from a crash is not a game being recorded.
+            File.SetCreationTimeUtc(segment, now.AddMinutes(-10));
+            File.SetLastWriteTimeUtc(segment, now.AddMinutes(-10));
+            Assert.False(MedalRecording.IsRecording(folder, now));
+            Assert.Equal(@"M:\Clips\Temp\RecordingBuffer", MedalRecording.BufferFolder(WindowsPath.Parse(@"M:\Clips")).Display);
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
     [Fact]
     public void StorageOutageIsACalmWaitNotAnError()
     {
@@ -96,6 +145,20 @@ public sealed class DesktopStatusTests
         Assert.Equal(SessionPhase.RecoveryNeeded, recovery.Phase);
         Assert.False(recovery.CanRetry);
         Assert.True(DesktopStatus.Resolve(Journal, Me, null, false, Now).CanRetry);
+    }
+
+    [Fact]
+    public void AnotherPcThatIsOnlyUploadingIsNotDescribedAsNeedingMedalQuit()
+    {
+        var other = new DeviceIdentity(new string('d', 32), "Other PC");
+        Assert.StartsWith("Quit Medal and finish the handoff on Synthetic PC.", DesktopStatus.Resolve(Journal, other, null, false, Now).NextAction,
+            StringComparison.Ordinal);
+        foreach (var state in new[] { OwnershipState.Draining, OwnershipState.Publishing })
+        {
+            var finishing = DesktopStatus.Resolve(Journal with { State = state }, other, null, false, Now);
+            Assert.Equal(SessionPhase.Waiting, finishing.Phase);
+            Assert.Equal("Synthetic PC is finishing its uploads and hands off the library by itself. Open Medal here after it is Ready.", finishing.NextAction);
+        }
     }
 
     [Fact]

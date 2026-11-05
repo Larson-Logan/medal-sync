@@ -224,6 +224,11 @@ paths and isolate the SSD cache from file synchronization. `init` without
 `--apply` previews server asset checks; initialization is only for a genuinely
 new shared library. A second PC uses the same library ID and `enroll` preview
 to review its existing records. Never initialize an existing journal.
+This works with an SMB primary and with an rclone primary such as
+`onedrive:MedalSync`. With an rclone primary, `enroll --apply` copies the PC's
+clips into its local copy, and the finish that follows uploads and verifies
+them before the library is shared or released. See
+[enroll into an rclone primary](storage.md#enroll-a-pc-with-existing-clips-into-an-rclone-primary).
 
 The new Start menu shortcut opens the companion without replacing Medal's own
 startup entries. Setup never changes them. After configuration and enrollment
@@ -249,16 +254,25 @@ wait for **Ready** before switching PCs, updating or uninstalling.
 
 Open **Medal Sync Status** from the Start menu, double-click its notification-area
 icon, or run `medal-sync-launch.exe --status`. A configured desktop launch starts
-the tray view automatically. Starting, Recording / Active, Uploading, Verifying,
+the tray view automatically. Starting, Medal open, Recording, Uploading, Verifying,
 Ready, Waiting for another PC, Recovery needed and Unknown / unreachable are
-distinct states. The notification-area icon carries a colored dot for the
-state: green for Ready, red while recording, blue while starting, uploading or
+distinct states. Recording means Medal is writing its replay buffer for a game;
+Medal open means it is running without recording (if Medal keeps its replay
+buffer in memory, it always shows as Medal open). The notification-area icon
+carries a colored dot for the state: green for Ready, red while recording,
+purple while Medal is open but not recording, blue while starting, uploading or
 verifying, gray while waiting for another PC or for storage, and amber when
 recovery is needed or the state is unknown. Hover over it for the state's name.
 The panel shows available queued files and bytes, the current
 required replica, last confirmation time and the next action. Unavailable counts
 stay unavailable; an empty queue alone never means Ready. Ready requires the
 committed, released journal state after the supervisor's checks.
+
+Failed and incomplete cloud-copy checks appear in text status and as a panel
+notice when no higher-priority notice is showing. Missing or different files
+show counts; an incomplete sign-in check says to sign in again. A passing check
+or a later handoff that verifies that target clears its warning. Text/JSON
+status and diagnostics retain these local results while shared storage is offline.
 
 The view reconnects automatically. Status older than 20 seconds, an unreadable
 journal or a lost progress feed shows Unknown; keep this PC's session and cache.
@@ -268,8 +282,22 @@ removals automatically. Interrupted startup cleanup instead requires reopening
 Medal Sync on this PC. A blocked finish shows its diagnostic and required recovery
 steps in **Last finish result**; follow those steps before retrying. The last
 supervisor refusal stays available when reopening status for that same session.
-Waiting for another PC does not start Medal automatically. When another PC asks
-to switch, the panel shows one notice per request. A request older than six
+When you open Medal while another PC owns the library, Medal Sync sends a switch
+request and asks whether to **wait and open Medal when ready**. No is the
+default. If that PC has already quit Medal and is only uploading, the message
+says it hands off by itself; nobody needs to go to it. Yes shows a waiting window that names the PC that has the library,
+when it was last checked and whether the server can be reached. Medal opens by
+itself once that PC finishes its handoff, after the usual startup checks. Cancel,
+Windows shutdown or 15 minutes without a handoff stop the wait and withdraw the
+request. An unreachable server or a quiet owner never counts as a handoff. If two
+PCs wait, only one gets the library; the other keeps waiting. Choosing to wait
+reuses the request just sent, so the other PC is told once. At sign-in nothing
+is offered and no request is sent: Windows started Medal, not you, so the PC
+that has the library is not interrupted. Open Medal when you want to switch.
+Scripts can use `launch --wait-for-handoff SECONDS`. When another PC asks
+to switch, the panel shows one notice per request, and while Medal is open the
+status names every PC still waiting. A PC disappears from it as soon as it
+stops waiting. A request older than six
 hours no longer prompts; `status` lists it as old until the next session on the
 owning PC removes it. If supervision stops while Medal is still open, its last
 message also appears in the panel instead of a dialog that would take focus.
@@ -305,6 +333,7 @@ the reason on standard error.
 | `safeToSwitch` | `true` only when the journal is `CLEAN` and the phase is `READY`. |
 | `handoffRequests` | `null` when unreachable. Each has `device`, `requestedAt`, `ageSeconds` and `stale` (older than six hours, no longer prompting). |
 | `pendingCloudCopies` | Optional cloud copies waiting for a retry: `name`, `firstFailure`, `lastAttempt`. |
+| `cloudCopies` | Configured cloud copies: `name`, `lastCheck`, `lastComplete` and `needsAttention`. Each check has `result` (`passed`, `failed`, `incomplete`), `reason` (or `null`), `finishedAt`, `generation`, and counts `planned`, `checked`, `matched`, `missing`, `mismatched`, `unknown`, `bytes`. A check is `null` when unavailable or never run. `lastComplete` preserves the latest completed check if a newer attempt is incomplete. A later verified handoff clears `needsAttention` without rewriting the historical check. |
 | `lastVerifiedAt` | When this PC last verified primary storage and its cloud copies, or `null`. |
 | `replicaRetry` | Ready-state cloud retry progress/result, or `null`: `generation`, `running`, `message`, `confirmedAt`, optional `target`, plus format and library identity. Stale running evidence becomes an explicit stale result. This does not change library ownership. |
 | `observedAt` | When this report was made. |
@@ -362,6 +391,14 @@ unknown; retained evidence is not a successful-upload receipt. Setup checks
 still refuse an active process, unfinished login or non-Ready journal. Run
 `finish` on the owning PC to recover an interrupted STARTING session without
 launching Medal; a failed stop or evidence write keeps ownership for retry.
+
+When a session finishes, its uploads are verified and its generation committed
+before its SSD cache and login are removed. The login first moves to
+`finished-sessions/SESSION/` beside a receipt naming that generation. If a
+program such as antivirus, the search indexer or a backup client holds a cached
+clip, the delete fails, but what is left does not block setup, the
+configuration wizard or the portable updater. The next launch or finish
+retries it, and `recover-start --session SESSION --apply` retries it on demand.
 
 An older build may have left an orphan `sessions/SESSION.json` after returning
 to Ready. With Medal quit and its clip drive stopped, preview

@@ -2,6 +2,125 @@
 
 ## Unreleased
 
+## 1.4.0 — 2026-11-05
+
+- Use less CPU, memory and disk activity while Medal Sync runs:
+  - The status view no longer reopens the library on every refresh. In Google
+    Drive mode each refresh, every 5 seconds even with the panel closed,
+    started rclone twice and made three Drive requests; it now makes one Drive
+    request and starts nothing. In server mode it reads half as many files
+    from the share.
+  - The clip drive and cloud copies run rclone with `--use-mmap`, so upload
+    and playback buffers go back to Windows as soon as a transfer ends.
+  - Medal Sync's own code is precompiled, so every command, launch and status
+    view starts with about a third less CPU. The download grows by about 2 MB.
+  - The status heartbeat, written every 5 seconds during a session, is no
+    longer forced to disk each time. Final results still are.
+  - The once-a-minute check of Medal's shortcuts skips shortcut files that
+    have not changed since they were last found correct.
+
+- Change the Medal Sync icon from violet to charcoal and white to match Medal,
+  with a thin lighter rim so it stays visible on dark taskbars. Tray status
+  dots keep their colors.
+- Handle two PCs being on at the same time more gracefully:
+  - Medal starting at sign-in on one PC no longer sends a switch request to the
+    PC that has the library, so that PC is not told to quit Medal just because
+    another PC was turned on. Opening Medal yourself still asks. The sign-in
+    launcher passes the new `launch --no-switch-request`.
+  - Choosing **Wait and open when ready** reuses the request the launch just
+    sent, so the other PC gets one notice instead of two.
+  - While Medal is open, the status panel on the PC that has the library names
+    every PC waiting for it, so a later notice cannot hide the request. A PC
+    drops off as soon as it stops waiting. A PC never asks itself to switch.
+  - When the other PC has already quit Medal and is only uploading, the
+    launch message, the waiting window and the status panel say it hands off by
+    itself, instead of asking you to quit Medal there.
+- Add an explicit wait for another PC to hand off the library. Opening Medal
+  while another PC owns it now offers **Wait and open when ready** (No is the
+  default), with Cancel and a 15-minute limit; `launch --wait-for-handoff
+  SECONDS` does the same for scripts. The wait keeps one switch request, shows
+  the owner and whether that status is current, and backs off between checks.
+  Only a released journal starts Medal, through the normal acquisition and
+  launch checks; an unreachable server is never taken as a release. Cancel,
+  timeout or Windows shutdown withdraws only that wait's request and starts
+  nothing. A plain launch still returns at once (#32).
+- Let a PC with existing clips `enroll` into a library whose primary is an
+  rclone remote, such as `onedrive:MedalSync`, including cloud mode. Previously
+  it could only set its own records aside with `launch --replace-local-library`.
+  The preview reviews the same lossless union and also checks for conflicts on
+  the primary and in this PC's local copy. If the primary is unreachable it
+  waits (exit 3) and changes nothing. Apply copies into the persistent local
+  copy, restores the union and hands the still-owned session to the normal
+  finish. Only that finish uploads and verifies every clip, publishes the union
+  and releases the library; an outage there is the usual pending wait.
+  `enroll recover` continues, rolls back or finishes it (#95).
+- Show the last cloud-copy check in text/JSON status, the status panel and
+  privacy-filtered diagnostics. Failed and incomplete checks include recovery
+  guidance; warnings clear after a passing check or a later verified handoff
+  for that target. An incomplete check keeps earlier unresolved damage visible.
+- Add **Retry cloud copies** to the status panel while Ready with optional
+  copies pending. Progress and results stay visible, cancellation keeps copies
+  pending, and closing the panel keeps the guarded retry running.
+- Allow reviewed cleanup and trash purges of required cloud copies. Referenced
+  and recent files remain protected. Applying cleanup invalidates this PC's
+  receipt before moving files so its next handoff verifies the full copy again.
+- Fix an interrupted `enroll --apply` (Ctrl+C, a closed window, a crash or a
+  reboot) being given back as an aborted launch at the next start, which then
+  suggested `launch --replace-local-library` and would have dropped this PC's
+  own clips from Medal. Enrollment now marks the ownership it holds; launch and
+  finish refuse to release it and name the review folder and `apply.json`.
+  `enroll recover --out DIR` continues the enrollment from where it stopped,
+  reusing verified copies, or with `--rollback` puts back this PC's original
+  library and capture folder and gives the library back (#105).
+- Fix one failed SSD cache delete after a successful handoff leaving a session
+  login that blocked Windows setup, the configuration wizard and the portable
+  updater for good. A finished session's login now moves to
+  `finished-sessions/SESSION/` beside a receipt naming the committed generation
+  before anything is deleted, so a leftover blocks nothing. The next launch or
+  finish retries the cleanup, and so does `recover-start --session SESSION
+  --apply`. A login without that receipt still blocks setup (#104).
+- Fix the backup that `launch --replace-local-library` promises being deleted
+  after about ten ordinary handoffs, together with the never-shared clips it
+  held. That backup, and the ones `repair` and `relocate` take, now go to
+  `Backups/kept-library-TIME-ID/`, which the automatic prune never touches.
+  Only a reviewed `retention` removes them, as a new kind it lists and warns
+  about (#106).
+- Fix the portable updater refusing every configured install with
+  `Medal Sync check failed: status --json.` It now checks readiness with
+  `setup check`, as Windows setup does, before it takes the session lock, so
+  `-Apply`, `-Uninstall -Apply` and `-Install -Apply` over retained state work
+  again from any installed version. It still refuses while Medal or supervision
+  runs, a session login is retained, or the library is not Ready (#98).
+- Say to exit the status view, instead of to quit Medal, when the status view is
+  the only thing keeping setup, uninstall or the portable updater from running
+  (#109).
+- Fix the status panel saying **Recording / Active** whenever Medal was open.
+  It now says **Recording** only while Medal writes its replay buffer for a
+  game, and **Medal open** otherwise, with a purple tray dot instead of red.
+  `medal-sync status` says **Active (Medal open)**. If Medal keeps its replay
+  buffer in memory, the panel always shows **Medal open**.
+- Make switching PCs after quitting Medal much faster. The check that every
+  library file is on the server looked up each file separately, several
+  network round trips per file; with about 1,200 files that took around
+  100 seconds. It now lists each server folder once and takes a few seconds.
+  Any file a listing does not show is still checked directly before it is
+  reported missing.
+- Make clips open and play without long waits or stalls from a share. rclone
+  hashed the whole clip over the network each time Medal opened it (and again
+  on seeks that reopen it); the clip drive now identifies files by size and
+  time instead (`--vfs-fast-fingerprint`). New configurations also keep played
+  clips cached for an hour instead of five minutes (`mount.cacheMaxAgeSeconds`);
+  existing configurations keep their value.
+- Publish a beta for every merge to `dev`, as a GitHub prerelease of the next
+  release, tagged `vMAJOR.MINOR.PATCH.NN-beta.N` (for example
+  `v1.3.1.02-beta.1`). Betas are built and tested like releases but never
+  marked Latest. Update checks offer them only on a PC that opts in with
+  `"betaUpdates": true` in its configuration. A PC running a beta is offered
+  the release it leads up to once it is published, and setup installs that
+  release over the beta.
+
+## 1.3.1.05 — 2026-11-01
+
 - Add **Start Medal at sign-in** to the Medal Sync tray menu, and
   `medal-sync startup [--apply | --restore]`, so an installed copy can start
   Medal through Medal Sync whenever you sign in. Before this, only the
@@ -10,21 +129,33 @@
   saves Medal's original entries in the same file the script uses, so either
   one can turn it off again. It needs a configuration first, and it reports,
   without changing, Windows' own Startup apps switch.
+
+## 1.3.1.04 — 2026-11-01
+
 - Fix an older portable copy starting at sign-in after installing with setup,
   so the status panel showed the old version after a restart. An installed
   copy now always owns Medal's startup entry, `medal://` handler and Medal
   shortcuts, and repoints any left on another launcher. This happens as soon
   as the installed launcher or status panel runs, not only after the next
   supervised session.
+
+## 1.3.1.03 — 2026-11-01
+
 - Fix **Check for updates** closing without a message as soon as the setup
   download began. The download progress window was updated from background
   threads, which Windows refused, and the update process crashed. Only the
   update window's own thread now touches it.
+
+## 1.3.1.02 — 2026-11-01
+
 - The configuration wizard shows only the fields the chosen storage mode uses,
   with a short explanation and example under each, and ignores values left in
   hidden fields. A new setup fills in the signed-in Medal account ID (with a
   **Detect** button to retry), and folder and file fields have **Browse...**
   buttons. Review, confirmation and save checks are unchanged.
+
+## 1.3.1.01 — 2026-11-01
+
 - Add Google Drive cloud mode for cross-PC library handoff without an SMB
   server. Each PC records to a persistent local copy; media and immutable
   library generations verify in Drive before ownership is released through
