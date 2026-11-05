@@ -225,7 +225,14 @@ public sealed class ReplicaMaintenanceTests : IDisposable
     }
 
     private ReplicaAudit Audit() => new(_config, _state, _store, RequireIdle, _remote, clock: () => _now);
-    private ReplicaPrune Prune() => new(_config, _state, _store, RequireIdle, _remote, () => _now);
+    private MedalSyncConfig PruneConfig(bool required) => _config with
+    {
+        Replication = _config.Replication! with
+        {
+            Targets = _config.Replication.Targets.Select(t => t.Name == "cloud" ? t with { Required = required } : t).ToArray(),
+        },
+    };
+    private ReplicaPrune Prune(bool required = false) => new(PruneConfig(required), _state, _store, RequireIdle, _remote, () => _now);
 
     [Theory]
     [InlineData("preview")]
@@ -400,6 +407,89 @@ public sealed class ReplicaMaintenanceTests : IDisposable
 
     // ---------- replica prune ----------
 
+    [Fact]
+    public void OptionalCleanupPlansKeepThePreviousFileShapeAndCanBeAppliedAfterReading()
+    {
+        Clutter();
+        byte[] bytes = Json.Serialize(Prune().Plan("cloud"));
+        Assert.DoesNotContain("\"required\"", System.Text.Encoding.UTF8.GetString(bytes), StringComparison.Ordinal);
+        var plan = Json.Deserialize<ReplicaPrunePlan>(bytes, "optional cleanup review");
+        Assert.False(plan.Required);
+        Assert.Equal(2, Prune().Apply(plan).Moved);
+    }
+
+    [Fact]
+    public void RequiredCleanupDropsItsReceiptBeforeAnInterruptedMoveAndTheNextHandoffReadsEveryFile()
+    {
+        Clutter();
+        var config = PruneConfig(true);
+        config = config with { Replication = config.Replication! with { FullVerifyEveryHandoffs = 100, FullVerifyEveryDays = 30 } };
+        var prune = new ReplicaPrune(config, _state, _store, RequireIdle, _remote, () => _now);
+        string destination = ReplicationPlan.Destination(config.Replication!.Targets[0], config.LibraryId);
+        string digest = _store.Generations.Read(0).Snapshot.Digest();
+        bool full = false;
+        IReadOnlyList<string> readBack = [];
+        void Handoff() => new ReplicationVerification(config, _state, config.ServerCapture.Display, destination, digest,
+            ["one.mp4", "two.mp4"], _now).Run((files, _) =>
+            {
+                readBack = files;
+                var checkedFiles = _remote.Check(config.ServerCapture.Display, destination, files);
+                Assert.Equal(files.Count, checkedFiles.Results.Count);
+                Assert.All(checkedFiles.Results.Values, result => Assert.Equal(RemoteCheck.Match, result));
+            }, _ => { }, (_, _, f) => full = f, RequireIdle);
+        Handoff();
+        Handoff();
+        Assert.False(full);
+        Assert.Empty(readBack);
+        var plan = prune.Plan("cloud");
+        Assert.True(plan.Required);
+        Assert.Contains("This copy is required", ReplicaPrune.Render(plan), StringComparison.Ordinal);
+        Assert.Contains("Referenced files are not touched", ReplicaPrune.Render(plan), StringComparison.Ordinal);
+        _remote.FailMoveAfter = 1;
+        Assert.Throws<RcloneFailedException>(() => prune.Apply(plan));
+        Handoff();
+        Assert.True(full);
+        Assert.Equal(["one.mp4", "two.mp4"], readBack);
+        _remote.FailMoveAfter = null;
+        prune.Apply(plan);
+        Handoff();
+        Assert.True(full);
+        Handoff();
+        Assert.False(full);
+        _now = _now.AddDays(8);
+        Handoff();
+        Assert.False(full);
+        Assert.Single(prune.Purge("cloud", 7, apply: true));
+        Handoff();
+        Assert.True(full);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [SupportedOSPlatform("windows")]
+    public void Prune_AnotherPcHoldingTheWriterLockRefusesBeforeMoving(bool required)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        Clutter();
+        var plan = Prune(required).Plan("cloud");
+        var otherPc = CoordinationStore.Open(_config.LibraryCoordinationDirectory, _config.LibraryId, _config.AccountId);
+        using var held = otherPc.AcquireWriterLock(TimeSpan.FromSeconds(1));
+        var before = Tree();
+        Assert.Throws<StorageBusyException>(() => ReplicaCommands.ApplyPrune(Prune(required), _store, plan, TimeSpan.Zero));
+        Assert.Equal(before, Tree());
+        Assert.Equal(0, _remote.Moves);
+    }
+
+    [Fact]
+    public void Prune_ChangingARequirementNeedsANewReview()
+    {
+        Clutter();
+        var plan = Prune().Plan("cloud");
+        Assert.Throws<UnsafeOperationException>(() => Prune(true).Apply(plan));
+        Assert.Equal(0, _remote.Moves);
+    }
+
     private void Clutter()
     {
         Remote("old.mp4", "unreferenced", _now.AddDays(-60));
@@ -409,17 +499,20 @@ public sealed class ReplicaMaintenanceTests : IDisposable
         Remote(".medal-sync-history/20250101T000000000Z-abc123/one.mp4", "prior one", _now.AddDays(-300));
     }
 
-    [Fact]
-    public void Prune_PlansOnlyOldUnreferencedMediaAndMovesItToTrash()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Prune_PlansOnlyOldUnreferencedMediaAndMovesItToTrash(bool required)
     {
         Clutter();
-        var plan = Prune().Plan("cloud");
+        foreach (string name in new[] { "one.mp4", "two.mp4" }) File.SetLastWriteTimeUtc(Path.Combine(Destination, name), _now.AddDays(-60).UtcDateTime);
+        var plan = Prune(required).Plan("cloud");
         Assert.Equal(["Thumbnails/old.jpg", "old.mp4"], plan.Files.Select(f => f.Path).Order(StringComparer.Ordinal));
         Assert.All(plan.Files, f => Assert.Equal(ReplicaPrune.Unreferenced, f.Category));
         Assert.Equal(2, plan.LeftAlone); // notes.txt and version history (not opted in)
         Assert.Contains("--history-older-than", ReplicaPrune.Render(plan), StringComparison.Ordinal);
 
-        var result = Prune().Apply(plan);
+        var result = Prune(required).Apply(plan);
         Assert.Equal(2, result.Moved);
         Assert.False(File.Exists(Path.Combine(Destination, "old.mp4")));
         Assert.True(File.Exists(Path.Combine(Destination, ".medal-sync-trash", plan.Id, "old.mp4")));
@@ -429,51 +522,61 @@ public sealed class ReplicaMaintenanceTests : IDisposable
         Assert.True(File.Exists(_state.Root + @"\replication\prune\" + plan.Id + ".json"));
     }
 
-    [Fact]
-    public void Prune_VersionHistoryIsAnOptInCategory()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Prune_VersionHistoryIsAnOptInCategory(bool required)
     {
         Clutter();
-        var plan = Prune().Plan("cloud", historyOlderThanDays: 30);
+        var plan = Prune(required).Plan("cloud", historyOlderThanDays: 30);
         var history = Assert.Single(plan.Files, f => f.Category == ReplicaPrune.History);
         Assert.Equal(".medal-sync-history/20250101T000000000Z-abc123/one.mp4", history.Path);
-        Assert.DoesNotContain(Prune().Plan("cloud", historyOlderThanDays: 3650).Files, f => f.Category == ReplicaPrune.History);
+        Assert.DoesNotContain(Prune(required).Plan("cloud", historyOlderThanDays: 3650).Files, f => f.Category == ReplicaPrune.History);
     }
 
-    [Fact]
-    public void Prune_AnUploadBetweenReviewAndApplyRefusesAndMovesNothing()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Prune_AnUploadBetweenReviewAndApplyRefusesAndMovesNothing(bool required)
     {
         Clutter();
-        var plan = Prune().Plan("cloud");
+        var plan = Prune(required).Plan("cloud");
         Remote("new-upload.mp4", "arrived after review", _now.AddDays(-30));
         var before = Tree();
-        Assert.Throws<UnsafeOperationException>(() => Prune().Apply(plan));
+        Assert.Throws<UnsafeOperationException>(() => Prune(required).Apply(plan));
         Assert.Equal(before, Tree());
     }
 
-    [Fact]
-    public void Prune_ANewCommittedGenerationRefusesTheOldReview()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Prune_ANewCommittedGenerationRefusesTheOldReview(bool required)
     {
         Clutter();
-        var plan = Prune().Plan("cloud");
+        var plan = Prune(required).Plan("cloud");
         Commit(DateTimeOffset.UtcNow);
         var before = Tree();
-        Assert.Throws<UnsafeOperationException>(() => Prune().Apply(plan));
+        Assert.Throws<UnsafeOperationException>(() => Prune(required).Apply(plan));
         Assert.Equal(before, Tree());
     }
 
-    [Fact]
-    public void Prune_ARecentUnfinishedSwitchProtectsTheFilesItReferences()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Prune_ARecentUnfinishedSwitchProtectsTheFilesItReferences(bool required)
     {
         Clutter();
         MedalFixture.AddContent(_db, "old", video: @"M:\Clips\old.mp4");
         long head = _store.ReadJournal().CommittedGeneration;
         _store.Generations.Publish(head + 1, head, SessionCoordinator.NewId(), _first, LibraryDatabase.ReadSnapshot(_db, MedalFixture.AccountId),
             new(1, [], []), Versions, _now.AddDays(-1));
-        Assert.DoesNotContain(Prune().Plan("cloud").Files, f => f.Path == "old.mp4");
+        Assert.DoesNotContain(Prune(required).Plan("cloud").Files, f => f.Path == "old.mp4");
     }
 
-    [Fact]
-    public void Prune_ARecentAbandonedAttemptBelowTheHeadStillProtectsItsFiles()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Prune_ARecentAbandonedAttemptBelowTheHeadStillProtectsItsFiles(bool required)
     {
         Clutter();
         // An attempt that referenced old.mp4 was abandoned; a later switch without it committed a higher number.
@@ -485,69 +588,78 @@ public sealed class ReplicaMaintenanceTests : IDisposable
         MedalFixture.DeleteContent(_db, "old");
         Commit(_now);
         Assert.True(_store.ReadJournal().CommittedGeneration > abandoned);
-        Assert.DoesNotContain(Prune().Plan("cloud").Files, f => f.Path == "old.mp4");
+        Assert.DoesNotContain(Prune(required).Plan("cloud").Files, f => f.Path == "old.mp4");
         // Once that attempt is older than the grace period it no longer protects anything.
         _now = _now.AddDays(20);
-        Assert.Contains(Prune().Plan("cloud").Files, f => f.Path == "old.mp4");
+        Assert.Contains(Prune(required).Plan("cloud").Files, f => f.Path == "old.mp4");
     }
 
-    [Fact]
-    public void Prune_AnInterruptedApplyFinishesWhenAppliedAgain()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Prune_AnInterruptedApplyFinishesWhenAppliedAgain(bool required)
     {
         Clutter();
-        var plan = Prune().Plan("cloud");
+        var plan = Prune(required).Plan("cloud");
         _remote.FailMoveAfter = 1;
-        Assert.Throws<RcloneFailedException>(() => Prune().Apply(plan));
+        Assert.Throws<RcloneFailedException>(() => Prune(required).Apply(plan));
         _remote.FailMoveAfter = null;
-        var result = Prune().Apply(plan);
+        var result = Prune(required).Apply(plan);
         Assert.Equal((1, 1), (result.Moved, result.AlreadyMoved));
         Assert.False(File.Exists(Path.Combine(Destination, "old.mp4")));
         Assert.False(File.Exists(Path.Combine(Destination, "Thumbnails", "old.jpg")));
     }
 
-    [Fact]
-    public void Prune_RefusesRequiredCopiesEditedPlansAndBusyLibraries()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Prune_RefusesEditedPlansAndBusyLibraries(bool required)
     {
         Clutter();
-        Assert.Throws<UnsafeOperationException>(() => Prune().Plan("vault"));
-        var plan = Prune().Plan("cloud");
+        var plan = Prune(required).Plan("cloud");
         var edited = plan with { Files = [.. plan.Files, new("one.mp4", 12, _now.AddDays(-60), ReplicaPrune.Unreferenced)] };
-        Assert.Throws<InvalidDataException>(() => Prune().Apply(edited));
-        Assert.Throws<InvalidDataException>(() => Prune().Apply(plan with { Files = [new("../escape.mp4", 1, _now, ReplicaPrune.Unreferenced)] }));
+        Assert.Throws<InvalidDataException>(() => Prune(required).Apply(edited));
+        Assert.Throws<InvalidDataException>(() => Prune(required).Apply(plan with { Files = [new("../escape.mp4", 1, _now, ReplicaPrune.Unreferenced)] }));
         _store.Update(r => Ownership.Acquire(r, _first, SessionCoordinator.NewId(), DateTimeOffset.UtcNow), TimeSpan.FromSeconds(1));
         var before = Tree();
-        Assert.Throws<UnsafeOperationException>(() => Prune().Apply(plan));
+        Assert.Throws<UnsafeOperationException>(() => Prune(required).Apply(plan));
         Assert.Equal(before, Tree());
     }
 
-    [Fact]
-    public void Prune_ALaunchOnThisPcStopsBeforeMoving()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Prune_ALaunchOnThisPcStopsBeforeMoving(bool required)
     {
         Clutter();
-        var plan = Prune().Plan("cloud");
+        var plan = Prune(required).Plan("cloud");
         _idle = false;
         var before = Tree();
-        Assert.Throws<OperationCanceledException>(() => Prune().Apply(plan));
+        Assert.Throws<OperationCanceledException>(() => Prune(required).Apply(plan));
         Assert.Equal(before, Tree());
     }
 
-    [Fact]
-    public void PurgeTrash_CountsAgeFromTheMoveNotTheReview()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PurgeTrash_CountsAgeFromTheMoveNotTheReview(bool required)
     {
         Clutter();
-        var plan = Prune().Plan("cloud");
+        var plan = Prune(required).Plan("cloud");
         _now = _now.AddDays(10);
-        Prune().Apply(plan);
-        var batch = Assert.Single(Prune().Trash("cloud"));
+        Prune(required).Apply(plan);
+        var batch = Assert.Single(Prune(required).Trash("cloud"));
         Assert.Equal(_now, batch.CreatedAt!.Value, TimeSpan.FromMilliseconds(1)); // The marker keeps milliseconds.
-        Assert.Empty(Prune().Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true));
+        Assert.Empty(Prune(required).Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true));
         Assert.True(File.Exists(Path.Combine(Destination, ".medal-sync-trash", plan.Id, "old.mp4")));
     }
 
-    [Fact]
-    public void PurgeTrash_ListsOnlyTheTrashSubtreeOnce()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PurgeTrash_ListsOnlyTheTrashSubtreeOnce(bool required)
     {
-        Assert.Empty(Prune().Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true));
+        Assert.Empty(Prune(required).Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true));
         Assert.Equal("synth:Medal/" + _config.LibraryId + "/.medal-sync-trash", Assert.Single(_remote.Listings));
         Assert.Empty(_remote.Purged);
     }
@@ -614,33 +726,37 @@ public sealed class ReplicaMaintenanceTests : IDisposable
         Assert.Contains(empty ? "The trash is empty." : "Preview only", output.ToString(), StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void PurgeTrash_CancellationAfterReportingKeepsEveryBatch()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PurgeTrash_CancellationAfterReportingKeepsEveryBatch(bool required)
     {
         TrashBatch("old", _now.AddDays(-8));
-        Assert.Throws<OperationCanceledException>(() => Prune().Purge("cloud", 7, apply: true, report: (_, _) => _idle = false));
+        Assert.Throws<OperationCanceledException>(() => Prune(required).Purge("cloud", 7, apply: true, report: (_, _) => _idle = false));
         Assert.Single(_remote.Listings);
         Assert.Empty(_remote.Purged);
         Assert.True(Directory.Exists(Path.Combine(Destination, ReplicaPrune.TrashRoot, "old")));
     }
 
-    [Fact]
-    public void PurgeTrash_DeletesOnlyBatchesOlderThanTheLimit()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PurgeTrash_DeletesOnlyBatchesOlderThanTheLimit(bool required)
     {
         Clutter();
-        var plan = Prune().Plan("cloud");
-        Prune().Apply(plan);
-        var batch = Assert.Single(Prune().Trash("cloud"));
+        var plan = Prune(required).Plan("cloud");
+        Prune(required).Apply(plan);
+        var batch = Assert.Single(Prune(required).Trash("cloud"));
         Assert.Equal((plan.Id, 2), (batch.Name, batch.Files));
-        Assert.Empty(Prune().Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true));
+        Assert.Empty(Prune(required).Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true));
         Assert.True(Directory.Exists(Path.Combine(Destination, ".medal-sync-trash", plan.Id)));
 
         Remote(".medal-sync-trash/undated/keep.mp4", "no date in name", _now.AddDays(-400));
         _now = _now.AddDays(8);
-        var due = Assert.Single(Prune().Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: false));
+        var due = Assert.Single(Prune(required).Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: false));
         Assert.Equal(plan.Id, due.Name);
         Assert.True(Directory.Exists(Path.Combine(Destination, ".medal-sync-trash", plan.Id)));
-        Prune().Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true);
+        Prune(required).Purge("cloud", ReplicaPrune.DefaultPurgeDays, apply: true);
         Assert.False(Directory.Exists(Path.Combine(Destination, ".medal-sync-trash", plan.Id)));
         Assert.True(File.Exists(Path.Combine(Destination, ".medal-sync-trash", "undated", "keep.mp4")));
         Assert.True(File.Exists(Path.Combine(Destination, "one.mp4")));

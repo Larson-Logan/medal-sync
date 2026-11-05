@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json.Serialization;
 using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Storage;
@@ -15,7 +16,8 @@ internal sealed record ReplicaPruneFile(string Path, long Size, DateTimeOffset M
 /// </summary>
 internal sealed record ReplicaPrunePlan(int Format, string Id, string LibraryId, string Target, string Destination, long Generation,
     string SnapshotDigest, DateTimeOffset CreatedAt, int GraceDays, int? HistoryOlderThanDays, int Listed, string ListingDigest,
-    int LeftAlone, IReadOnlyList<ReplicaPruneFile> Files, string Integrity = "")
+    int LeftAlone, IReadOnlyList<ReplicaPruneFile> Files, string Integrity = "",
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Required = false)
 {
     public const int CurrentFormat = 1;
     public string TrashFolder => ReplicaPrune.TrashRoot + "/" + Id;
@@ -84,7 +86,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         var plan = new ReplicaPrunePlan(ReplicaPrunePlan.CurrentFormat,
             now.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + "-" + ShortId(),
             config.LibraryId, target.Name, destination, journal.CommittedGeneration, generation.Snapshot.Digest(), now, graceDays,
-            historyOlderThanDays, listing.Count, Digest(listing), leftAlone, files);
+            historyOlderThanDays, listing.Count, Digest(listing), leftAlone, files, Required: target.Required);
         if (store.ReadJournal() != journal) throw new UnsafeOperationException("The library changed during the review; preview again.");
         return plan with { Integrity = IntegrityOf(plan) };
     }
@@ -100,8 +102,8 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         var target = Target(plan.Target);
         var journal = RequireReady();
         string destination = ReplicationPlan.Destination(target, config.LibraryId);
-        if (plan.LibraryId != config.LibraryId || plan.Destination != destination)
-            throw new UnsafeOperationException("The cleanup plan belongs to another library or destination; preview again.");
+        if (plan.LibraryId != config.LibraryId || plan.Destination != destination || plan.Required != target.Required)
+            throw new UnsafeOperationException("The cleanup plan belongs to another library or destination, or the copy's requirement changed; preview again.");
         var generation = store.Generations.Read(journal.CommittedGeneration);
         if (journal.CommittedGeneration != plan.Generation || generation.Snapshot.Digest() != plan.SnapshotDigest)
             throw new UnsafeOperationException("The committed generation changed since the review; preview the cleanup again. Nothing was moved.");
@@ -112,6 +114,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
 
         var (remaining, alreadyMoved) = Remaining(plan, remote.List(destination));
         requireIdle();
+        DistrustRequired(target);
         if (remaining.Count > 0)
         {
             // Trash age counts from the move, not the review: a late or resumed apply still gets the full wait before purge.
@@ -164,6 +167,11 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         // Report and deletion use this one snapshot. A batch that becomes old enough later stays kept.
         report?.Invoke(all, due);
         if (!apply) return due;
+        if (due.Length > 0)
+        {
+            requireIdle();
+            DistrustRequired(target);
+        }
         foreach (var batch in due)
         {
             requireIdle();
@@ -176,9 +184,15 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
     {
         var target = config.Replication?.Targets.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
             ?? throw new UnsafeOperationException("--target must name a configured cloud copy.");
-        if (target.Required) throw new UnsafeOperationException(
-            $"'{target.Name}' is a required copy. Cleanup currently supports optional cloud copies only; nothing was changed.");
         return target;
+    }
+
+    private void DistrustRequired(ReplicaTarget target)
+    {
+        if (!target.Required) return;
+        // Drop this PC's receipt before any move/delete, including an interrupted apply.
+        // The next handoff on this PC must read every referenced file back.
+        new ReplicationVerification(config, state, "", ReplicationPlan.Destination(target, config.LibraryId), "", [], Now).Invalidate();
     }
 
     private OwnershipRecord RequireReady()
@@ -296,6 +310,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         var text = new StringBuilder();
         long bytes = plan.Files.Sum(f => f.Size);
         text.AppendLine(CultureInfo.InvariantCulture, $"Cloud copy '{plan.Target}' ({plan.Destination}) against committed generation {plan.Generation}: {plan.Listed} file(s) listed.");
+        if (plan.Required) text.AppendLine("This copy is required. Referenced files are not touched; this PC's next handoff reads every referenced file back.");
         foreach (var group in plan.Files.GroupBy(f => f.Category).OrderBy(g => g.Key, StringComparer.Ordinal))
             text.AppendLine(CultureInfo.InvariantCulture, $"  {group.Key}: {group.Count()} file(s), {StorageVolume.Gb(group.Sum(f => f.Size))}");
         string history = plan.HistoryOlderThanDays is { } d

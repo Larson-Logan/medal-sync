@@ -498,7 +498,7 @@ Exit codes: 0 passed, 1 missing or different files, 3 incomplete or canceled.
 
 Files the library no longer references stay at a cloud copy, as does version
 history when `replication.conflictPolicy` is `version`. Cleanup is a reviewed,
-two-step operation for optional targets only:
+two-step operation for optional or required targets:
 
 ```powershell
 medal-sync replica prune --target offsite --out C:\Private\offsite-cleanup.json
@@ -513,7 +513,8 @@ uncommitted generation from that period, the storage marker, database folders
 or anything that is not clip media. Version history under
 `.medal-sync-history/` is planned only with `--history-older-than DAYS`, and
 only whole, dated attempts. The review file names private paths: keep it on
-this PC.
+this PC. For a required copy, the review identifies it as required and confirms
+that referenced files are not touched.
 
 Cleanup refuses duplicate or case-conflicting paths, unsafe names, links and
 unreadable listing entries before saving a review or changing the destination.
@@ -534,8 +535,14 @@ being purged. Each invocation lists only `.medal-sync-trash/`, once. With
 batches marked `kept` remain even if they cross the age limit during reporting.
 A missing trash folder is empty. Age counts from the move, not the review, so
 applying an old review still gets the full wait. Apply writes an empty `.medal-sync-moved-<time>`
-marker into the batch for this; batches without one are kept. Required targets
-are refused.
+marker into the batch for this; batches without one are kept.
+
+Applying cleanup to a required copy drops this PC's incremental verification
+receipt before moving files, even if the move is interrupted. Applying a
+nonempty trash purge drops it too. This PC's next handoff reads every referenced
+file back at that destination before releasing ownership. Other PCs' private
+receipts are unchanged; cleanup protects the referenced files they verify.
+Cleaning an rclone primary is not supported by these commands.
 
 ### Check sign-in before recording
 
