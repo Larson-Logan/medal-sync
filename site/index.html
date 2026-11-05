@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Medal Sync – Free Medal.tv Clip Sync and Backup for Windows</title>
+<meta name="description" content="Free, open-source Windows app that syncs your Medal.tv clip library between gaming PCs and backs it up to a NAS, OneDrive, Dropbox or Google Drive.">
+<meta name="keywords" content="Medal sync, Medal.tv sync, sync Medal clips between PCs, Medal clip backup, Medal library sync, Medal clips NAS, Medal clips Google Drive, Medal clips OneDrive, Medal clips Dropbox, free Medal storage">
+<link rel="canonical" href="https://larson-logan.github.io/medal-sync/">
+<link rel="icon" href="favicon.ico">
+<meta name="robots" content="index, follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Medal Sync">
+<meta property="og:title" content="Medal Sync – Free Medal.tv clip sync and backup">
+<meta property="og:description" content="Free, open-source Windows app that keeps your Medal.tv clips on your own storage and shares one clip library across your gaming PCs.">
+<meta property="og:url" content="https://larson-logan.github.io/medal-sync/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Medal Sync – Free Medal.tv clip sync and backup">
+<meta name="twitter:description" content="Sync your Medal.tv clip library between PCs and back it up to a NAS, OneDrive, Dropbox or Google Drive. Free and open source.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Medal Sync",
+  "description": "Free, open-source Windows companion for Medal.tv that syncs one clip library between gaming PCs, records to a fast SSD cache and keeps clips on your own SMB server, local disk, OneDrive, Dropbox or Google Drive.",
+  "applicationCategory": "UtilitiesApplication",
+  "operatingSystem": "Windows (x64)",
+  "url": "https://larson-logan.github.io/medal-sync/",
+  "downloadUrl": "https://github.com/Larson-Logan/medal-sync/releases/latest",
+  "softwareHelp": "https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md",
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "Logan Larson", "url": "https://github.com/Larson-Logan" },
+  "sameAs": ["https://github.com/Larson-Logan/medal-sync"]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is Medal Sync free?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Medal Sync is free and open source under the MIT license. You only need your own storage: a local disk, an SMB share or NAS, or a cloud account you already have." }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I sync Medal clips between two PCs?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Install Medal Sync on each PC and point them at the same library on an SMB share, NAS or Google Drive. Launch Medal through Medal Sync. When you quit Medal, it finishes uploads, verifies them and shows Ready; the other PC can then start Medal with the same clip library. Each PC keeps its own Medal login and recording settings." }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I back up Medal.tv clips to Google Drive, OneDrive or Dropbox?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Medal Sync can send verified copies of your clips to OneDrive, Dropbox, Google Drive or any rclone destination. Google Drive can also be the main library without a server." }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I store Medal clips on a NAS or home server?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Medal records to a fast virtual drive backed by a local SSD cache, and clips upload in the background to your SMB server or NAS." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is Medal Sync made by Medal?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. Medal Sync is an independent project and is not affiliated with Medal, Microsoft, Dropbox or Google." }
+    }
+  ]
+}
+</script>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f7f8fa; --surface: #ffffff; --text: #16181d; --muted: #555b66;
+  --border: #d9dde4; --accent: #2254ad; --accent-text: #ffffff; --warn: #fff4d6; --warn-border: #e5c56b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --surface: #171a20; --text: #e8eaee; --muted: #a3a9b4;
+    --border: #2b3039; --accent: #91b9ff; --accent-text: #0f1115; --warn: #2a2414; --warn-border: #6b5a26;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --surface: #171a20; --text: #e8eaee; --muted: #a3a9b4;
+  --border: #2b3039; --accent: #91b9ff; --accent-text: #0f1115; --warn: #2a2414; --warn-border: #6b5a26;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.6; }
+main, header, footer { max-width: 880px; margin: 0 auto; padding: 0 16px; }
+header { padding-top: 3.5rem; }
+.eyebrow { color: var(--muted); font-size: .85rem; letter-spacing: .08em; text-transform: uppercase; margin: 0; }
+h1 { font-size: clamp(2rem, 6vw, 2.9rem); line-height: 1.15; margin: .4rem 0 1rem; }
+h2 { font-size: 1.45rem; line-height: 1.25; margin: 2.75rem 0 .75rem; }
+h3 { font-size: 1.05rem; margin: 0 0 .35rem; }
+.lead { font-size: 1.2rem; color: var(--muted); max-width: 46rem; }
+a { color: var(--accent); }
+.actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.75rem 0 1rem; }
+.button { display: inline-block; padding: .7rem 1.2rem; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--accent); }
+.button.primary { background: var(--accent); color: var(--accent-text); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; }
+.card p { margin: 0; color: var(--muted); }
+ol li, ul li { margin: .45rem 0; }
+.note { background: var(--warn); border: 1px solid var(--warn-border); border-radius: 12px; padding: .8rem 1.1rem; margin: 2rem 0 0; }
+details { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: .8rem 1.1rem; margin: .6rem 0; }
+summary { cursor: pointer; font-weight: 600; }
+details p { margin: .6rem 0 .2rem; color: var(--muted); }
+table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+th, td { text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+.table-wrap { overflow-x: auto; }
+footer { color: var(--muted); font-size: .9rem; padding-top: 2.5rem; padding-bottom: 3rem; }
+</style>
+</head>
+<body>
+<header>
+<p class="eyebrow">Free · Open source · Windows</p>
+<h1>Sync your Medal.tv clips between PCs, on your own storage</h1>
+<p class="lead">Medal Sync is a free Windows companion for <a href="https://medal.tv">Medal</a>.
+It records to a fast SSD cache, keeps your clip library on your own server or disk, and can back it up to
+OneDrive, Dropbox or Google Drive. Move between gaming PCs with one shared library, while each PC keeps its
+own Medal login and recording settings.</p>
+<div class="actions">
+<a class="button primary" href="https://github.com/Larson-Logan/medal-sync/releases/latest">Download for Windows</a>
+<a class="button" href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md">Getting started</a>
+<a class="button" href="https://github.com/Larson-Logan/medal-sync">Source on GitHub</a>
+</div>
+</header>
+<main>
+<section aria-labelledby="features">
+<h2 id="features">What Medal Sync does</h2>
+<div class="grid">
+<div class="card"><h3>Shared clip library across PCs</h3><p>Play on your desktop today and your second PC tomorrow. One library, handed between PCs safely.</p></div>
+<div class="card"><h3>Records at SSD speed</h3><p>Medal writes to a virtual clip drive backed by a local SSD cache. Clips upload in the background.</p></div>
+<div class="card"><h3>Your storage, not a quota</h3><p>Keep clips on an SMB server or NAS, a local folder, or any rclone remote.</p></div>
+<div class="card"><h3>Cloud backup copies</h3><p>Send verified copies to OneDrive, Dropbox, Google Drive or several rclone destinations.</p></div>
+<div class="card"><h3>Verifies before handoff</h3><p>Uploads are checked before another PC can take over. Anything uncertain stops and waits for you.</p></div>
+<div class="card"><h3>Private data stays private</h3><p>Medal logins, provider credentials and full Medal databases are never copied to shared storage.</p></div>
+</div>
+</section>
+
+<section aria-labelledby="storage">
+<h2 id="storage">Choose where your Medal recordings live</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Storage</th><th>How it works</th></tr></thead>
+<tbody>
+<tr><td>Server with SSD cache</td><td>Record through a cached virtual drive; the collection lives on your SMB server or NAS.</td></tr>
+<tr><td>Local copy and server</td><td>Keep a complete collection on a local disk and upload it to the server before switching PCs.</td></tr>
+<tr><td>Local storage only</td><td>Keep media and coordination on one PC. No server needed.</td></tr>
+<tr><td>Cloud or personal-server primary</td><td>Use any rclone remote as primary storage, with a persistent local copy.</td></tr>
+<tr><td>Google Drive without a server</td><td>Keep a local recording copy; use Drive for media, library history and cross-PC ownership.</td></tr>
+<tr><td>Cloud copies (add-on)</td><td>Add OneDrive, Dropbox, Google Drive or other rclone destinations to any mode.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The <a href="https://github.com/Larson-Logan/medal-sync/blob/main/docs/storage.md">storage guide</a> explains each mode and how to set it up.</p>
+</section>
+
+<section aria-labelledby="how">
+<h2 id="how">How syncing Medal between PCs works</h2>
+<ol>
+<li>Start Medal through Medal Sync. It takes ownership of the library and mounts the clip drive.</li>
+<li>Medal records as usual. New clips upload in the background.</li>
+<li>When you quit Medal, Medal Sync finishes uploads, verifies every required copy and shows <strong>Ready</strong>.</li>
+<li>Another PC can now start Medal and pick up the same clip library.</li>
+</ol>
+<p>If something is interrupted, the PC keeps ownership and its local clips so the next launch can retry.</p>
+</section>
+
+<section aria-labelledby="faq">
+<h2 id="faq">Questions</h2>
+<details open><summary>Is Medal Sync free?</summary>
+<p>Yes. Medal Sync is free and open source under the MIT license. You only need your own storage: a local disk, an SMB share or NAS, or a cloud account you already have.</p></details>
+<details><summary>How do I sync Medal clips between two PCs?</summary>
+<p>Install Medal Sync on each PC and point them at the same library on an SMB share, NAS or Google Drive. Launch Medal through Medal Sync. When you quit Medal, it finishes uploads, verifies them and shows Ready; the other PC can then start Medal with the same clip library. Each PC keeps its own Medal login and recording settings.</p></details>
+<details><summary>Can I back up Medal.tv clips to Google Drive, OneDrive or Dropbox?</summary>
+<p>Yes. Medal Sync can send verified copies of your clips to OneDrive, Dropbox, Google Drive or any rclone destination. Google Drive can also be the main library without a server.</p></details>
+<details><summary>Can I store Medal clips on a NAS or home server?</summary>
+<p>Yes. Medal records to a fast virtual drive backed by a local SSD cache, and clips upload in the background to your SMB server or NAS.</p></details>
+<details><summary>Is Medal Sync made by Medal?</summary>
+<p>No. Medal Sync is an independent project and is not affiliated with Medal, Microsoft, Dropbox or Google.</p></details>
+</section>
+
+<p class="note"><strong>Experimental software for Windows x64.</strong> Keep an independent backup of your clips.
+A synced library and a cache are not a backup.</p>
+</main>
+<footer>
+<p><a href="https://github.com/Larson-Logan/medal-sync">GitHub</a> ·
+<a href="https://github.com/Larson-Logan/medal-sync/releases/latest">Releases</a> ·
+<a href="https://github.com/Larson-Logan/medal-sync/blob/main/SUPPORT.md">Get help</a> ·
+<a href="https://github.com/Larson-Logan/medal-sync/blob/main/LICENSE">MIT license</a></p>
+<p>Medal Sync is an independent project, not affiliated with Medal, Microsoft, Dropbox or Google.</p>
+</footer>
+</body>
+</html>

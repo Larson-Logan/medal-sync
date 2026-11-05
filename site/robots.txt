@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://larson-logan.github.io/medal-sync/sitemap.xml
