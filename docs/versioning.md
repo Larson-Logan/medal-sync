@@ -27,8 +27,8 @@ counts as `.00`, and its hotfixes continue at `.01`. See the
 
 | Part | Raised when |
 | --- | --- |
-| `MAJOR` | A PC on the new version can no longer share a library with a PC on the previous major version, a documented file `format` changes, a documented command or option is removed, or a documented output field changes meaning. |
-| `MINOR` | New commands, options, settings or output fields; newly supported Medal builds or schemas; behavior changes that keep existing configurations and libraries working. |
+| `MAJOR` | A PC on the new version can no longer share a library with a PC on the previous major version, a documented file `format` changes, a documented command or option is removed, or a documented output field changes meaning. Required when a promotion includes a breaking (`type!:`) pull request. |
+| `MINOR` | New commands, options, settings or output fields; newly supported Medal builds or schemas; behavior changes that keep existing configurations and libraries working. Required when a promotion includes a `feat` pull request. |
 | `PATCH` | Fixes and documentation only, with no new options or fields. |
 | `NN` | Automatically, for each merge to `main` that does not change `VersionPrefix`. |
 

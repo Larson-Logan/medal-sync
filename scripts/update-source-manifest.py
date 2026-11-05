@@ -46,6 +46,7 @@ RULES = [
       '.github/workflows/milestones.yml', '.github/workflows/release.yml',
       '.github/workflows/beta.yml', '.github/workflows/pages.yml', 'site/',
       '.github/workflows/branch-cleanup.yml', 'scripts/cleanup-pr-branch.py',
+      'scripts/check-promotion.py',
       'scripts/check-repository.py', 'scripts/check-doc-links.mjs',
       'scripts/update-source-manifest.py', 'scripts/generate-icon.py',
       'scripts/setup-github-project.ps1', 'scripts/setup-github-rulesets.ps1',

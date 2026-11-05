@@ -13,7 +13,8 @@ Record user-visible changes under `## Unreleased` in `CHANGELOG.md` as they
 merge to `dev`. Before promoting, rename that heading on `dev` to the release
 the promotion will publish, such as `## 1.4.0 — DATE` for a new version or
 `## 1.3.0.01 — DATE` for a hotfix, and start a new empty `## Unreleased`
-above it. The release workflow does not edit the changelog.
+above it. The release workflow does not edit the changelog; the
+[promotion check](#promote-dev-to-main) refuses a promotion that skips this.
 
 ## Build locally
 
@@ -86,9 +87,6 @@ of the merged branch, because the squash commit replaces the original commits. D
 testing; branches need not be up to date to merge, and validation tests the
 merge result.
 
-To promote, open a pull request from `dev` to `main` and merge it once
-`validate` is green. Its title is free-form, and the title check labels it
-`promotion` so release notes skip it. Fix anything it finds on `dev` first.
 The branch and tag rules are kept in
 [.github/rulesets](../.github/rulesets); see
 [security maintenance](security-maintenance.md#branches-tags-and-actions).
@@ -105,6 +103,33 @@ add `--apply` to delete the branch. Local clones should set
 `git config fetch.prune true` to discard deleted remote-tracking references on
 fetch; local topic branches and worktrees require separate cleanup after
 checking for unmerged commits and local edits.
+
+### Promote dev to main
+
+To promote, open a pull request from `dev` to `main` and merge it once
+`validate` is green. Its title is free-form, and the title check labels it
+`promotion` so release notes skip it. Fix anything it finds on `dev` first.
+
+On every pull request into `main`, validation runs the
+[promotion check](../scripts/check-promotion.py) before any suite. It compares
+the `dev` commit with `main` and fails when:
+
+- a squashed pull request in the promotion has a breaking title (`type!:`)
+  and `VersionPrefix` does not raise MAJOR, or a `feat` title and it does not
+  raise MINOR;
+- `VersionPrefix` is lower than on `main`, or already released;
+- `CHANGELOG.md` still has entries under `## Unreleased`, or its newest
+  heading does not name the release this promotion publishes, such as
+  `## 1.4.0 — DATE` for a new version or `## 1.4.0.01 — DATE` for a hotfix.
+  A release with only internal changes still needs a heading that says so.
+
+The check chooses the version as the release workflow does and names it in
+the run summary. Preview it before opening the promotion:
+
+```powershell
+git fetch origin main dev --tags
+python scripts/check-promotion.py --main origin/main --dev origin/dev
+```
 
 ## GitHub pipeline
 
@@ -160,7 +185,9 @@ Every promotion to `main` is a release. To start a new version, raise
 then promote `dev` to `main`; that release is `.00`. To ship a hotfix, merge
 the fix to `dev` and promote it without touching `VersionPrefix`; it is
 released as the next number, such as `.01`. Changing `VersionPrefix` to a
-version that already has a release is refused.
+version that already has a release is refused. A hotfix carries fixes only:
+once `dev` holds a `feat` or breaking pull request, the
+[promotion check](#promote-dev-to-main) requires a new MINOR or MAJOR version.
 
 The first release after 1.2.0 (`LAST_LEGACY_RELEASE` in the workflow) was
 the three-part bridge `v1.3.0`, because update checks in 1.2.0 and earlier
