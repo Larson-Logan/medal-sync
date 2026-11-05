@@ -37,14 +37,12 @@ function Get-MedalBuildVersion([string]$Root) {
     $props = [xml](Get-Content -LiteralPath (Join-Path $Root 'Directory.Build.props') -Raw)
     $prefix = $props.SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText
     $revision = if ($env:MedalReleaseRevision) { $env:MedalReleaseRevision } else { $props.SelectSingleNode('/Project/PropertyGroup/MedalReleaseRevision').InnerText }
-    if ($revision -cnotmatch '^(0[0-9]|[1-9][0-9]+|none)$') { throw "MedalReleaseRevision '$revision' must be two or more digits, such as 00 or 01, or none." }
-    # "none" is the one-time three-part bridge release for pre-1.3.0 updaters.
-    $version = if ($revision -ceq 'none') { $prefix } else { "$prefix.$revision" }
+    if ($revision -cnotmatch '^(0[0-9]|[1-9][0-9]+)$') { throw "MedalReleaseRevision '$revision' must be two or more digits, such as 00 or 01." }
+    $version = "$prefix.$revision"
     $null = Assert-MedalVersion $version
     $prerelease = if ($env:MedalPrerelease) { $env:MedalPrerelease } else { '' }
     if ($prerelease) {
         if ($prerelease -cnotmatch "^$script:Prerelease$") { throw "MedalPrerelease '$prerelease' must be beta.N, such as beta.1." }
-        if ($revision -ceq 'none') { throw 'A beta build needs a hotfix counter, not none.' }
         $version = "$version-$prerelease"
     }
     return $version

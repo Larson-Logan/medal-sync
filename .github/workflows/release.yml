@@ -8,11 +8,8 @@ name: Release Medal Sync
 # Directory.Build.props; NN is a two-digit hotfix counter. A merge that raises
 # VersionPrefix starts at .00, and every later merge adds one. Betas of the
 # next release, vMAJOR.MINOR.PATCH.NN-beta.N, come from dev (see beta.yml) and
-# never count here.
-#
-# Updaters in 1.2.0 and earlier only recognize three-part tags. So the first
-# release newer than LAST_LEGACY_RELEASE is a three-part bridge (for example
-# v1.3.0) whose updater understands both formats; its hotfixes continue at .01.
+# never count here. The three-part tag v1.3.0, the one-time bridge for
+# updaters in 1.2.0 and earlier, counts as 1.3.0.00.
 #
 # Only administrators and the medal-sync-release GitHub App may create v* tags
 # (see .github/rulesets/release-tags.json), and rulesets cannot exempt
@@ -31,8 +28,6 @@ concurrency:
   group: release
   cancel-in-progress: false
 env:
-  # Newest release whose updater only understands vMAJOR.MINOR.PATCH tags.
-  LAST_LEGACY_RELEASE: 1.2.0
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
   NUGET_XMLDOC_MODE: skip
@@ -107,17 +102,6 @@ jobs:
             revision="$(printf '%02d' $((used + 1)))"
           fi
           version="$prefix.$revision"
-          if [ "$revision" = 00 ]; then
-            # No release is newer than LAST_LEGACY_RELEASE yet: publish the bridge.
-            newest="$( { echo "$LAST_LEGACY_RELEASE"
-                gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name | ltrimstr("v")'
-              } | sort -V | tail -n 1)"
-            if [ "$newest" = "$LAST_LEGACY_RELEASE" ]; then
-              revision=none
-              version="$prefix"
-              echo "Older updaters only find three-part tags, so this bridge release is v$version; hotfixes continue at .01." >>"$GITHUB_STEP_SUMMARY"
-            fi
-          fi
           {
             echo "version=$version"
             echo "revision=$revision"
@@ -126,7 +110,7 @@ jobs:
           echo "Releasing $version (VersionPrefix $prefix, hotfix $revision)." >>"$GITHUB_STEP_SUMMARY"
 
           # The first release of a version closes its milestone, so list anything still open in it now.
-          if [ "$revision" = 00 ] || [ "$revision" = none ]; then
+          if [ "$revision" = 00 ]; then
             milestone="$(gh api --paginate "repos/$REPO/milestones?state=open&per_page=100" --jq '.[] | select(.title == env.PREFIX) | .number')"
             if [ -n "$milestone" ]; then
               remaining="$(gh api --paginate "repos/$REPO/issues?milestone=$milestone&state=open&per_page=100" --jq '.[] | "- #\(.number) \(.title)"')"

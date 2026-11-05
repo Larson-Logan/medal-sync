@@ -427,5 +427,93 @@ class PromotionReuseTests(unittest.TestCase):
         self.assertIn('"Validate beta / validate"', workflow)
 
 
+class ReleasePlanTests(unittest.TestCase):
+    """Runs the actual release planning step against a fake gh with a synthetic release history."""
+
+    SHA, PARENT = 'c' * 40, 'p' * 40
+    STUB = textwrap.dedent(r"""
+        gh() {
+          local args="$*" prefix
+          case "$args" in
+            *"contents/Directory.Build.props?ref=$SHA"*) props "$STUB_PREFIX" ;;
+            *"contents/Directory.Build.props?ref=$STUB_PARENT"*) props "$STUB_PREVIOUS" ;;
+            *commits/main*) echo "$STUB_HEAD" ;;
+            *"commits/$SHA"*) echo "$STUB_PARENT" ;;
+            *target_commitish*) if [ -n "$STUB_EXISTING" ]; then echo "$STUB_EXISTING"; fi ;;
+            *matching-refs/tags/*)
+              prefix="${args#*matching-refs/tags/}"
+              prefix="${prefix%% *}"
+              printf '%s\n' $STUB_TAGS | awk -v p="$prefix" 'index($0, p) == 1' ;;
+            */milestones*) ;;
+            */releases*) printf '%s\n' $STUB_RELEASES ;;
+            *) echo "unexpected gh call: $args" >&2; return 1 ;;
+          esac
+        }
+        props() { printf '<Project>\n  <PropertyGroup>\n    <VersionPrefix>%s</VersionPrefix>\n  </PropertyGroup>\n</Project>\n' "$1"; }
+    """)
+
+    def plan(self, prefix='1.4.0', previous=None, releases=(), tags=(), head=SHA, existing=''):
+        with tempfile.TemporaryDirectory(prefix='release-plan-') as temporary:
+            root = Path(temporary)
+            workflow = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+            body = workflow.split('      - id: plan\n', 1)[1].split('        run: |\n', 1)[1]
+            lines = []
+            for line in body.splitlines(keepends=True):
+                if line.strip() and not line.startswith(' ' * 10):
+                    break
+                lines.append(line)
+            script = root / 'plan.sh'
+            # GitHub runs bash steps with -eo pipefail.
+            script.write_text('set -eo pipefail\n' + self.STUB + textwrap.dedent(''.join(lines)),
+                              encoding='utf-8', newline='\n')
+            output, summary = root / 'output', root / 'summary'
+            output.touch()
+            environment = {**os.environ, 'REPO': 'example/project', 'SHA': self.SHA, 'STUB_PARENT': self.PARENT,
+                           'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(summary),
+                           'STUB_PREFIX': prefix, 'STUB_PREVIOUS': previous or prefix, 'STUB_HEAD': head,
+                           'STUB_EXISTING': existing, 'STUB_RELEASES': ' '.join(releases), 'STUB_TAGS': ' '.join(tags)}
+            result = subprocess.run(['bash', script.name], cwd=root, env=environment,
+                                    capture_output=True, text=True)
+            values = dict(line.split('=', 1) for line in output.read_text(encoding='utf-8').splitlines())
+            return result, values
+
+    def planned(self, **history):
+        result, values = self.plan(**history)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual('true', values.get('release'), values)
+        self.assertEqual(values['revision'], values['version'].split('.')[3])
+        return values['version']
+
+    def test_a_raised_version_prefix_starts_at_00_even_after_only_betas(self):
+        history = ('v1.3.1.05', 'v1.4.0.00-beta.1')
+        self.assertEqual('1.4.0.00', self.planned(previous='1.3.1', releases=history, tags=history))
+
+    def test_the_next_merge_adds_one_to_the_counter(self):
+        history = ('v1.4.0.00', 'v1.4.0.01-beta.3')
+        self.assertEqual('1.4.0.01', self.planned(releases=history, tags=history))
+
+    def test_a_first_release_is_four_parts_and_never_a_bridge(self):
+        # Before 1.4.0, a .00 release with nothing newer than 1.2.0 published a three-part bridge.
+        self.assertEqual('2.0.0.00', self.planned(prefix='2.0.0', previous='1.4.0'))
+
+    def test_the_bridge_tag_counts_as_00(self):
+        self.assertEqual('1.3.0.01', self.planned(prefix='1.3.0', releases=('v1.3.0',), tags=('v1.3.0',)))
+
+    def test_refuses_a_raised_prefix_that_is_already_released(self):
+        result, _ = self.plan(previous='1.3.1', releases=('v1.4.0.00',), tags=('v1.4.0.00',))
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('already released', result.stdout)
+
+    def test_skips_a_commit_that_is_no_longer_the_tip_of_main(self):
+        result, values = self.plan(head='d' * 40)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual({'release': 'false'}, values)
+
+    def test_skips_a_commit_that_already_has_a_release(self):
+        result, values = self.plan(existing='https://example.com/releases/v1.4.0.00')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual({'release': 'false'}, values)
+
+
 if __name__ == '__main__':
     unittest.main()
