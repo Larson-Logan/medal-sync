@@ -137,20 +137,13 @@ internal static class SessionCommands
         return 0;
     }
 
-    /// <summary>Read-only status client: never creates device identity, mount credentials or a handoff request.</summary>
-    internal static DesktopStatus ReadDesktopStatus()
-    {
-        var state = LocalState.ForCurrentUser();
-        var config = MedalSyncConfig.Load(state.ConfigPath);
-        var device = state.ExistingDevice();
-        if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
-        var store = CoordinationStore.Open(config);
-        var journal = store.ReadJournal();
-        _ = store.Generations.ReadManifest(journal.CommittedGeneration);
-        var now = DateTimeOffset.UtcNow;
-        return DesktopStatus.Read(state, config.LibraryId, journal, device, AnotherInstanceRunning(), now,
-            ReplicaCheckStatus.Read(state, config.LibraryId, now, config.Replication?.Targets ?? []));
-    }
+    /// <summary>
+    /// Read-only status client: never creates device identity, mount credentials or a handoff request. It keeps the
+    /// open library between reads; see <see cref="DesktopStatusSource"/>.
+    /// </summary>
+    internal static DesktopStatus ReadDesktopStatus() => StatusView.Read();
+
+    private static readonly DesktopStatusSource StatusView = new(LocalState.ForCurrentUser, AnotherInstanceRunning);
 
     public static int MountPlanCommand(Arguments args, TextWriter output)
     {

@@ -45,7 +45,7 @@ internal static class ReplicationPlan
     {
         if (command is not ("copy" or "check")) throw new ArgumentException("Unsupported replication command.", nameof(command));
         List<string> arguments = [command, source, target, "--config", configPath, "--files-from-raw", fileList,
-            "--retries", "2", "--low-level-retries", "3", "--contimeout", "10s", "--timeout", "60s", "--transfers", "2"];
+            "--retries", "2", "--low-level-retries", "3", "--contimeout", "10s", "--timeout", "60s", "--transfers", "2", MountPlan.UseMmap];
         // Immutable prevents silent replacement. Download verification compares bytes on backends without a common hash.
         if (command == "copy")
         {

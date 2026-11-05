@@ -184,11 +184,81 @@ internal sealed class DesktopStatusPublisher : IDisposable
             try
             {
                 _report = _report with { ConfirmedAt = DateTimeOffset.UtcNow };
-                AtomicFile.Replace(_path, Json.Serialize(_report));
+                // Progress is rewritten every few seconds and a reader treats an unreadable file as unknown, so it is
+                // not forced to disk each time. An outcome is kept as advice after the supervisor exits, so it is.
+                AtomicFile.Replace(_path, Json.Serialize(_report), durable: _report.Progress.IsOutcome);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Advisory only. */ }
         }
     }
 
     public void Dispose() => _heartbeat.DisposeAsync().AsTask().GetAwaiter().GetResult();
+}
+
+/// <summary>
+/// The status view's reader, called every few seconds for as long as the view runs. While config.json is unchanged
+/// it keeps the parsed configuration and the open journal store, so a read costs only the journal and the local
+/// status files. Opening the store again on every read is what costs: in cloud mode it starts rclone twice (for the
+/// sign-in token and the Drive folder) and makes two extra Drive requests. The cloud connection, with its token and
+/// folder, is kept even while opening fails, so an outage costs one failed request per read. Generations never change
+/// once published, so the committed manifest is checked once per generation. An outage keeps everything; any other
+/// failure drops the store and the connection, so the next read opens the library afresh.
+/// </summary>
+internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> supervisorRunning,
+    Func<MedalSyncConfig, CloudCoordination>? connect = null)
+{
+    private readonly object _gate = new();
+    private byte[]? _configBytes;
+    private MedalSyncConfig? _config;
+    private CloudCoordination? _cloud;
+    private CoordinationStore? _store;
+    private long? _checkedGeneration;
+
+    public DesktopStatus Read()
+    {
+        lock (_gate)
+        {
+            var local = state();
+            var config = Config(local.ConfigPath);
+            var device = local.ExistingDevice();
+            if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
+            OwnershipRecord journal;
+            try
+            {
+                _store ??= Open(config);
+                journal = _store.ReadJournal();
+                if (_checkedGeneration != journal.CommittedGeneration)
+                {
+                    _ = _store.Generations.ReadManifest(journal.CommittedGeneration);
+                    _checkedGeneration = journal.CommittedGeneration;
+                }
+            }
+            catch (Exception ex) when (ex is not IOException)
+            {
+                Forget();
+                throw;
+            }
+            var now = DateTimeOffset.UtcNow;
+            return DesktopStatus.Read(local, config.LibraryId, journal, device, supervisorRunning(), now,
+                ReplicaCheckStatus.Read(local, config.LibraryId, now, config.Replication?.Targets ?? []));
+        }
+    }
+
+    private CoordinationStore Open(MedalSyncConfig config) => config.StorageMode != StorageMode.Cloud
+        ? CoordinationStore.Open(config)
+        : CoordinationStore.OpenCloud(config, _cloud ??= (connect ?? (c => CloudCoordination.For(c)))(config));
+
+    private MedalSyncConfig Config(string path)
+    {
+        byte[] bytes = Json.ReadBytes(path);
+        if (_config is not null && _configBytes is not null && bytes.AsSpan().SequenceEqual(_configBytes)) return _config;
+        Forget();
+        (_config, _configBytes) = (null, null);
+        // Parsed from its own read: if the file changes in between, the next read sees different bytes and loads again.
+        var config = MedalSyncConfig.Load(path);
+        (_config, _configBytes) = (config, bytes);
+        return config;
+    }
+
+    private void Forget() => (_store, _cloud, _checkedGeneration) = (null, null, null);
 }

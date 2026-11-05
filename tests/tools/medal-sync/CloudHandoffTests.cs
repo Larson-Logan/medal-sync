@@ -43,7 +43,7 @@ public sealed class CloudHandoffTests : IDisposable
     {
         public CloudJournal? Value;
         public bool Offline, IgnoreConditions, ApplyThenDisconnect;
-        public int Revision = 1, Writes;
+        public int Revision = 1, Writes, Reads;
         private readonly object gate = new();
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -65,11 +65,14 @@ public sealed class CloudHandoffTests : IDisposable
                 }
                 if (Value is null) return Reply(HttpStatusCode.NotFound);
                 if (request.Method == HttpMethod.Get)
+                {
+                    Reads++;
                     return Reply(HttpStatusCode.OK, JsonSerializer.Serialize(new
                     {
                         id = FileId, mimeType = "application/json", description = Encoding.UTF8.GetString(Json.Serialize(Value)),
                         etag = "\"" + Revision + "\"", labels = new { trashed = false },
                     }));
+                }
                 Assert.Equal(HttpMethod.Patch, request.Method);
                 if (!IgnoreConditions && request.Headers.IfMatch.Single().Tag != "\"" + Revision + "\"") return Reply(HttpStatusCode.PreconditionFailed);
                 using var patch = JsonDocument.Parse(body);
@@ -145,6 +148,64 @@ public sealed class CloudHandoffTests : IDisposable
             "--rclone-config", config.Replication.RcloneConfigPath!, "--cache-root", config.CacheRoot, "--out", fixture.PathFor("candidate.json")], output, error));
         Assert.False(File.Exists(fixture.PathFor("candidate.json")));
         Assert.Contains("CLOUD", output.ToString());
+    }
+
+    [Fact]
+    public void StatusViewKeepsTheOpenLibraryBetweenReadsAndReopensItAfterAConfigChangeOrFailure()
+    {
+        using var drive = new Drive();
+        var config = Config("first");
+        Seed(drive, config, Snapshot("seed", "one"));
+        var state = new LocalState(fixture.PathFor("first", "state"));
+        state.Device();
+        File.WriteAllBytes(state.ConfigPath, Json.Serialize(config));
+        int connections = 0;
+        var source = new DesktopStatusSource(() => state, () => false, c =>
+        {
+            connections++;
+            return new CloudCoordination(c, Api(drive), Run);
+        });
+        int commandsBefore = commands.Count;
+
+        // Unreachable at first: each read is one failed request on the same connection and starts no rclone.
+        drive.Offline = true;
+        Assert.Throws<StorageOfflineException>(() => source.Read());
+        Assert.Throws<StorageOfflineException>(() => source.Read());
+        drive.Offline = false;
+        Assert.Equal(1, connections);
+        Assert.Empty(commands.Skip(commandsBefore));
+
+        int readsBefore = drive.Reads;
+        Assert.Equal(SessionPhase.Ready, source.Read().Phase);
+        int firstReadRequests = drive.Reads - readsBefore;
+        Assert.Equal(SessionPhase.Ready, source.Read().Phase);
+        Assert.Equal(SessionPhase.Ready, source.Read().Phase);
+
+        // Opening runs rclone once to find the Drive folder; later reads are one journal request each and run nothing.
+        Assert.Equal(1, connections);
+        Assert.Equal(["lsjson"], commands.Skip(commandsBefore));
+        Assert.Equal(firstReadRequests + 2, drive.Reads - readsBefore);
+
+        // An outage after opening keeps the open library too.
+        drive.Offline = true;
+        Assert.Throws<StorageOfflineException>(() => source.Read());
+        drive.Offline = false;
+        Assert.Equal(SessionPhase.Ready, source.Read().Phase);
+        Assert.Equal(1, connections);
+
+        // A journal for another Drive folder is refused, and the next read connects and opens the library afresh.
+        var good = drive.Value!;
+        drive.Value = good with { StorageFolderId = "another-drive-folder" };
+        Assert.Throws<IncompatibleLibraryException>(() => source.Read());
+        drive.Value = good;
+        Assert.Equal(SessionPhase.Ready, source.Read().Phase);
+        Assert.Equal(2, connections);
+        Assert.Equal(2, commands.Skip(commandsBefore).Count());
+
+        // So does any change to config.json.
+        File.WriteAllBytes(state.ConfigPath, Json.Serialize(config with { MaxSessionHours = 3 }));
+        Assert.Equal(SessionPhase.Ready, source.Read().Phase);
+        Assert.Equal(3, connections);
     }
 
     [Fact]

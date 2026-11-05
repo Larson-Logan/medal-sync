@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Use less CPU, memory and disk activity while Medal Sync runs:
+  - The status view no longer reopens the library on every refresh. In Google
+    Drive mode each refresh, every 5 seconds even with the panel closed,
+    started rclone twice and made three Drive requests; it now makes one Drive
+    request and starts nothing. In server mode it reads half as many files
+    from the share.
+  - The clip drive and cloud copies run rclone with `--use-mmap`, so upload
+    and playback buffers go back to Windows as soon as a transfer ends.
+  - Medal Sync's own code is precompiled, so every command, launch and status
+    view starts with about a third less CPU. The download grows by about 2 MB.
+  - The status heartbeat, written every 5 seconds during a session, is no
+    longer forced to disk each time. Final results still are.
+  - The once-a-minute check of Medal's shortcuts skips shortcut files that
+    have not changed since they were last found correct.
+
 - Change the Medal Sync icon from violet to charcoal and white to match Medal,
   with a thin lighter rim so it stays visible on dark taskbars. Tray status
   dots keep their colors.

@@ -36,7 +36,8 @@ internal sealed class ReplicaRetryStatus(LocalState state, string libraryId, lon
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(PathName)!);
                 _report = _report with { ConfirmedAt = DateTimeOffset.UtcNow };
-                AtomicFile.Replace(PathName, Json.Serialize(_report));
+                // Running progress is rewritten every few seconds; only the final result is forced to disk.
+                AtomicFile.Replace(PathName, Json.Serialize(_report), durable: !_report.Running);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Advisory. */ }
         }

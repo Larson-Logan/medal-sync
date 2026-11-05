@@ -13,6 +13,11 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- Single-file publish must carry the native SQLite library. -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Medal Sync's own code is precompiled at publish, so each start (every command, launch and status view)
+         skips most JIT work: about a third less CPU to start a command. The runtime is already precompiled;
+         recompiling it into the exe (the single-file default) adds about 13 MB and starts no faster. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <PublishReadyToRunComposite>false</PublishReadyToRunComposite>
   </PropertyGroup>
 
   <ItemGroup>

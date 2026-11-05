@@ -8,12 +8,24 @@ namespace MedalSync.Util;
 internal static class AtomicFile
 {
     /// <summary>Replaces <paramref name="path"/> with <paramref name="bytes"/> atomically.</summary>
-    public static void Replace(string path, ReadOnlySpan<byte> bytes)
+    public static void Replace(string path, ReadOnlySpan<byte> bytes) => Replace(path, bytes, durable: true);
+
+    /// <summary>
+    /// Replaces <paramref name="path"/> atomically. With <paramref name="durable"/> false the bytes are not forced to
+    /// the disk first: readers still see the old or the complete new file, but a power cut can leave it unreadable.
+    /// Only for files rewritten every few seconds whose readers already treat an unreadable file as unknown.
+    /// </summary>
+    public static void Replace(string path, ReadOnlySpan<byte> bytes, bool durable)
     {
         string temp = TempSibling(path);
         try
         {
-            WriteFlushed(temp, bytes, FileMode.CreateNew);
+            if (durable) WriteFlushed(temp, bytes, FileMode.CreateNew);
+            else
+            {
+                using var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, bufferSize: 1);
+                stream.Write(bytes);
+            }
             MoveOver(temp, path);
         }
         finally

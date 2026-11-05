@@ -32,6 +32,9 @@ internal static class MountPlan
     public const string ControlUserVariable = "RCLONE_RC_USER";
     public const string ControlPasswordVariable = "RCLONE_RC_PASS";
 
+    /// <summary>rclone's allocator for transfer buffers that returns them to Windows as soon as they are freed.</summary>
+    public const string UseMmap = "--use-mmap";
+
     public const int MinimumBandwidthMiB = 1;
     public const int MaximumBandwidthMiB = 10000;
 
@@ -65,6 +68,9 @@ internal static class MountPlan
             "--vfs-fast-fingerprint",
             "--dir-cache-time", Duration(settings.DirCacheTime),
             "--transfers", settings.Transfers.ToString(CultureInfo.InvariantCulture),
+            // Upload and playback buffers come from Windows directly and go back as soon as a transfer ends, instead of
+            // growing the garbage-collected heap, which keeps the drive's memory use lower for the whole session.
+            UseMmap,
             "--cache-dir", settings.CacheDirectory,
             "--volname", settings.VolumeName,
             "--rc", "--rc-addr", $"127.0.0.1:{settings.ControlPort.ToString(CultureInfo.InvariantCulture)}",

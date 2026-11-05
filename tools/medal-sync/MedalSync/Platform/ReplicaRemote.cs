@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using MedalSync.Config;
+using MedalSync.Storage;
 using MedalSync.Util;
 
 namespace MedalSync.Platform;
@@ -118,7 +119,7 @@ internal sealed class RcloneReplicaRemote(MedalSyncConfig config, LocalState sta
             try
             {
                 List<string> arguments = ["check", source, destination, "--config", Credentials, "--files-from-raw", list,
-                    "--one-way", "--download", "--combined", combined, .. Network, "--transfers", "2"];
+                    "--one-way", "--download", "--combined", combined, .. Network, "--transfers", "2", MountPlan.UseMmap];
                 if (config.Replication?.BandwidthLimitMiB is { } bandwidth)
                     arguments.AddRange(["--bwlimit", bandwidth.ToString(CultureInfo.InvariantCulture) + "Mi"]);
                 RcloneFailedException? failure = null;

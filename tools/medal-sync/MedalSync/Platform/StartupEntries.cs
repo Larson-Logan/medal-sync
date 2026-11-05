@@ -233,9 +233,38 @@ internal static class StartupEntries
         }
         foreach (string shortcut in shortcuts)
         {
-            if (RepairShortcut(shortcut, launcher)) done.Add($"pointed the shortcut '{shortcut}' back at the launcher");
+            if (RepairChangedShortcut(shortcut, launcher)) done.Add($"pointed the shortcut '{shortcut}' back at the launcher");
         }
         return done;
+    }
+
+    /// <summary>Each shortcut's exact bytes when it last needed no repair for that launcher.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Launcher, byte[] Bytes)> Unchanged =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <see cref="RepairShortcut"/>, skipped while the file is byte-for-byte what an earlier check found needing no
+    /// repair. The supervisor checks every minute, and each check otherwise starts a COM shell object per shortcut.
+    /// A result is only remembered when the file read the same before and after the check, so a shortcut Medal
+    /// rewrites during a check is checked again next time.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    internal static bool RepairChangedShortcut(string path, string launcher)
+    {
+        byte[]? before = ReadShortcut(path);
+        if (before is not null && Unchanged.TryGetValue(path, out var known) && known.Launcher == launcher
+            && known.Bytes.AsSpan().SequenceEqual(before)) return false;
+        Unchanged.TryRemove(path, out _);
+        if (RepairShortcut(path, launcher)) return true;
+        if (before is not null && ReadShortcut(path) is { } after && after.AsSpan().SequenceEqual(before)) Unchanged[path] = (launcher, before);
+        return false;
+    }
+
+    private static byte[]? ReadShortcut(string path)
+    {
+        // Full sharing, so a check never makes Medal's own rewrite of the shortcut fail.
+        try { return Util.Json.ReadBytes(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
     internal const string LockName = @"Local\LarsonServer.MedalSync.StartupEntries";

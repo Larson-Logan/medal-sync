@@ -18,6 +18,9 @@
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Precompiled like medal-sync.exe, so the launcher, supervisor and status view skip most JIT work at start. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <PublishReadyToRunComposite>false</PublishReadyToRunComposite>
     <!-- Shown on the exe, so the installer's shortcuts and its uninstall entry use it too. Redraw with scripts/generate-icon.py. -->
     <ApplicationIcon>medal-sync.ico</ApplicationIcon>
   </PropertyGroup>

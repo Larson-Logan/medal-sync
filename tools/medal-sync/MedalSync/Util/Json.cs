@@ -36,12 +36,7 @@ internal static class Json
     /// </summary>
     public static T ReadFile<T>(string path, string what)
     {
-        byte[] bytes;
-        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-        {
-            bytes = new byte[stream.Length];
-            stream.ReadExactly(bytes);
-        }
+        byte[] bytes = ReadBytes(path);
         try
         {
             return Deserialize<T>(bytes, what);
@@ -50,5 +45,14 @@ internal static class Json
         {
             throw new InvalidDataException($"'{path}': {ex.Message}", ex);
         }
+    }
+
+    /// <summary>A file's bytes, read with the same sharing as <see cref="ReadFile{T}"/>.</summary>
+    public static byte[] ReadBytes(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        byte[] bytes = new byte[stream.Length];
+        stream.ReadExactly(bytes);
+        return bytes;
     }
 }
