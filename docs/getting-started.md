@@ -7,6 +7,63 @@ After Medal quits, the companion waits for uploads, verifies storage
 assets, publishes an immutable library generation and releases ownership.
 Each PC keeps its own Medal database, login, audio/encoder settings and identity.
 
+## Quick start
+
+Most people keep their clips on a NAS or home server and share them between
+two or more PCs. This is the **server with SSD cache** mode. If that is you,
+follow these steps on each PC, then read only the sections they link to. Not
+sure that is your setup? See [which mode should I pick?](#which-mode-should-i-pick)
+first.
+
+1. **Check you have what's needed:** Windows x64, Medal signed in, a local SSD
+   and an SMB share every PC can reach. See
+   [requirements and limits](#requirements-and-limits).
+2. **Back up first.** Copy your clips and quit Medal before changing anything.
+   A shared library is not a backup.
+3. **Install.** Download the setup EXE from
+   [Releases](https://github.com/Larson-Logan/medal-sync/releases/latest) and
+   choose all-users setup, so it can install the WinFsp driver. See
+   [install the programs](#install-the-programs).
+4. **Make the folders.** On the server, a media share (for example
+   `\\SERVER\Data\Media\Videos`) and a coordination folder (for example
+   `\\SERVER\Data\AppData\MedalSync`). On this PC, an empty cache folder on the
+   SSD (for example `E:\MedalCache`).
+5. **Configure.** Open **Medal Sync** from the Start menu and accept the
+   configuration wizard, or run `medal-sync-launch.exe --configure`. Choose
+   **Server (SMB)**. On the first PC choose a new library; on every other PC
+   enter the first PC's library ID. Review, then save. See
+   [plan configuration](#plan-configuration-before-using-live-data).
+6. **Create or join the library.** On the first PC run `medal-sync init`, read
+   the preview, then `medal-sync init --apply`. On every other PC run
+   `medal-sync enroll --out DIR` and then the same command with `--apply`.
+   Never run `init` on a library that already exists.
+7. **Record.** Open Medal from the **Medal Library** shortcut. After you quit
+   Medal, wait for **Ready** in the status panel before switching PCs. When
+   it all works, you can choose **Start Medal at sign-in** in the tray menu.
+
+Everything below explains each step in detail, along with recovery and
+advanced options.
+
+### Which mode should I pick?
+
+Answer from the top and stop at the first yes:
+
+- **One PC only, and no server?** Use
+  [local storage](storage.md#local-storage-and-cloud-without-a-server). Cloud
+  copies are optional.
+- **Several PCs and a NAS or home server (SMB)?** Use server with SSD cache
+  (the quick start above).
+- **Same, but you also want every clip on each PC's own disk?** Use
+  [a local copy and the server](storage.md#keep-a-local-copy-and-upload-to-the-server).
+- **Several PCs and Google Drive, but no server?** Use
+  [Google Drive without a server](storage.md#google-drive-without-a-server).
+- **Clips on a cloud provider or SFTP server, with SMB still used for handoff?**
+  Use [an rclone primary](storage.md#use-a-cloud-provider-or-personal-server-as-primary-storage).
+
+Any mode can also copy clips to OneDrive, Dropbox or Google Drive; see
+[add OneDrive, Dropbox or Google Drive](storage.md#add-onedrive-dropbox-or-google-drive).
+The [storage guide](storage.md) compares every mode.
+
 ## Requirements and limits
 
 - Windows x64, PowerShell 7, Medal, rclone and WinFsp.
