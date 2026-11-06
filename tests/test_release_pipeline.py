@@ -2,12 +2,22 @@
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import textwrap
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Some classes run the workflow's PowerShell steps, so they need PowerShell 7.
+# Without it they are skipped locally, so a Linux or macOS checkout still runs
+# the rest. CI never skips them: on GitHub Actions, or with
+# MEDAL_SYNC_REQUIRE_PWSH=1, a missing pwsh fails these tests instead.
+PWSH_REQUIRED = (os.environ.get('GITHUB_ACTIONS') == 'true'
+                 or os.environ.get('MEDAL_SYNC_REQUIRE_PWSH') == '1')
+requires_pwsh = unittest.skipUnless(
+    PWSH_REQUIRED or shutil.which('pwsh'), 'PowerShell 7 (pwsh) is not installed')
 
 
 def step_script(name, workflow='release.yml'):
@@ -25,6 +35,7 @@ def step_script(name, workflow='release.yml'):
     return textwrap.dedent(''.join(script))
 
 
+@requires_pwsh
 class ReleaseAssetTests(unittest.TestCase):
     WORKFLOW = 'release.yml'
     VERSION = '1.3.0.02'
@@ -109,6 +120,7 @@ class BetaAssetTests(ReleaseAssetTests):
         self.verify(succeeds=False)
 
 
+@requires_pwsh
 class ReleasePublishTests(unittest.TestCase):
     def test_publishes_to_the_explicit_repository_without_a_checkout(self):
         with tempfile.TemporaryDirectory(prefix='release-publish-') as temporary:
@@ -149,6 +161,7 @@ class ReleasePublishTests(unittest.TestCase):
             self.assertIn('https://example.com/release', summary.read_text(encoding='utf-8'))
 
 
+@requires_pwsh
 class BetaPublishTests(unittest.TestCase):
     """Runs the actual beta publish step against a fake gh that records each call."""
 
