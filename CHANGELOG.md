@@ -7,10 +7,9 @@
   PowerShell check of the download's SHA-256.
 - Add a quick start and a "which mode should I pick?" list to the top of
   getting started.
-- Prepare free code signing through SignPath Foundation. Once the project is
-  accepted and signing is turned on, stable releases sign `medal-sync.exe`,
-  `medal-sync-launch.exe` and the setup EXE. See the
-  [code signing policy](docs/code-signing.md).
+- Start preparing free code signing through SignPath Foundation: add the
+  [code signing policy](docs/code-signing.md) and a helper that swaps in
+  signed files. Releases stay unsigned until the project is accepted.
 - Prepare publishing to winget: a manifest generator for the first submission
   and a workflow that submits each later stable release.
 - Python tests that run PowerShell are skipped when `pwsh` is not installed,

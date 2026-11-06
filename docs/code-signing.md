@@ -8,25 +8,28 @@ open-source projects. Until the project is accepted and signing is turned on,
 releases stay unsigned, as described in
 [if Windows warns about the download](updates.md#if-windows-warns-about-the-download).
 
-## What is signed
+## What will be signed
 
-Each stable release from `main` signs:
+Each stable release from `main` will sign:
 
 - `medal-sync.exe` and `medal-sync-launch.exe`, in both the setup EXE and the
   portable ZIP
 - the setup EXE, `medal-sync-VERSION-setup-win-x64.exe`
 
-Betas from `dev` are not signed. The portable ZIP itself cannot carry a
-signature; its programs are signed and its SHA-256 sidecar and per-file manifest
-describe the signed files. Third-party programs bundled by setup, such as
+Betas from `dev` will not be signed. The portable ZIP itself cannot carry a
+signature; its programs will be signed and its SHA-256 sidecar and per-file manifest
+will describe the signed files. Third-party programs bundled by setup, such as
 rclone and the WinFsp installer, keep their publishers' own signatures or are
 verified against pinned SHA-256 values.
 
 Only files built from this repository's source by the
 [release workflow](../.github/workflows/release.yml) on GitHub-hosted runners
-are signed. Nothing built on a personal computer is submitted for signing.
+will be signed. Nothing built on a personal computer is submitted for signing.
 
-## How a release is signed
+## How releases will be signed
+
+The release workflow does not sign anything yet. Once the project is
+accepted, each stable release will be signed like this:
 
 1. A merge to `main` starts the release workflow. Validation builds both
    programs and uploads them as a workflow artifact.
@@ -40,12 +43,9 @@ are signed. Nothing built on a personal computer is submitted for signing.
    the workflow checks again that the setup EXE and both programs have a
    valid, timestamped signature.
 
-Signing is turned on by setting the `SIGNPATH_ORGANIZATION_ID` repository
-variable and the `SIGNPATH_API_TOKEN` secret. `SIGNPATH_PROJECT_SLUG` and
-`SIGNPATH_POLICY_SLUG` override the default project slug `medal-sync` and
-signing policy slug `release-signing`.
-
-The SignPath project needs two artifact configurations. `programs`:
+The SignPath project uses the slug `medal-sync`, the signing policy
+`release-signing` with manual approval, and two artifact configurations.
+`programs`:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>

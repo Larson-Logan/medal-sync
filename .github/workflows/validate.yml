@@ -29,14 +29,6 @@ on:
         description: Beta label such as beta.3 for a beta built from dev, or empty for a release from main
         type: string
         default: ''
-      sign:
-        description: Sign the programs and setup EXE through SignPath (release builds only; see docs/code-signing.md)
-        type: boolean
-        default: false
-    secrets:
-      SIGNPATH_API_TOKEN:
-        description: SignPath API token, needed only when sign is true
-        required: false
 permissions:
   contents: read
 concurrency:
@@ -200,12 +192,7 @@ jobs:
     needs: checks
     if: needs.checks.outputs.desktop == 'true'
     runs-on: windows-latest
-    # A signed release waits for a maintainer to approve each signing request.
-    timeout-minutes: ${{ inputs.sign && 90 || 25 }}
-    # SignPath reads this job's details and downloads its artifact with github.token.
-    permissions:
-      contents: read
-      actions: read
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -261,85 +248,8 @@ jobs:
         shell: pwsh
         run: ./scripts/validate.ps1 -Part Desktop, Scripts
       - name: Smoke test release packaging
-        if: ${{ !inputs.sign }}
         shell: pwsh
         run: ./scripts/package-windows-installer.ps1
-      # A signed release signs both programs before they are packaged, then
-      # signs the setup EXE built from them, so the ZIP's per-file manifest and
-      # both .sha256 sidecars describe signed files. SignPath Foundation signs
-      # open-source projects for free; see docs/code-signing.md.
-      - name: Build the programs to sign
-        if: inputs.sign
-        shell: pwsh
-        run: ./scripts/storage/medal-sync/publish-medal-sync.ps1
-      - name: Upload the unsigned programs for signing
-        id: unsigned-programs
-        if: inputs.sign
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: unsigned-programs
-          overwrite: true
-          path: |
-            .medal-sync-dist/medal-sync.exe
-            .medal-sync-dist/medal-sync-launch.exe
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-      - name: Sign the programs
-        if: inputs.sign
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'medal-sync' }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
-          artifact-configuration-slug: programs
-          github-artifact-id: ${{ steps.unsigned-programs.outputs.artifact-id }}
-          wait-for-completion-timeout-in-seconds: 2400
-          output-artifact-directory: ${{ runner.temp }}/signed-programs
-      - name: Package the signed programs and build the setup EXE
-        if: inputs.sign
-        shell: pwsh
-        env:
-          SIGNED: ${{ runner.temp }}/signed-programs
-        run: |
-          $ErrorActionPreference = 'Stop'
-          ./scripts/use-signed-files.ps1 -SignedDirectory $env:SIGNED -Name medal-sync.exe, medal-sync-launch.exe
-          ./scripts/package-release.ps1 -SkipBuild
-          ./scripts/package-windows-installer.ps1 -SkipPackage
-      - name: Upload the unsigned setup EXE for signing
-        id: unsigned-setup
-        if: inputs.sign
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: unsigned-setup
-          overwrite: true
-          path: .medal-sync-dist/medal-sync-*-setup-win-x64.exe
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-      - name: Sign the setup EXE
-        if: inputs.sign
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'medal-sync' }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
-          artifact-configuration-slug: setup
-          github-artifact-id: ${{ steps.unsigned-setup.outputs.artifact-id }}
-          wait-for-completion-timeout-in-seconds: 2400
-          output-artifact-directory: ${{ runner.temp }}/signed-setup
-      - name: Use the signed setup EXE and refresh its checksum
-        if: inputs.sign
-        shell: pwsh
-        env:
-          SIGNED: ${{ runner.temp }}/signed-setup
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Import-Module ./scripts/storage/medal-sync/MedalSync.Update.psm1
-          $version = Get-MedalBuildVersion (Get-Location).Path
-          ./scripts/use-signed-files.ps1 -SignedDirectory $env:SIGNED -Name "medal-sync-$version-setup-win-x64.exe" -RefreshChecksum
       - name: Test native setup, upgrade and uninstall in isolated user installation
         shell: pwsh
         run: ./scripts/test-windows-installer.ps1
