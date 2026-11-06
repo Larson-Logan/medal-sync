@@ -145,8 +145,8 @@ def main(argv=None):
     parser.add_argument('--dry-run', action='store_true', help='print the plan without changing files')
     parser.add_argument('--root', default=str(ROOT), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', args.date):
-        parser.error('--date must be YYYY-MM-DD.')
+    if not promotion.is_date(args.date):
+        parser.error('--date must be a real date written as YYYY-MM-DD.')
     try:
         result = plan(args.root, args.main, args.date)
     except PromotionError as error:

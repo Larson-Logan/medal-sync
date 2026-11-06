@@ -124,6 +124,11 @@ class PromotionCheckTests(unittest.TestCase):
         self.commit('fix: a fix (#9)', changelog=changelog)
         self.assert_refused('"## 1.3.1.06 — Unreleased"')
 
+    def test_the_heading_date_must_exist(self):
+        changelog = '# Changelog\n\n## Unreleased\n\n## 1.3.1.06 — 2026-13-45\n\n- New change.\n\n' + SHIPPED
+        self.commit('fix: a fix (#9)', changelog=changelog)
+        self.assert_refused('"## 1.3.1.06 — 2026-13-45"', 'date that does not exist')
+
     def test_a_lower_version_is_refused(self):
         self.commit('fix: a fix (#9)', prefix='1.3.0', changelog=self.heading('1.3.0.02'))
         self.assert_refused('VersionPrefix 1.3.0 is lower than 1.3.1 on main.')

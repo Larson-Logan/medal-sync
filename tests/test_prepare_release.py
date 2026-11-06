@@ -190,6 +190,16 @@ class PrepareReleaseTests(unittest.TestCase):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             prepare.main(['--root', str(self.root), '--date', '20 Nov'])
 
+    def test_refuses_a_date_that_does_not_exist(self):
+        self.commit('fix: repair a thing (#9)', entry='Repair a thing.')
+        before = self.files()
+        for date in ('2026-13-01', '2026-02-30', '2026-11-00'):
+            with self.subTest(date=date), self.assertRaises(SystemExit), \
+                    contextlib.redirect_stderr(io.StringIO()) as stderr:
+                prepare.main(['--root', str(self.root), '--date', date])
+            self.assertIn('real date', stderr.getvalue())
+            self.assertEqual(before, self.files())
+
 
 if __name__ == '__main__':
     unittest.main()

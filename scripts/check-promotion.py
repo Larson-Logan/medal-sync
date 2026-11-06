@@ -16,14 +16,15 @@ It fails when the promotion:
   VersionPrefix on main;
 - lowers VersionPrefix, or raises it to a version that is already released;
 - still has entries under `## Unreleased` in CHANGELOG.md, or the changelog's
-  newest release heading is not the release that this promotion publishes, or
-  an older section below it was prepared for a release that never shipped.
+  newest release heading is not the release that this promotion publishes or
+  has a date that does not exist, or an older section below it was prepared for a release that never shipped.
 
 The version is chosen as the release workflow chooses it: `.00` when the
 promotion changes VersionPrefix, otherwise one more than the highest hotfix
 counter tagged for it. Only the standard library is used.
 """
 import argparse
+import datetime
 import os
 from pathlib import Path
 import re
@@ -57,6 +58,17 @@ def version_prefix(root, rev):
     if not SEMVER.fullmatch(value):
         raise PromotionError(f"VersionPrefix '{value}' at {rev} is not MAJOR.MINOR.PATCH.")
     return tuple(int(part) for part in value.split('.'))
+
+
+def is_date(value):
+    """Whether value is a real calendar date written as YYYY-MM-DD."""
+    if not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value):
+        return False
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 def text(version):
@@ -151,6 +163,9 @@ def changelog_errors(changelog, version, names, released=None):
             return [f'The newest release heading in CHANGELOG.md is "## {name}", but this '
                     f'promotion publishes {version}. Add "{expected}" on dev above it with '
                     'what this release changes.']
+        if not is_date(match.group(2)):
+            return [f'The release heading "## {name}" in CHANGELOG.md has a date that does not '
+                    f'exist. Write the release date as YYYY-MM-DD on dev.']
         # A section prepared for a release that never shipped would be left
         # behind under a version nobody can install.
         older = headings[position + 1][1] if position + 1 < len(headings) else ''
