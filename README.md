@@ -84,7 +84,9 @@ includes .NET and rclone, and offers the WinFsp driver.
 1. **Install.** Download the **Windows x64 setup EXE** from
    [Releases](https://github.com/Larson-Logan/medal-sync/releases/latest).
    Choose per-user or all-users installation. All-users setup can install
-   the bundled WinFsp driver.
+   the bundled WinFsp driver. The installer is not code-signed yet, so Windows
+   may show an unknown-publisher warning; see
+   [if Windows warns about the download](docs/updates.md#if-windows-warns-about-the-download).
 2. **Check compatibility.** Run `medal-sync.exe compatibility` to confirm your
    installed Medal version and database are supported.
 3. **Configure.** Open **Medal Sync Setup Guide** from the Start menu, or

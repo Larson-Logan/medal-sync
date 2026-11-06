@@ -7,7 +7,9 @@ maintainer publishes a release. This is the normal Windows installer.
 ## Install
 
 1. Run the setup EXE and choose installation for all users or just your account.
-   The all-users option requires Windows administrator approval.
+   The all-users option requires Windows administrator approval. If Windows
+   warns about an unknown publisher, see
+   [if Windows warns about the download](#if-windows-warns-about-the-download).
 2. Review storage guidance, dependency status, license and program folder.
    All-users setup defaults to `C:\Program Files\Medal Sync`; per-user setup
    uses your local Programs folder.
@@ -26,6 +28,31 @@ WinFsp installation or needs an administrator to install that driver once.
 Setup never automatically restarts Windows. Ordinary installation needs neither
 PowerShell nor a separate .NET installation. Follow
 [getting started](getting-started.md) for storage configuration and enrollment.
+
+### If Windows warns about the download
+
+The setup EXE is not code-signed yet, so Windows SmartScreen may show
+**Windows protected your PC** with an unknown publisher. This is expected for
+an unsigned download and does not mean the file is damaged.
+
+1. Before running it, check the download against the published checksum.
+   Download the matching `.sha256` file from the same release and compare:
+
+   ```powershell
+   $setup = '.\medal-sync-VERSION-setup-win-x64.exe'
+   (Get-FileHash $setup -Algorithm SHA256).Hash -eq (Get-Content "$setup.sha256").Split(' ')[0]
+   ```
+
+   Replace `VERSION` with the version you downloaded. This prints `True` when
+   the file matches. If it prints `False`, delete the download and do not run it. See
+   [package verification](#package-verification).
+2. Run the setup EXE. If SmartScreen appears, select **More info**, check that
+   the file name is the one you downloaded, then select **Run anyway**.
+
+Some antivirus tools also flag unsigned programs that mount a drive or start
+other programs. If yours quarantines a file from a verified download, report a
+false positive to your antivirus vendor, and see [getting help](../SUPPORT.md)
+if Medal Sync stops working because of it.
 
 Setup checks the initiating user's library readiness before copying programs.
 Quit Medal normally, wait for Ready, then choose **Exit Medal Sync** in the

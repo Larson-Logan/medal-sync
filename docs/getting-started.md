@@ -29,7 +29,11 @@ real playback, cross-PC handoff and physical reboot need desktop acceptance.
 
 ## Install the programs
 
-Follow [installation and updates](updates.md). The setup EXE offers per-user
+Follow [installation and updates](updates.md). The setup EXE is not
+code-signed yet, so Windows may warn about an unknown publisher; check the
+download's SHA-256 first, then choose **More info**, then **Run anyway** (see
+[if Windows warns about the download](updates.md#if-windows-warns-about-the-download)).
+The setup EXE offers per-user
 and all-users installation and creates Start menu shortcuts. All-users setup
 defaults to `C:\Program Files\Medal Sync`; per-user setup uses your local
 programs folder. Use the location selected in the installer for CLI commands,
