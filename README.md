@@ -87,6 +87,8 @@ includes .NET and rclone, and offers the WinFsp driver.
    the bundled WinFsp driver. The installer is not code-signed yet, so Windows
    may show an unknown-publisher warning; see
    [if Windows warns about the download](docs/updates.md#if-windows-warns-about-the-download).
+   Once Medal Sync is in winget, you can also
+   [install it with winget](docs/updates.md#install-with-winget).
 2. **Check compatibility.** Run `medal-sync.exe compatibility` to confirm your
    installed Medal version and database are supported.
 3. **Configure.** Open **Medal Sync Setup Guide** from the Start menu, or

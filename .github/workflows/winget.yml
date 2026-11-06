@@ -1,0 +1,85 @@
+name: Publish to winget
+# Opens a pull request in microsoft/winget-pkgs for each stable release, so
+# `winget upgrade` offers it. Betas are never submitted. Runs on a standard
+# GitHub-hosted runner, free for this public repository.
+#
+# Off until the first manifest is merged into winget-pkgs by hand (see
+# docs/updates.md#install-with-winget) and the WINGET_PACKAGE_IDENTIFIER
+# variable is set. It also needs the WINGET_TOKEN secret: a classic token with
+# only the public_repo scope, from an account with a fork of winget-pkgs. Komac
+# cannot open winget-pkgs pull requests with a fine-grained token.
+#
+# The release workflow publishes with the medal-sync-release app token, so its
+# releases trigger this workflow. To resubmit a release, choose Run workflow.
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable release version to submit, such as 1.4.0.00
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: winget
+  cancel-in-progress: false
+jobs:
+  submit:
+    name: Submit the release to winget-pkgs
+    if: vars.WINGET_PACKAGE_IDENTIFIER != '' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The token only reads this repository's public release; Komac uses WINGET_TOKEN.
+    permissions:
+      contents: read
+    steps:
+      - name: Choose the release
+        id: release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          INPUT: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          version="${INPUT:-${TAG#v}}"
+          if ! grep -Eqx '(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0[0-9]|[1-9][0-9]+)' <<<"$version"; then
+            echo "::error::'$version' is not a stable release version such as 1.4.0.00."
+            exit 1
+          fi
+          export SETUP="medal-sync-$version-setup-win-x64.exe"
+          # A manual run must name a published stable release that has the setup EXE.
+          release="$(gh api "repos/$REPO/releases/tags/v$version" \
+            --jq '"\(.draft) \(.prerelease) \([.assets[].name] | index(env.SETUP) != null)"')"
+          if [ "$release" != 'false false true' ]; then
+            echo "::error::v$version is not a published stable release with $SETUP."
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "url=https://github.com/$REPO/releases/download/v$version/$SETUP"
+          } >>"$GITHUB_OUTPUT"
+      - name: Install Komac
+        env:
+          KOMAC_VERSION: 2.17.2
+          KOMAC_SHA256: b03b020eec98acfb0b53e284a6e21815b884be33de6785b97e7a120f0e748966
+        run: |
+          archive="$RUNNER_TEMP/komac.tar.gz"
+          curl -fsSL --retry 3 -o "$archive" \
+            "https://github.com/russellbanks/Komac/releases/download/v${KOMAC_VERSION}/komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$KOMAC_SHA256  $archive" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP" komac
+      - name: Open the winget-pkgs pull request
+        env:
+          GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}
+          VERSION: ${{ steps.release.outputs.version }}
+          URL: ${{ steps.release.outputs.url }}
+        run: |
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "::error::Set the WINGET_TOKEN secret; see the comment at the top of this workflow."
+            exit 1
+          fi
+          "$RUNNER_TEMP/komac" update "$IDENTIFIER" --version "$VERSION" --urls "$URL" \
+            --release-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" --submit
+          echo "Submitted $IDENTIFIER $VERSION to winget-pkgs." >>"$GITHUB_STEP_SUMMARY"

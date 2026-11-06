@@ -319,6 +319,40 @@ To turn it on after acceptance:
    [installation and updates](updates.md#if-windows-warns-about-the-download)
    after the first signed release.
 
+### winget
+
+Stable releases can be submitted to the Windows Package Manager by the
+[winget workflow](../.github/workflows/winget.yml), which runs
+[Komac](https://github.com/russellbanks/Komac) to open a pull request in
+`microsoft/winget-pkgs` when a stable release is published. Betas are never
+submitted. It stays off until the first version is in winget-pkgs:
+
+1. After a stable release, write its manifests:
+
+   ```powershell
+   python scripts/new-winget-manifest.py --version 1.4.0.00 `
+     --sidecar medal-sync-1.4.0.00-setup-win-x64.exe.sha256 --out winget
+   ```
+
+2. On Windows, run `winget validate` on the version folder, then test it on a
+   clean Windows VM with `winget install --manifest` for both `--scope machine`
+   and `--scope user`.
+3. Copy the `manifests` folder into a fork of `microsoft/winget-pkgs` and open
+   a pull request. Answer the review until it is merged.
+4. Create a classic GitHub token with only the `public_repo` scope on the
+   account that owns the fork, and save it as the `WINGET_TOKEN` repository
+   secret. Komac cannot open winget-pkgs pull requests with a fine-grained
+   token.
+5. Set the repository variable `WINGET_PACKAGE_IDENTIFIER` to
+   `LarsonLogan.MedalSync`. From then on, every published stable release opens
+   its own winget-pkgs pull request. Choose **Run workflow** with a version to
+   resubmit one.
+6. Add the `winget install` command to the website, and remove "once it is
+   available" from the README, [getting started](getting-started.md) and
+   [install with winget](updates.md#install-with-winget).
+
+Komac is pinned by version and SHA-256 in the workflow. Update both together.
+
 Repository visibility, branch/tag rules and vulnerability reporting remain
 separate GitHub settings. No build or test deploys onto a live library.
 

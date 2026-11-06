@@ -29,6 +29,26 @@ Setup never automatically restarts Windows. Ordinary installation needs neither
 PowerShell nor a separate .NET installation. Follow
 [getting started](getting-started.md) for storage configuration and enrollment.
 
+### Install with winget
+
+Medal Sync is being submitted to the Windows Package Manager. Once the
+`LarsonLogan.MedalSync` package is available, you can install it from a
+terminal instead of downloading the setup EXE:
+
+```powershell
+winget install LarsonLogan.MedalSync --scope machine   # all users; installs WinFsp if missing
+winget install LarsonLogan.MedalSync --scope user      # just you; winget installs WinFsp first
+```
+
+This runs the same setup EXE silently, so the readiness checks below still
+apply: quit Medal, wait for **Ready** and exit Medal Sync first, or setup
+refuses. Only stable releases are published to winget, usually within a few
+days of the GitHub release while winget reviews them.
+
+`winget upgrade` and Medal Sync's own update offer install the same setup, so
+use whichever you like. After either one, the other sees the new version. Betas
+are never offered through winget.
+
 ### If Windows warns about the download
 
 The setup EXE is not code-signed yet, so Windows SmartScreen may show
