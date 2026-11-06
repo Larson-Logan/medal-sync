@@ -59,6 +59,7 @@ RULES = [
     (['tools/medal-sync/MedalSync.Launch/', 'tests/desktop/', 'tests/scripts/',
       'tests/fixtures/', 'scripts/storage/', 'installer/', 'docs/setup.html',
       'scripts/package-release.ps1', 'scripts/package-windows-installer.ps1',
+      'scripts/use-signed-files.ps1',
       'scripts/setup-installer-toolchain.ps1', 'scripts/test-windows-installer.ps1',
       'scripts/test-windows-installer-isolated.ps1', 'LICENSE', 'THIRD_PARTY.md'], ['desktop']),
     # Everything else, including the core program, its configuration, the SDK

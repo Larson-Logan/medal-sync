@@ -178,7 +178,11 @@ a portable ZIP with an exact file allowlist and per-file SHA-256 manifest.
 Public GitHub asset digests support release discovery; requests send no account,
 configuration, identity or credentials. Hash verification depends on control of
 the repository and HTTPS and does not replace publisher signing. Medal Sync's
-own generated binaries and setup EXE are currently unsigned.
+own generated binaries and setup EXE are currently unsigned. Free signing
+through SignPath Foundation is being set up; once it is turned on, stable
+releases show SignPath Foundation as the publisher. See the
+[code signing policy](code-signing.md) for what is signed and how to check a
+signature.
 
 ## Advanced portable lifecycle tool
 

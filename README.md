@@ -110,7 +110,8 @@ Before updating or uninstalling, quit Medal, wait for **Ready**, then choose
 **Exit Medal Sync** in the status panel or tray menu. Repair and removal are in
 Windows **Installed apps**. A portable ZIP is also available for advanced use.
 See [installation, updates and removal](docs/updates.md) for checksum
-verification and recovery.
+verification and recovery, and the [code signing policy](docs/code-signing.md)
+for how releases are signed.
 
 ## Questions
 

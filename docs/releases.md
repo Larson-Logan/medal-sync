@@ -287,7 +287,37 @@ every suite gates publishing. Drafts are invisible to automatic update
 checks, and prereleases are too unless a PC opts in to
 [betas](#beta-releases). A published stable setup is advertised on the
 next desktop launch; installation stays
-explicit and verifies Ready status. Publisher code signing is not configured.
+explicit and verifies Ready status.
+
+### Code signing
+
+Stable releases are signed for free through SignPath Foundation once the
+project is accepted; the [code signing policy](code-signing.md) lists what is
+signed and who approves it. Signing is off until the repository variable
+`SIGNPATH_ORGANIZATION_ID` and the secret `SIGNPATH_API_TOKEN` are set; until
+then releases are built unsigned exactly as before. With both set, the release
+run's validation signs `medal-sync.exe` and `medal-sync-launch.exe` before
+packaging, then signs the setup EXE it builds from them, waiting up to 40
+minutes for each approval. Approve both requests in SignPath when a release
+runs. The installer tests then run against the signed setup, and the publish
+job refuses any file without a valid, timestamped signature. Betas are never
+signed.
+
+To turn it on after acceptance:
+
+1. In SignPath, create the project (slug `medal-sync`), link it to this
+   repository as a GitHub trusted build system, and add the `programs` and
+   `setup` artifact configurations from the
+   [code signing policy](code-signing.md#how-a-release-is-signed).
+2. Use the `release-signing` signing policy, with manual approval.
+3. Add a SignPath CI user API token as the `SIGNPATH_API_TOKEN` repository
+   secret, and the organization ID as the `SIGNPATH_ORGANIZATION_ID`
+   repository variable. Set `SIGNPATH_PROJECT_SLUG` or `SIGNPATH_POLICY_SLUG`
+   only if you chose different slugs.
+4. Remove the unsigned-installer notes from the README, the website,
+   [getting started](getting-started.md) and
+   [installation and updates](updates.md#if-windows-warns-about-the-download)
+   after the first signed release.
 
 Repository visibility, branch/tag rules and vulnerability reporting remain
 separate GitHub settings. No build or test deploys onto a live library.

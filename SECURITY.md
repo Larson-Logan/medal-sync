@@ -11,7 +11,9 @@ credentials, databases, recordings or runtime logs.
 Release downloads are verified against the SHA-256 digest returned by GitHub,
 then each payload file is checked against its manifest. These checks depend
 on HTTPS and control of the GitHub repository; they are not publisher signing.
-Windows binaries are currently unsigned. Launch checks send no configuration,
+Windows binaries are currently unsigned; free signing through SignPath
+Foundation is being set up under the [code signing policy](docs/code-signing.md).
+Launch checks send no configuration,
 account information or credentials; GitHub receives the ordinary network
 request and its source IP address.
 
