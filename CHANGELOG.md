@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve this PC's beta update preference when saving unrelated changes in
+  the configuration wizard (#180).
 - Explain the Windows SmartScreen warning for the unsigned installer in the
   README, getting started, installation guide and website, with a one-line
   PowerShell check of the download's SHA-256.

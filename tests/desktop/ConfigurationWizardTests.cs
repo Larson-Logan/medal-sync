@@ -2,6 +2,7 @@ using System.Reflection;
 using MedalSync;
 using MedalSync.Config;
 using MedalSync.Launch;
+using MedalSync.Platform;
 using MedalSync.Util;
 
 internal static class ConfigurationWizardTests
@@ -36,6 +37,7 @@ internal static class ConfigurationWizardTests
                 var candidate = wizard.Candidate();
                 check(candidate.StorageMode == StorageMode.Local && candidate.LibraryId.Length == 32, "Native wizard builds a validated new local identity");
                 check(candidate.Replication is null && candidate.CloudJournalId is null, "Values typed into hidden fields never reach the configuration");
+                check(!candidate.BetaUpdates, "New wizard setups keep beta updates off by default");
                 fields["copy"].Text = fields["cloudJournal"].Text = "";
                 check(candidate.Mount.ControlPort == 53684, "New wizard setups leave rclone's browser sign-in port free");
                 check(fields.Values.All(f => f.AccessibleName?.Length > 0 && f.TabStop), "Wizard text fields support native accessibility and keyboard traversal");
@@ -96,6 +98,28 @@ internal static class ConfigurationWizardTests
                 check(fields["library"].ReadOnly && fields["account"].ReadOnly && !Field<ComboBox>(wizard, "_identity").Enabled, "Existing account and library identities cannot be replaced in the wizard");
                 wizard.Close();
                 check(File.ReadAllBytes(state.ConfigPath).SequenceEqual(legacyOriginal), "Cancel preserves the existing configuration byte-for-byte");
+            }
+            File.WriteAllBytes(state.ConfigPath, original);
+
+            foreach (bool betaUpdates in new[] { true, false })
+            {
+                File.WriteAllBytes(state.ConfigPath, Json.Serialize(saved with { BetaUpdates = betaUpdates }));
+                using var wizard = new WindowsConfigurationWizard(state, (_, _) => { }, () => new Guard());
+                wizard.Show();
+                // An unrelated edit must retain the update preference through review, save and update checks.
+                Field<NumericUpDown>(wizard, "_hours").Value = 6;
+                Field<Button>(wizard, "_next").PerformClick();
+                Until(() => !Field<bool>(wizard, "_busy"));
+                check(Field<Button>(wizard, "_save").Enabled, "Existing setup can review an unrelated change");
+                var review = Field<ConfigurationReview>(wizard, "_proposal");
+                check(review.Config.BetaUpdates == betaUpdates, "Review retains the existing beta update preference");
+                review.Save(true, (_, _) => { });
+                var reloaded = MedalSyncConfig.Load(state.ConfigPath);
+                check(reloaded.MaxSessionHours == 6 && reloaded.BetaUpdates == betaUpdates,
+                    "Saving unrelated wizard changes preserves either beta update preference");
+                check(ReleaseUpdate.BetaUpdatesEnabled(state.ConfigPath) == betaUpdates,
+                    "Update checks honor the existing preference after a wizard save");
+                wizard.Close();
             }
             File.WriteAllBytes(state.ConfigPath, original);
 
