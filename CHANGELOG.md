@@ -16,6 +16,10 @@
   and a workflow that submits each later stable release.
 - Python tests that run PowerShell are skipped when `pwsh` is not installed,
   except on GitHub Actions.
+- Keep aborted-start recovery evidence and session logins when the cache disk
+  is disconnected, inaccessible or cannot be inspected. Retention now requires
+  a confirmed empty cache or a readable immediate parent proving it absent,
+  and rechecks before removal, including interrupted retention trash (#182).
 
 ## 1.4.0 — 2026-11-05
 

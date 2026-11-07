@@ -750,7 +750,10 @@ keeps the newest `--keep` accepted-change reviews, media refresh backups,
 aborted-start folders and kept library backups (`Backups/kept-library-*`, from
 `launch --replace-local-library`, `repair` and `relocate`) plus any from the
 last `--keep-days` days; aborted-start evidence is kept while its cache still
-holds files. A kept library backup can hold entries that were never shared, and
+holds files or cannot be inspected, including when its disk is disconnected.
+An absent cache is removable only when its immediate parent is readable and
+confirms it is gone. Apply checks again before removing evidence or interrupted
+retention trash. A kept library backup can hold entries that were never shared, and
 the review says so. Clip media and the live library database are never touched.
 
 Apply refuses unless the library is exactly as reviewed. It holds the journal

@@ -288,6 +288,164 @@ public sealed class RetentionTests : IDisposable
         Assert.Equal("recording", File.ReadAllText(Path.Combine(fullCache, "unpublished.mp4")));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConnectedAbortedStartCacheRemovesEvidenceOnlyWhenEmpty(bool unpublishedMedia)
+    {
+        string cache = _fixture.PathFor("cache-disk", "library", "session");
+        Directory.CreateDirectory(cache);
+        if (unpublishedMedia) File.WriteAllText(Path.Combine(cache, "unpublished.mp4"), "synthetic recording");
+        string evidence = AbortedStart(cache);
+
+        var plan = Retention().Plan(Policy(keep: 0));
+        Assert.Equal(!unpublishedMedia, plan.Items.Any(i => i.Kind == Platform.Retention.AbortedStart));
+        Retention().Apply(plan);
+        if (unpublishedMedia)
+        {
+            AssertRecoveryEvidence(evidence);
+            Assert.True(File.Exists(Path.Combine(cache, "unpublished.mp4")));
+        }
+        else Assert.False(Directory.Exists(evidence));
+    }
+
+    [Fact]
+    public void AbortedStartEvidenceAndLoginAreKeptWhenTheCacheDiskIsUnavailable()
+    {
+        string disk = _fixture.PathFor("cache-disk");
+        string cache = Path.Combine(disk, "library", "session");
+        Directory.CreateDirectory(cache);
+        File.WriteAllText(Path.Combine(cache, "unpublished.mp4"), "synthetic recording");
+        string evidence = AbortedStart(cache);
+        string offline = _fixture.PathFor("offline-disk");
+        Directory.Move(disk, offline); // An isolated folder stands in for a disconnected disk.
+
+        var plan = Retention().Plan(Policy(keep: 0));
+        Assert.DoesNotContain(plan.Items, i => i.Kind == Platform.Retention.AbortedStart);
+        Retention().Apply(plan);
+        AssertRecoveryEvidence(evidence);
+        Assert.Equal("synthetic recording", File.ReadAllText(Path.Combine(offline, "library", "session", "unpublished.mp4")));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AbsentAbortedStartCacheIsRemovableOnlyWithAReadableImmediateParent(bool parentPresent)
+    {
+        string parent = _fixture.PathFor("cache-disk", "library");
+        if (parentPresent) Directory.CreateDirectory(parent);
+        string evidence = AbortedStart(Path.Combine(parent, "missing-session"));
+
+        var plan = Retention().Plan(Policy(keep: 0));
+        Assert.Equal(parentPresent, plan.Items.Any(i => i.Kind == Platform.Retention.AbortedStart));
+        Retention().Apply(plan);
+        if (parentPresent) Assert.False(Directory.Exists(evidence));
+        else AssertRecoveryEvidence(evidence);
+    }
+
+    [Fact]
+    public void InaccessibleAbortedStartCacheKeepsRecoveryEvidenceAndLogin()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string cache = _fixture.PathFor("cache-disk", "library", "session");
+        var directory = Directory.CreateDirectory(cache);
+        string evidence = AbortedStart(cache);
+        var original = System.IO.FileSystemAclExtensions.GetAccessControl(directory);
+        var denied = System.IO.FileSystemAclExtensions.GetAccessControl(directory);
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        denied.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(identity.User!,
+            System.Security.AccessControl.FileSystemRights.ListDirectory, System.Security.AccessControl.AccessControlType.Deny));
+        try
+        {
+            System.IO.FileSystemAclExtensions.SetAccessControl(directory, denied);
+            Assert.Throws<UnauthorizedAccessException>(() => Directory.EnumerateFileSystemEntries(cache).Any());
+            var plan = Retention().Plan(Policy(keep: 0));
+            Assert.DoesNotContain(plan.Items, i => i.Kind == Platform.Retention.AbortedStart);
+            Retention().Apply(plan);
+            AssertRecoveryEvidence(evidence);
+        }
+        finally { System.IO.FileSystemAclExtensions.SetAccessControl(directory, original); }
+    }
+
+    [Fact]
+    public void ApplyRefusesWhenAMissingCacheReconnectsWithUnpublishedMedia()
+    {
+        string cache = _fixture.PathFor("cache-disk", "library", "session");
+        Directory.CreateDirectory(cache);
+        string evidence = AbortedStart(cache);
+        string offline = _fixture.PathFor("offline-session");
+        Directory.Move(cache, offline);
+        var plan = Retention().Plan(Policy(keep: 0));
+        Assert.Contains(plan.Items, i => i.Kind == Platform.Retention.AbortedStart);
+        File.WriteAllText(Path.Combine(offline, "unpublished.mp4"), "synthetic recording");
+        Directory.Move(offline, cache);
+
+        Assert.Throws<UnsafeOperationException>(() => Retention().Apply(plan));
+        AssertRecoveryEvidence(evidence);
+        Assert.True(File.Exists(Path.Combine(cache, "unpublished.mp4")));
+        Assert.Null(Generations.ReadRetention());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ApplyKeepsEvidenceWhenCacheDisconnectsAfterReview(bool duringApply)
+    {
+        string disk = _fixture.PathFor("cache-disk");
+        string cache = Path.Combine(disk, "library", "session");
+        Directory.CreateDirectory(cache);
+        string evidence = AbortedStart(cache);
+        var plan = Retention().Plan(Policy(keep: 0));
+        Assert.Contains(plan.Items, i => i.Kind == Platform.Retention.AbortedStart);
+        string offline = _fixture.PathFor("offline-disk");
+        if (!duringApply) Directory.Move(disk, offline);
+
+        Assert.Throws<UnsafeOperationException>(() => Retention().Apply(plan,
+            duringApply ? () => Directory.Move(disk, offline) : null));
+        AssertRecoveryEvidence(evidence);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InterruptedRetentionTrashKeepsEvidenceUntilItsCacheCanBeInspected(bool newPlan)
+    {
+        string disk = _fixture.PathFor("cache-disk");
+        string cache = Path.Combine(disk, "library", "session");
+        Directory.CreateDirectory(cache);
+        string evidence = AbortedStart(cache);
+        var plan = Retention().Plan(Policy(keep: 0));
+        string offline = _fixture.PathFor("offline-disk");
+        int calls = 0;
+        Assert.Throws<UnsafeOperationException>(() => Retention().Apply(plan, () =>
+        {
+            if (++calls == 2) Directory.Move(disk, offline); // Evidence was moved, before deleting trash.
+        }));
+        string moved = Path.Combine(_state.Root, "retention-trash", plan.Id, Platform.Retention.AbortedStart, Path.GetFileName(evidence));
+        AssertRecoveryEvidence(moved);
+        Assert.Throws<UnsafeOperationException>(() => Retention().Apply(newPlan ? Retention().Plan(Policy(keep: 0)) : plan));
+        AssertRecoveryEvidence(moved);
+
+        Directory.Move(offline, disk);
+        Retention().Apply(newPlan ? Retention().Plan(Policy(keep: 0)) : plan);
+        Assert.False(Directory.Exists(moved));
+    }
+
+    private string AbortedStart(string cache)
+    {
+        string session = SessionCoordinator.NewId();
+        _ = _state.SessionSecret(session, Now.AddDays(-200));
+        string folder = _state.RetainAbortedStart(session, _config.LibraryId, cache, Now.AddDays(-200));
+        Directory.SetCreationTimeUtc(folder, Now.AddDays(-200).UtcDateTime);
+        return folder;
+    }
+
+    private static void AssertRecoveryEvidence(string folder)
+    {
+        Assert.True(File.Exists(Path.Combine(folder, "recovery.json")));
+        Assert.True(File.Exists(Path.Combine(folder, "login.json")));
+    }
+
     [Fact]
     public void KeptLibraryBackupsAreRemovedOnlyByAReviewedRetention()
     {
