@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using MedalSync.Cli;
@@ -43,7 +44,9 @@ public sealed class CloudHandoffTests : IDisposable
     {
         public CloudJournal? Value;
         public bool Offline, IgnoreConditions, ApplyThenDisconnect;
+        public HttpStatusCode? Failure;
         public int Revision = 1, Writes, Reads;
+        public readonly List<HttpMethod> Methods = [];
         private readonly object gate = new();
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -51,9 +54,11 @@ public sealed class CloudHandoffTests : IDisposable
             Assert.Equal("synthetic-token", request.Headers.Authorization?.Parameter);
             Assert.Equal("www.googleapis.com", request.RequestUri!.Host);
             if (Offline) throw new HttpRequestException("Synthetic offline");
+            if (Failure is { } failure) return Reply(failure);
             string body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
             lock (gate)
             {
+                Methods.Add(request.Method);
                 if (request.Method == HttpMethod.Post)
                 {
                     if (Value is not null) return Reply(HttpStatusCode.Conflict);
@@ -126,6 +131,129 @@ public sealed class CloudHandoffTests : IDisposable
         var backend = new CloudCoordination(config, Api(drive), Run);
         backend.Create(snapshot, new(1, [], []), First, new string('1', 32), Versions, Now);
         return CoordinationStore.OpenCloud(config, backend);
+    }
+
+    private LocalState HistoryState(MedalSyncConfig config)
+    {
+        var state = new LocalState(fixture.PathFor("history-state"));
+        Directory.CreateDirectory(state.Root);
+        File.WriteAllBytes(state.ConfigPath, Json.Serialize(config));
+        return state;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static int History(bool diff, LocalState state, TextWriter output, Func<MedalSyncConfig, CoordinationStore> open)
+    {
+        var args = Arguments.Parse(diff ? ["--from", "0", "--to", "1", "--json"] : ["--json"],
+            new HashSet<string> { "--json" }, new HashSet<string> { "--from", "--to" });
+        return diff ? HistoryCommands.Diff(args, output, state, open) : HistoryCommands.List(args, output, state, open);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [SupportedOSPlatform("windows")]
+    public void HistoryDownloadsAnAbsentCloudCacheWithoutChangingAnotherPcsOwnership(bool diff)
+    {
+        using var drive = new Drive();
+        var first = Seed(drive, Config("first"), Snapshot("seed", "one"));
+        string session = new('1', 32);
+        first.Update(j => Ownership.Acquire(j, First, session, Now), TimeSpan.Zero);
+        first.Update(j => Ownership.MarkActive(j, First, session, Now), TimeSpan.Zero);
+        first.Update(j => Ownership.BeginDrain(j, First, session, Now), TimeSpan.Zero);
+        first.Update(j => Ownership.BeginPublish(j, First, session, Now), TimeSpan.Zero);
+        first.Generations.Publish(1, 0, session, First, Snapshot("next", "one", "two"), new(1, [], []), Versions, Now);
+        first.Update(j => Ownership.CompletePublish(j, First, session, 1, Now), TimeSpan.Zero);
+        first.Update(j => Ownership.Acquire(j, First, session, Now), TimeSpan.Zero);
+        first.Update(j => Ownership.MarkActive(j, First, session, Now), TimeSpan.Zero);
+        byte[] journal = Json.Serialize(drive.Value);
+        int writes = drive.Writes, revision = drive.Revision;
+        drive.Methods.Clear();
+        commands.Clear();
+
+        var config = Config("second");
+        var state = HistoryState(config);
+        Assert.False(Directory.Exists(config.CoordinationRoot));
+        var output = new StringWriter();
+        string ReadOnlyRun(IReadOnlyList<string> args)
+        {
+            Assert.True(args[0] == "lsjson" || args[0] == "copy" && args[1].StartsWith("gdrive:", StringComparison.Ordinal)
+                && Path.GetFullPath(args[2]).StartsWith(config.LibraryCoordinationDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+            return Run(args);
+        }
+
+        Assert.Equal(0, History(diff, state, output, c => CoordinationStore.OpenCloud(c, new(c, Api(drive), ReadOnlyRun))));
+
+        using var json = JsonDocument.Parse(output.ToString());
+        Assert.Equal(1, json.RootElement.GetProperty("head").GetInt64());
+        if (diff) Assert.Equal(1, json.RootElement.GetProperty("counts").GetProperty("added").GetInt64());
+        else Assert.Equal(2, json.RootElement.GetProperty("entries").GetArrayLength());
+        Assert.Contains("copy", commands);
+        Assert.True(Directory.Exists(Path.Combine(config.LibraryCoordinationDirectory, "generations", GenerationStore.Name(1))));
+        Assert.Equal(journal, Json.Serialize(drive.Value));
+        Assert.Equal(writes, drive.Writes);
+        Assert.Equal(revision, drive.Revision);
+        Assert.NotEmpty(drive.Methods);
+        Assert.All(drive.Methods, method => Assert.Equal(HttpMethod.Get, method));
+        Assert.Equal([state.ConfigPath], Directory.GetFiles(state.Root));
+        Assert.False(File.Exists(Path.Combine(config.LibraryCoordinationDirectory, "writer.lock")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [SupportedOSPlatform("windows")]
+    public void HistoryStillWaitsForAMissingServerRootBeforeOpeningIt(bool diff)
+    {
+        var config = Config("server") with
+        {
+            StorageMode = StorageMode.Server, CloudJournalId = null,
+            CoordinationRoot = @"\\127.0.0.1\medal-sync-synthetic-" + Guid.NewGuid().ToString("N"),
+        };
+        var state = HistoryState(config);
+        var output = new StringWriter();
+        Assert.Equal(3, History(diff, state, output, _ => throw new InvalidOperationException("An absent server must not be opened.")));
+        Assert.Contains("Waiting for storage", output.ToString());
+        Assert.Equal([state.ConfigPath], Directory.GetFiles(state.Root));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [SupportedOSPlatform("windows")]
+    public void HistoryDistinguishesCloudOutageAccessRefusalAndInvalidConfiguration(bool diff)
+    {
+        using var drive = new Drive { Value = Initial(), Offline = true };
+        var config = Config("second");
+        var state = HistoryState(config);
+        var output = new StringWriter();
+        CoordinationStore Open(MedalSyncConfig c) => CoordinationStore.OpenCloud(c, new(c, Api(drive), Run));
+
+        Assert.Equal(3, History(diff, state, output, Open));
+        Assert.Contains("Waiting for storage", output.ToString());
+        Assert.False(Directory.Exists(config.CoordinationRoot));
+
+        drive.Offline = false;
+        drive.Failure = HttpStatusCode.Unauthorized;
+        output.GetStringBuilder().Clear();
+        Assert.Throws<StorageActionRequiredException>(() => History(diff, state, output, Open));
+        Assert.Equal("", output.ToString());
+
+        drive.Failure = null;
+        foreach (var hint in new[] { RcloneHints.SignIn, RcloneHints.Config })
+        {
+            var refusal = Assert.Throws<StorageActionRequiredException>(() => History(diff, state, output,
+                c => CoordinationStore.OpenCloud(c, new(c, Api(drive),
+                    _ => throw new RcloneFailedException("synthetic", 1, hints: hint, command: "lsjson")))));
+            Assert.Contains(hint == RcloneHints.SignIn ? "sign-in" : "configuration", refusal.Message);
+        }
+
+        File.WriteAllBytes(state.ConfigPath, Json.Serialize(config with { CloudJournalId = null }));
+        Assert.Throws<InvalidDataException>(() => History(diff, state, output,
+            _ => throw new InvalidOperationException("An invalid configuration must not reach the provider.")));
+        Assert.False(Directory.Exists(config.CoordinationRoot));
+        Assert.Equal(0, drive.Writes);
+        Assert.Equal([state.ConfigPath], Directory.GetFiles(state.Root));
     }
 
     [Fact]

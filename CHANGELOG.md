@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Let cloud-mode `history list` and `history diff` download committed history
+  when this PC's local history cache does not exist yet. An absent cache no
+  longer reports the cloud library as offline; provider failures still refuse
+  or wait, and reading history never changes ownership (#181).
 - Preserve this PC's beta update preference when saving unrelated changes in
   the configuration wizard (#180).
 - Explain the Windows SmartScreen warning for the unsigned installer in the

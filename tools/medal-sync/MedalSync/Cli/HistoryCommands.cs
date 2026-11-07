@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using MedalSync.Config;
 using MedalSync.Coordination;
+using MedalSync.Platform;
 using MedalSync.Util;
 
 namespace MedalSync.Cli;
@@ -11,20 +12,22 @@ namespace MedalSync.Cli;
 [SupportedOSPlatform("windows")]
 internal static class HistoryCommands
 {
-    public static int List(Arguments args, TextWriter output)
+    public static int List(Arguments args, TextWriter output, LocalState? state = null,
+        Func<MedalSyncConfig, CoordinationStore>? openStore = null)
     {
         bool json = args.Flag("--json");
         int limit = args.Value("--limit") is { } text ? (int)Number("--limit", text, 1, GenerationHistory.MaxLimit) : GenerationHistory.DefaultLimit;
         long? before = args.Value("--before") is { } b ? Number("--before", b, 1, long.MaxValue) : null;
         args.RequireAllUsed();
-        if (Open(output) is not { } opened) return 3;
+        if (Open(output, state, openStore) is not { } opened) return 3;
         var (store, head) = opened;
         var list = GenerationHistory.List(store.Generations, head, limit, before, DateTimeOffset.UtcNow);
         output.WriteLine(json ? JsonSerializer.Serialize(list, Json.Options) : GenerationHistory.Render(list));
         return 0;
     }
 
-    public static int Diff(Arguments args, TextWriter output)
+    public static int Diff(Arguments args, TextWriter output, LocalState? state = null,
+        Func<MedalSyncConfig, CoordinationStore>? openStore = null)
     {
         bool json = args.Flag("--json");
         long from = Number("--from", args.Required("--from"), 0, long.MaxValue);
@@ -32,7 +35,7 @@ internal static class HistoryCommands
         string? details = args.Value("--out");
         args.RequireAllUsed();
         if (details is not null && File.Exists(details)) throw new UsageException($"{details} already exists; choose a new file for the details.");
-        if (Open(output) is not { } opened) return 3;
+        if (Open(output, state, openStore) is not { } opened) return 3;
         var (store, head) = opened;
         var (diff, items) = GenerationHistory.Diff(store.Generations, head, from, to, DateTimeOffset.UtcNow);
         if (details is not null) GenerationHistory.WriteDetails(details, diff, items);
@@ -49,17 +52,25 @@ internal static class HistoryCommands
     /// Reads the journal once, without the writer lock; the head it names is what the report describes.
     /// Null (exit 3, as for <c>status</c>) when the shared library cannot be reached.
     /// </summary>
-    private static (CoordinationStore Store, long Head)? Open(TextWriter output)
+    private static (CoordinationStore Store, long Head)? Open(TextWriter output, LocalState? state,
+        Func<MedalSyncConfig, CoordinationStore>? openStore)
     {
-        var state = LocalState.ForCurrentUser();
+        state ??= LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
         try
         {
-            if (!Directory.Exists(config.CoordinationRoot)) throw new StorageOfflineException("The coordination root is missing.");
-            var store = CoordinationStore.Open(config);
+            // Cloud coordination downloads immutable history into this disposable local cache.
+            if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot))
+                throw new StorageOfflineException("The coordination root is missing.");
+            var store = openStore is null ? CoordinationStore.Open(config) : openStore(config);
             return (store, store.ReadJournal().CommittedGeneration);
         }
-        catch (IOException)
+        catch (RcloneFailedException ex) when (!RcloneFailure.IsTransient(ex))
+        {
+            throw new StorageActionRequiredException(RcloneFailure.Describe(ex, "Library history", config.Remote,
+                config.Replication?.RcloneConfigPath), ex);
+        }
+        catch (IOException ex) when (ex is not StorageActionRequiredException)
         {
             output.WriteLine("Waiting for storage: the shared library's server cannot be reached right now, and history is read from it. Try again later.");
             return null;
