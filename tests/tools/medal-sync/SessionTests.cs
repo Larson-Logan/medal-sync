@@ -1681,6 +1681,35 @@ public sealed partial class SessionTests : IDisposable
     }
 
     [Fact]
+    public void Launch_WaitsInsteadOfTrustingAStaleJournal()
+    {
+        // Windows served the other PC's replaced journal from a cached open; the listing showed the newer file.
+        var other = Computer(SecondPc, "second");
+        Assert.Equal(LaunchStatus.Started, other.Coordinator.Launch().Status);
+        var pc = Computer(FirstPc, "first");
+        var listed = new DateTime(2026, 11, 9, 0, 32, 21, DateTimeKind.Utc);
+        var defaultReader = _store.JournalReader;
+        _store.JournalReader = new FreshCoordinationRead
+        {
+            ReadOpen = _ => ("{}"u8.ToArray(), listed.AddMinutes(-1)),
+            ReadListing = _ => listed,
+            Sleep = _ => { },
+            PauseDirectory = _fixture.PathFor("pauses"),
+        };
+
+        var outcome = pc.Coordinator.Launch();
+
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.True(outcome.StorageOffline);
+        Assert.Equal(LaunchWait.ServerUnreachable, outcome.Wait);
+        Assert.Contains("out-of-date copy of the library's ownership journal", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal(0, pc.Medal.Launches);
+        Assert.Empty(pc.Mount.Starts);
+        _store.JournalReader = defaultReader;
+        Assert.Equal(SecondPc.DeviceId, _store.ReadJournal().Owner?.DeviceId);
+    }
+
+    [Fact]
     public void Launch_RefusesToOverwriteChangesThatWereNeverShared()
     {
         string db = _fixture.CreateLibrary("second");

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Stop trusting an out-of-date copy of the server journal. Windows can keep
+  returning the old file after another PC replaces it, which left a PC waiting
+  for a session that had already ended and could let a stale "Ready" start a
+  second session. Journal reads are now checked against the folder listing;
+  an older copy is refused (launch waits for storage), and every Medal Sync
+  process on that PC stops reading it for a while so Windows fetches it again.
 - Let cloud-mode `history list` and `history diff` download committed history
   when this PC's local history cache does not exist yet. An absent cache no
   longer reports the cloud library as offline; provider failures still refuse
