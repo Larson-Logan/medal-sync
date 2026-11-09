@@ -636,6 +636,13 @@ Remote outages are waits, not errors:
   when nothing must be downloaded, and a notice in the status panel says the
   handoff cannot finish until that is fixed.
 
+- **Out-of-date server journal.** Windows can keep serving an old copy of
+  the SMB journal after another PC replaced it, so a finished session still
+  looks in use. Medal Sync compares each read with the folder listing and
+  never acts on an older copy. It waits as above (*Waiting for storage*) and
+  stops reading that file on this PC for 60 seconds, doubling up to 5
+  minutes while the copy stays old, so Windows fetches the file again.
+
 The copier adds files and refuses conflicting replacements. It does not
 propagate deletions or remove older replica files. Removing a clip from Medal
 removes its library reference; retained replica files do not recreate that

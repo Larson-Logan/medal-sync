@@ -70,6 +70,9 @@ internal sealed partial class CoordinationStore
 
     private string JournalPath => Path.Combine(Root, "journal.json");
 
+    /// <summary>Refuses a stale copy of the journal that Windows serves from a cached open; replaced in tests.</summary>
+    internal FreshCoordinationRead JournalReader { get; set; } = FreshCoordinationRead.Default;
+
     private string LockPath => Path.Combine(Root, "writer.lock");
 
     private string RequestsPath => Path.Combine(Root, "requests");
@@ -132,7 +135,9 @@ internal sealed partial class CoordinationStore
 
     public OwnershipRecord ReadJournal()
     {
-        var record = cloud is null ? Json.ReadFile<OwnershipRecord>(JournalPath, "Ownership journal") : cloud.ReadJournal();
+        var record = cloud is null
+            ? Json.Deserialize<OwnershipRecord>(JournalReader.Read(JournalPath, "library's ownership journal"), $"'{JournalPath}': Ownership journal")
+            : cloud.ReadJournal();
         if (record.Format != OwnershipRecord.CurrentFormat) throw new InvalidDataException($"Journal format {record.Format} is not supported.");
         if (record.LibraryId != Identity.LibraryId || record.AccountId != Identity.AccountId)
         {
