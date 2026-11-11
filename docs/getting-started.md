@@ -87,7 +87,7 @@ real playback, cross-PC handoff and physical reboot need desktop acceptance.
 ## Install the programs
 
 Follow [installation and updates](updates.md). The setup EXE is not
-code-signed yet, so Windows may warn about an unknown publisher; check the
+code-signed, so Windows may warn about an unknown publisher; check the
 download's SHA-256 first, then choose **More info**, then **Run anyway** (see
 [if Windows warns about the download](updates.md#if-windows-warns-about-the-download)).
 Once it is available, you can [install with winget](updates.md#install-with-winget)

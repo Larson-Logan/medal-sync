@@ -84,7 +84,7 @@ includes .NET and rclone, and offers the WinFsp driver.
 1. **Install.** Download the **Windows x64 setup EXE** from
    [Releases](https://github.com/Larson-Logan/medal-sync/releases/latest).
    Choose per-user or all-users installation. All-users setup can install
-   the bundled WinFsp driver. The installer is not code-signed yet, so Windows
+   the bundled WinFsp driver. The installer is not code-signed, so Windows
    may show an unknown-publisher warning; see
    [if Windows warns about the download](docs/updates.md#if-windows-warns-about-the-download).
    Once Medal Sync is in winget, you can also
@@ -112,8 +112,7 @@ Before updating or uninstalling, quit Medal, wait for **Ready**, then choose
 **Exit Medal Sync** in the status panel or tray menu. Repair and removal are in
 Windows **Installed apps**. A portable ZIP is also available for advanced use.
 See [installation, updates and removal](docs/updates.md) for checksum
-verification and recovery, and the [code signing policy](docs/code-signing.md)
-for how releases are signed.
+verification and recovery.
 
 ## Questions
 
