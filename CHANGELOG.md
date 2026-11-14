@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The status view no longer says "Unknown / unreachable" on a PC that is not
+  set up yet. Without a configuration it says so and points to Configure; with
+  a configuration but before this PC's first command, it shows the library's
+  real state, as `medal-sync status` does (#189).
+- Check for updates no longer gives up on the setup download after five
+  minutes in total. A slow connection that keeps delivering can finish; only
+  a connection that delivers nothing for a minute, or Cancel, stops it (#190).
+- Ignore a saved pause for an out-of-date journal copy when it ends later
+  than any pause can last, as after the PC's clock was corrected backwards.
+  It no longer blocks Medal Sync from reading the journal until then (#193).
 - Stop trusting an out-of-date copy of the server journal. Windows can keep
   returning the old file after another PC replaces it, which left a PC waiting
   for a session that had already ended and could let a stale "Ready" start a
