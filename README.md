@@ -1,6 +1,6 @@
 # Medal Sync
 
-[![Validation](https://github.com/Larson-Logan/medal-sync/actions/workflows/validate.yml/badge.svg)](https://github.com/Larson-Logan/medal-sync/actions/workflows/validate.yml)
+[![Dev build](https://github.com/Larson-Logan/medal-sync/actions/workflows/beta.yml/badge.svg?branch=dev)](https://github.com/Larson-Logan/medal-sync/actions/workflows/beta.yml)
 [![Latest release](https://img.shields.io/github/v/release/Larson-Logan/medal-sync?label=release)](https://github.com/Larson-Logan/medal-sync/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -84,7 +84,11 @@ includes .NET and rclone, and offers the WinFsp driver.
 1. **Install.** Download the **Windows x64 setup EXE** from
    [Releases](https://github.com/Larson-Logan/medal-sync/releases/latest).
    Choose per-user or all-users installation. All-users setup can install
-   the bundled WinFsp driver.
+   the bundled WinFsp driver. The installer is not code-signed, so Windows
+   may show an unknown-publisher warning; see
+   [if Windows warns about the download](docs/updates.md#if-windows-warns-about-the-download).
+   Once Medal Sync is in winget, you can also
+   [install it with winget](docs/updates.md#install-with-winget).
 2. **Check compatibility.** Run `medal-sync.exe compatibility` to confirm your
    installed Medal version and database are supported.
 3. **Configure.** Open **Medal Sync Setup Guide** from the Start menu, or

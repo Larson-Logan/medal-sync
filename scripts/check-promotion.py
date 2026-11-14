@@ -16,13 +16,16 @@ It fails when the promotion:
   VersionPrefix on main;
 - lowers VersionPrefix, or raises it to a version that is already released;
 - still has entries under `## Unreleased` in CHANGELOG.md, or the changelog's
-  newest release heading is not the release that this promotion publishes.
+  newest release heading is not the release that this promotion publishes or
+  has a date that does not exist, or an older section below it was prepared
+  for a release that never shipped.
 
 The version is chosen as the release workflow chooses it: `.00` when the
 promotion changes VersionPrefix, otherwise one more than the highest hotfix
 counter tagged for it. Only the standard library is used.
 """
 import argparse
+import datetime
 import os
 from pathlib import Path
 import re
@@ -36,6 +39,7 @@ TITLE = re.compile(rf'({TYPES})(\([a-z0-9._/-]+\))?(!)?: ')
 PREFIX = re.compile(r'<VersionPrefix>([^<]*)</VersionPrefix>')
 SEMVER = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
 RELEASE_HEADING = re.compile(r'(\S+) — ([0-9]{4}-[0-9]{2}-[0-9]{2})')
+RELEASE_NAME = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\.([0-9]{2,}))?')
 
 
 class PromotionError(Exception):
@@ -57,6 +61,17 @@ def version_prefix(root, rev):
     return tuple(int(part) for part in value.split('.'))
 
 
+def is_date(value):
+    """Whether value is a real calendar date written as YYYY-MM-DD."""
+    if not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value):
+        return False
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
 def text(version):
     return '.'.join(str(part) for part in version)
 
@@ -69,6 +84,21 @@ def released_counters(prefix, tags):
             yield 0
         elif tag.startswith(stable + '.') and re.fullmatch(r'[0-9]{2,}', tag[len(stable) + 1:]):
             yield int(tag[len(stable) + 1:])
+
+
+def release_key(name):
+    """A release name or tag version as (MAJOR, MINOR, PATCH, NN); three parts mean .00."""
+    match = RELEASE_NAME.fullmatch(name)
+    if not match:
+        return None
+    major, minor, patch, counter = match.groups()
+    return int(major), int(minor), int(patch), int(counter or 0)
+
+
+def newest_released(tags):
+    """The newest stable release tagged, or None. Betas never count."""
+    keys = [release_key(tag[1:]) for tag in tags if tag.startswith('v')]
+    return max((key for key in keys if key), default=None)
 
 
 def next_release(prefix, previous, tags):
@@ -118,7 +148,7 @@ def listed(subjects):
     return ''.join(f'\n  - {subject}' for subject in subjects)
 
 
-def changelog_errors(changelog, version, names):
+def changelog_errors(changelog, version, names, released=None):
     lines = changelog.splitlines()
     headings = [(index, line[3:].strip()) for index, line in enumerate(lines) if line.startswith('## ')]
     expected = f'## {names[0]} — YYYY-MM-DD'
@@ -134,6 +164,18 @@ def changelog_errors(changelog, version, names):
             return [f'The newest release heading in CHANGELOG.md is "## {name}", but this '
                     f'promotion publishes {version}. Add "{expected}" on dev above it with '
                     'what this release changes.']
+        if not is_date(match.group(2)):
+            return [f'The release heading "## {name}" in CHANGELOG.md has a date that does not '
+                    'exist. Write the release date as YYYY-MM-DD on dev.']
+        # A section prepared for a release that never shipped would be left
+        # behind under a version nobody can install.
+        older = headings[position + 1][1] if position + 1 < len(headings) else ''
+        stale = RELEASE_HEADING.fullmatch(older)
+        key = stale and release_key(stale.group(1))
+        if key and released is not None and key > released:
+            return [f'CHANGELOG.md still has "## {older}", which was never released, below '
+                    f'"## {name}". Move its entries under "## {name}" on dev; '
+                    'python scripts/prepare-release.py does this.']
         return []
     return [f'CHANGELOG.md has no release heading. Add "{expected}" on dev.']
 
@@ -150,7 +192,7 @@ def check(root, main, dev):
         version, names = next_release(prefix, previous, tags)
     except PromotionError as error:
         return None, errors + [str(error)]
-    errors += changelog_errors(git(root, 'show', f'{dev}:CHANGELOG.md'), version, names)
+    errors += changelog_errors(git(root, 'show', f'{dev}:CHANGELOG.md'), version, names, newest_released(tags))
     return (None if errors else version), errors
 
 

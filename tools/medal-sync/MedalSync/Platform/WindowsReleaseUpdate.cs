@@ -58,7 +58,7 @@ internal static class WindowsReleaseUpdate
         }
         catch (OperationCanceledException)
         {
-            ui.Show("The update download was canceled or timed out. Check for updates again to retry.");
+            ui.Show("The update download was canceled, or the connection stopped delivering data. Check for updates again to retry.");
             return 1;
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or UnauthorizedAccessException or COMException or Win32Exception)
@@ -245,7 +245,9 @@ internal static class WindowsReleaseUpdate
     internal static string Download(ReleaseAsset asset, string directory, HttpClient client)
     {
         var dialog = ShellProgressDialog.Create();
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        // No limit on the whole download, so a slow connection can finish. The user can cancel, and a connection
+        // that delivers nothing for ReleaseUpdate.DownloadStall is given up.
+        using var cancellation = new CancellationTokenSource();
         try
         {
             dialog.SetTitle("Medal Sync update");
@@ -258,7 +260,7 @@ internal static class WindowsReleaseUpdate
             // cancellation independently of network reads, including stalled connections.
             long received = 0;
             var download = Task.Run(() => ReleaseUpdate.DownloadSetupAsync(client, asset, directory,
-                (value, _) => Interlocked.Exchange(ref received, value), cancellation.Token));
+                (value, _) => Interlocked.Exchange(ref received, value), cancellation.Token, ReleaseUpdate.DownloadStall));
             // WhenAny never faults, so the original cancellation or download exception reaches the caller unwrapped.
             var finished = Task.WhenAny(download);
             while (!finished.Wait(200))

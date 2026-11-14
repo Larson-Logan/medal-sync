@@ -259,7 +259,7 @@ internal sealed class SessionCoordinator(
         try { journal = store.ReadJournal(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return StorageOfflineLaunch();
+            return StorageOfflineLaunch(ex);
         }
         if (Platform.PersistentMediaRefresh.IsPending(journal))
             return new LaunchOutcome(LaunchStatus.Blocked, "A persistent media refresh retains ownership. Retry its exact refresh-media review before opening Medal.", journal.SessionId);
@@ -325,8 +325,11 @@ internal sealed class SessionCoordinator(
                 + $"To switch, quit Medal on {where}, then open Medal here.";
     }
 
-    private static LaunchOutcome StorageOfflineLaunch() => new(LaunchStatus.Waiting,
-        "Waiting for storage: the shared library's server cannot be reached right now. Nothing was changed; open Medal again once it is back.",
+    /// <summary>An unreachable server, or one returning a stale journal: either way nothing was acquired.</summary>
+    private static LaunchOutcome StorageOfflineLaunch(Exception? cause = null) => new(LaunchStatus.Waiting,
+        cause is StaleCoordinationReadException stale
+            ? "Waiting for storage: " + stale.Message + " Open Medal again after that."
+            : "Waiting for storage: the shared library's server cannot be reached right now. Nothing was changed; open Medal again once it is back.",
         StorageOffline: true, Wait: LaunchWait.ServerUnreachable);
 
     /// <summary>
@@ -405,7 +408,7 @@ internal sealed class SessionCoordinator(
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return StorageOfflineLaunch();
+            return StorageOfflineLaunch(ex);
         }
         RestoreResult restored;
         string? warning;

@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+## 1.5.0 — 2026-11-14
+
+- The status view no longer says "Unknown / unreachable" on a PC that is not
+  set up yet. Without a configuration it says so and points to Configure; with
+  a configuration but before this PC's first command, it shows the library's
+  real state, as `medal-sync status` does (#189).
+- Check for updates no longer gives up on the setup download after five
+  minutes in total. A slow connection that keeps delivering can finish; only
+  a connection that delivers nothing for a minute, or Cancel, stops it (#190).
+- Ignore a saved pause for an out-of-date journal copy when it ends later
+  than any pause can last, as after the PC's clock was corrected backwards.
+  It no longer blocks Medal Sync from reading the journal until then (#193).
+- Stop trusting an out-of-date copy of the server journal. Windows can keep
+  returning the old file after another PC replaces it, which left a PC waiting
+  for a session that had already ended and could let a stale "Ready" start a
+  second session. Journal reads are now checked against the folder listing;
+  an older copy is refused (launch waits for storage), and every Medal Sync
+  process on that PC stops reading it for a while so Windows fetches it again.
+- Let cloud-mode `history list` and `history diff` download committed history
+  when this PC's local history cache does not exist yet. An absent cache no
+  longer reports the cloud library as offline; provider failures still refuse
+  or wait, and reading history never changes ownership (#181).
+- Preserve this PC's beta update preference when saving unrelated changes in
+  the configuration wizard (#180).
+- Explain the Windows SmartScreen warning for the unsigned installer in the
+  README, getting started, installation guide and website, with a one-line
+  PowerShell check of the download's SHA-256.
+- Add a quick start and a "which mode should I pick?" list to the top of
+  getting started.
+- Prepare publishing to winget: a manifest generator for the first submission
+  and a workflow that submits each later stable release.
+- Python tests that run PowerShell are skipped when `pwsh` is not installed,
+  except on GitHub Actions.
+- Keep aborted-start recovery evidence and session logins when the cache disk
+  is disconnected, inaccessible or cannot be inspected. Retention now requires
+  a confirmed empty cache or a readable immediate parent proving it absent,
+  and rechecks before removal, including interrupted retention trash (#182).
+
 ## 1.4.0 — 2026-11-05
 
 - Use less CPU, memory and disk activity while Medal Sync runs:

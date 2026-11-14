@@ -636,6 +636,13 @@ Remote outages are waits, not errors:
   when nothing must be downloaded, and a notice in the status panel says the
   handoff cannot finish until that is fixed.
 
+- **Out-of-date server journal.** Windows can keep serving an old copy of
+  the SMB journal after another PC replaced it, so a finished session still
+  looks in use. Medal Sync compares each read with the folder listing and
+  never acts on an older copy. It waits as above (*Waiting for storage*) and
+  stops reading that file on this PC for 60 seconds, doubling up to 5
+  minutes while the copy stays old, so Windows fetches the file again.
+
 The copier adds files and refuses conflicting replacements. It does not
 propagate deletions or remove older replica files. Removing a clip from Medal
 removes its library reference; retained replica files do not recreate that
@@ -750,7 +757,10 @@ keeps the newest `--keep` accepted-change reviews, media refresh backups,
 aborted-start folders and kept library backups (`Backups/kept-library-*`, from
 `launch --replace-local-library`, `repair` and `relocate`) plus any from the
 last `--keep-days` days; aborted-start evidence is kept while its cache still
-holds files. A kept library backup can hold entries that were never shared, and
+holds files or cannot be inspected, including when its disk is disconnected.
+An absent cache is removable only when its immediate parent is readable and
+confirms it is gone. Apply checks again before removing evidence or interrupted
+retention trash. A kept library backup can hold entries that were never shared, and
 the review says so. Clip media and the live library database are never touched.
 
 Apply refuses unless the library is exactly as reviewed. It holds the journal

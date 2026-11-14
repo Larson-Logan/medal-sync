@@ -141,16 +141,31 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
                 items.Add(new(LocalTrash, Path.GetRelativePath(state.Root, folder).Replace('\\', '/'), null, null, FolderBytes(folder)));
     }
 
-    /// <summary>Aborted-start evidence names the cache it left behind; it is kept while that cache still holds files.</summary>
+    /// <summary>Keep aborted-start evidence unless its cache can be positively inspected as empty or absent.</summary>
     private static bool CacheInUse(string folder)
     {
         try
         {
             using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(Path.Combine(folder, "recovery.json")));
-            string? cache = document.RootElement.TryGetProperty("cache", out var value) ? value.GetString() : null;
-            return cache is null || (Directory.Exists(cache) && Directory.EnumerateFileSystemEntries(cache).Any());
+            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("cache", out var value)
+                || value.ValueKind != System.Text.Json.JsonValueKind.String
+                || value.GetString() is not { } cache || !Path.IsPathFullyQualified(cache)) return true;
+            cache = Path.TrimEndingDirectorySeparator(Path.GetFullPath(cache));
+            try { return Directory.EnumerateFileSystemEntries(cache).Any(); }
+            catch (DirectoryNotFoundException)
+            {
+                // Directory.Exists also returns false for an unplugged disk or denied access. A missing
+                // cache is safe only when its immediate parent is readable and does not contain it.
+                // Never walk up to another ancestor: that may be on the host disk of a missing mount.
+                string? parent = Path.GetDirectoryName(cache);
+                if (parent is null) return true;
+                return Directory.EnumerateFileSystemEntries(parent).Any(entry => string.Equals(entry, cache,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+            }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException
+            or ArgumentException or NotSupportedException or System.Security.SecurityException)
         {
             return true; // Unreadable evidence is kept for a person to look at.
         }
@@ -192,7 +207,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
             Remove(plan.Items.Where(i => i.OnServer), item => Path.Combine(GenerationsDirectory, item.Name), serverTrash, requireIdle);
         }
         string localTrash = Path.Combine(state.Root, LocalTrashFolder, plan.Id);
-        Remove(plan.Items.Where(i => !i.OnServer), item => Path.Combine(state.Root, item.Name.Replace('/', '\\')), localTrash, requireIdle);
+        Remove(plan.Items.Where(i => !i.OnServer), item => Path.Combine(state.Root, item.Name.Replace('/', '\\')), localTrash, requireIdle, local: true);
         string receipt = Path.Combine(state.Root, "retention", plan.Id + ".json");
         Directory.CreateDirectory(Path.GetDirectoryName(receipt)!);
         AtomicFile.Replace(receipt, Json.Serialize(new
@@ -203,7 +218,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
     }
 
     /// <summary>Renames each folder into the trash (one step on the same volume), then deletes the trash.</summary>
-    private static void Remove(IEnumerable<RetentionItem> items, Func<RetentionItem, string> path, string trash, Action? requireIdle)
+    private static void Remove(IEnumerable<RetentionItem> items, Func<RetentionItem, string> path, string trash, Action? requireIdle, bool local = false)
     {
         var list = items.ToArray();
         if (list.Length == 0) return;
@@ -213,6 +228,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
             string source = path(item);
             if (!Directory.Exists(source)) continue; // Already moved by an interrupted apply.
             if (File.GetAttributes(source).HasFlag(FileAttributes.ReparsePoint)) throw new IOException($"{item.Name} is a link; retention was refused.");
+            if (item.Kind == AbortedStart) RequireUnusedCache(source);
             string target = Path.Combine(trash, item.Kind, Path.GetFileName(source));
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             Directory.Move(source, target);
@@ -220,8 +236,20 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
         foreach (var leftover in list.Where(i => i.Kind is ServerTrash or LocalTrash).Select(path).Append(trash))
         {
             requireIdle?.Invoke();
-            if (Directory.Exists(leftover)) Directory.Delete(leftover, recursive: true);
+            if (!Directory.Exists(leftover)) continue;
+            // An interrupted apply may already have moved evidence here. Revalidate it too, rather
+            // than letting a later trash cleanup bypass the unavailable-cache protection.
+            string aborted = Path.Combine(leftover, AbortedStart);
+            if (local && Directory.Exists(aborted))
+                foreach (string folder in Directory.EnumerateDirectories(aborted)) RequireUnusedCache(folder);
+            Directory.Delete(leftover, recursive: true);
         }
+    }
+
+    private static void RequireUnusedCache(string folder)
+    {
+        if (CacheInUse(folder))
+            throw new UnsafeOperationException($"The cache for {Path.GetFileName(folder)} is not confirmed empty or absent; its recovery evidence was kept. Reconnect the cache disk and preview retention again.");
     }
 
     private bool Exists(RetentionItem item) =>

@@ -9,6 +9,10 @@ name: Beta release Medal Sync
 # that version from 1. For example, after v1.3.1.01 the betas are
 # v1.3.1.02-beta.1, -beta.2 and so on until v1.3.1.02 itself is released.
 #
+# This is also dev's only full validation: validate.yml does not run on pushes
+# to dev, and a promotion into main reuses this run's validation of the same
+# commit.
+#
 # Update checks never see betas: GitHub never marks a prerelease Latest, and
 # the updaters ignore prereleases and suffixed tags. A beta install is offered
 # the release it leads up to once that is published.
@@ -111,7 +115,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.release == 'true'
     # Its checks job asks for actions: read, which a caller must grant. A beta
-    # run always takes every suite; it never reuses another run.
+    # run always takes every suite; it never reuses another run. Promotions
+    # look this job's result up as "Validate beta / validate", so keep its name.
     permissions:
       contents: read
       actions: read

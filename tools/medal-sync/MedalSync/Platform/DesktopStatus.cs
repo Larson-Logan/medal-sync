@@ -47,7 +47,10 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
     int? QueuedFiles = null, long? QueuedBytes = null, string? Replica = null, bool CanRetry = false, string? Notice = null,
     string? LastResult = null, bool Recording = false, bool CanRetryCloudCopies = false)
 {
-    public string Title => Phase switch
+    /// <summary>Replaces the phase's own title when the phase alone would mislead, as before this PC is set up.</summary>
+    public string? Heading { get; init; }
+
+    public string Title => Heading ?? Phase switch
     {
         SessionPhase.Active => Recording ? "Recording" : "Medal open",
         SessionPhase.Waiting => "Waiting for another PC",
@@ -60,6 +63,13 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
     /// <summary>The server or primary is offline. Media and any session stay on this PC; nothing needs fixing.</summary>
     public static DesktopStatus StorageOffline(DateTimeOffset now) => new(SessionPhase.WaitingForStorage,
         "Waiting for storage. Clips are safe on this PC; Medal Sync continues automatically when storage is back.", now);
+
+    /// <summary>
+    /// There is no config.json yet, so this PC has no session, cache or storage to report: only setup to finish.
+    /// </summary>
+    public static DesktopStatus NotConfigured(DateTimeOffset now) => new(SessionPhase.Unknown,
+        "Medal Sync is not set up on this PC yet. Right-click the Medal Sync icon in the notification area and choose Configure, "
+        + "or open Medal Sync Setup Guide from the Start menu.", now) { Heading = "Not set up yet" };
 
     public static DesktopStatus Unknown(DateTimeOffset? lastConfirmed = null) => new(SessionPhase.Unknown,
         "Status is stale or unreadable. Keep this PC's session and cache; reconnect to storage or reopen status to retry.", lastConfirmed);
@@ -221,8 +231,17 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
         lock (_gate)
         {
             var local = state();
+            if (!File.Exists(local.ConfigPath))
+            {
+                // The view also opens before setup, from its Start menu shortcut. Nothing is created here.
+                Forget();
+                (_config, _configBytes) = (null, null);
+                return DesktopStatus.NotConfigured(DateTimeOffset.UtcNow);
+            }
             var config = Config(local.ConfigPath);
-            var device = local.ExistingDevice();
+            // The wizard saves only the configuration. A PC that has not run its first command has no identity yet,
+            // and so owns nothing; a damaged or copied identity still refuses.
+            var device = File.Exists(Path.Combine(local.Root, "device.json")) ? local.ExistingDevice() : null;
             if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
             OwnershipRecord journal;
             try

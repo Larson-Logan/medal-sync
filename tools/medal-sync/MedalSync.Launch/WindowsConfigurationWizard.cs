@@ -371,6 +371,7 @@ internal sealed class WindowsConfigurationWizard : Form
         {
             StorageMode = mode,
             CloudJournalId = Optional("cloudJournal"),
+            BetaUpdates = _existing?.BetaUpdates ?? false,
             Replication = replication.LocalCopyRoot is null && replication.RcloneConfigPath is null && targets.Count == 0 ? null : replication,
         };
     }

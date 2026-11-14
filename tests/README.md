@@ -5,6 +5,12 @@ global.json, PowerShell 7, Node 24 and Python 3.11+. To rerun one area, pass
 `-Part` with `Unit`, `Desktop`, `Scripts` or `Repository` (for example
 `-Part Unit, Desktop`); CI runs these as parallel jobs.
 
+The Python tests also run on Linux and macOS with
+`python3 -m unittest discover -s tests -p 'test_*.py'`. The release and beta
+workflow step tests in `test_release_pipeline.py` run PowerShell, so they are
+skipped when `pwsh` is not installed. On GitHub Actions, or with
+`MEDAL_SYNC_REQUIRE_PWSH=1`, they fail instead of being skipped.
+
 - .NET tests use synthetic SQLite fixtures and cover ownership, restoration,
   upload verification, configuration, library review, shutdown and release checks.
 - Native desktop checks in `tests/desktop/` use a fake supervisor and isolated

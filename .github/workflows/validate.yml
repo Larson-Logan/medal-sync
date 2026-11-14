@@ -4,14 +4,14 @@ name: Medal Sync validation
 # always billed. Jobs run in parallel to keep wall time short.
 #
 # Work lands on dev first, and validate must pass for the suites a pull request
-# can affect. Every push to dev runs every suite. Only dev merges into main, and
-# a promotion's merge result is exactly the dev commit's tree, so a promotion
-# reuses that commit's passing push run, or runs every suite itself. The release
-# workflow runs every suite again, without caches, before it publishes, and
-# the beta workflow does the same for each dev commit it publishes as a beta.
+# can affect. Pushes to dev do not run this workflow on its own: the beta
+# workflow calls it for every dev commit, with every suite and no caches, before
+# it publishes that commit as a beta, so each commit is validated once. Only dev
+# merges into main, and a promotion's merge result is exactly the dev commit's
+# tree, so a promotion reuses that commit's passing beta validation, or runs
+# every suite itself. The release workflow runs every suite again, without
+# caches, before it publishes.
 on:
-  push:
-    branches: [dev]
   pull_request:
   workflow_dispatch:
   # Main calls this workflow from release.yml so publishing waits for all suites.
@@ -22,7 +22,7 @@ on:
         type: boolean
         default: false
       revision:
-        description: Hotfix counter, or none for the legacy bridge release
+        description: Hotfix counter, such as 00 or 01
         type: string
         default: '00'
       prerelease:
@@ -32,16 +32,14 @@ on:
 permissions:
   contents: read
 concurrency:
-  # A newer run replaces a running one for the same pull request, or for dev
-  # pushes: the newer dev commit contains the older one. Calls from the release
-  # and beta workflows use their own group, so they never contend with
-  # standalone validation or with the caller's concurrency group.
+  # A newer run replaces a running one for the same pull request. Calls from
+  # the release and beta workflows use their own group, so they never contend
+  # with standalone validation or with the caller's concurrency group.
   group: >-
     validate-${{ github.workflow }}-${{ (inputs.release && github.run_id)
     || github.event.pull_request.number
-    || (github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'dev')
     || github.run_id }}
-  cancel-in-progress: ${{ !inputs.release && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev')) }}
+  cancel-in-progress: ${{ !inputs.release && github.event_name == 'pull_request' }}
 env:
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
@@ -52,8 +50,8 @@ jobs:
   checks:
     name: Repository checks
     runs-on: ubuntu-latest
-    # A promotion may wait up to 15 minutes for dev's own run of the same commit.
-    timeout-minutes: 20
+    # A promotion may wait up to 25 minutes for the beta validation of the same commit.
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read
@@ -117,10 +115,11 @@ jobs:
           REPO: ${{ github.repository }}
         # public-source.json maps every file to the suites it affects, and the
         # inventory check above proved it is current. Pull requests into dev
-        # run only those suites; pushes run all. A promotion into main (already
-        # proven to come from dev) whose merge result is exactly the dev
-        # commit's tree reuses that commit's push run, waiting while it is
-        # still going. Any other outcome runs every suite here.
+        # run only those suites; other events run all. A promotion into main
+        # (already proven to come from dev) whose merge result is exactly the
+        # dev commit's tree reuses the validation that the beta workflow ran
+        # for that commit, waiting while it is still going. Any other outcome
+        # runs every suite here.
         run: |
           run_all() { printf '%s\n' unit=true desktop=true storage=true >>"$GITHUB_OUTPUT"; }
           reuse_dev() { printf '%s\n' unit=false desktop=false storage=false >>"$GITHUB_OUTPUT"; }
@@ -138,20 +137,29 @@ jobs:
             run_all
             exit 0
           fi
-          runs="repos/$REPO/actions/workflows/validate.yml/runs?branch=dev&event=push&head_sha=$dev"
-          for _ in $(seq 60); do
+          # The beta workflow's push run for this commit calls this workflow with
+          # every suite before it publishes. Its aggregate validate job is the
+          # result to reuse; a failed publish after it does not matter here.
+          runs="repos/$REPO/actions/workflows/beta.yml/runs?branch=dev&event=push&head_sha=$dev"
+          url='' conclusion=none
+          for _ in $(seq 100); do
             # On an API error gh prints the error body, so discard it and run every suite.
-            run="$(gh api "$runs" --jq '.workflow_runs[0] // {} | "\(.status // "none") \(.conclusion // "none") \(.html_url // "")"')" || run='none none'
-            read -r status conclusion url <<<"$run"
-            if [ "$status" = completed ] || [ "$status" = none ]; then break; fi
-            echo "Waiting for dev's validation of $dev ($status): $url"
+            run="$(gh api "$runs" --jq '.workflow_runs[0] // {} | "\(.id // "none") \(.status // "none") \(.html_url // "")"')" || run='none none'
+            read -r id status url <<<"$run"
+            [ "$id" = none ] && break
+            job="$(gh api "repos/$REPO/actions/runs/$id/jobs?per_page=100" \
+              --jq '[.jobs[] | select(.name == "Validate beta / validate")][0] // {} | "\(.status // "none") \(.conclusion // "none")"')" || job='none none'
+            read -r job_status conclusion <<<"$job"
+            if [ "$job_status" = completed ] || [ "$status" = completed ]; then break; fi
+            echo "Waiting for the beta validation of $dev ($status): $url"
+            conclusion=none
             sleep 15
           done
           if [ "$conclusion" = success ]; then
-            echo "Every suite already passed for dev at $dev, which this merge matches exactly: $url" >>"$GITHUB_STEP_SUMMARY"
+            echo "Every suite already passed for dev at $dev in its beta run, which this merge matches exactly: $url" >>"$GITHUB_STEP_SUMMARY"
             reuse_dev
           else
-            echo "dev at $dev has no passing validation run ($status, $conclusion), so every suite runs." >>"$GITHUB_STEP_SUMMARY"
+            echo "dev at $dev has no passing beta validation (${status:-none}, $conclusion), so every suite runs." >>"$GITHUB_STEP_SUMMARY"
             run_all
           fi
 
@@ -311,7 +319,7 @@ jobs:
 
   # The required check for main. It passes only when every suite passed, or a
   # suite was skipped because the source inventory showed the change cannot
-  # affect it, or because a promotion reused dev's passing run.
+  # affect it, or because a promotion reused dev's passing beta validation.
   validate:
     if: ${{ !cancelled() }}
     needs: [checks, unit-tests, windows-build, storage-integration]

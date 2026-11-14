@@ -166,8 +166,15 @@ internal static partial class ReleaseUpdate
         }
     }
 
+    /// <summary>How long the setup download may deliver nothing before it is given up.</summary>
+    internal static readonly TimeSpan DownloadStall = TimeSpan.FromSeconds(60);
+
+    /// <param name="stall">
+    /// Gives up, as a cancellation, when no response or no further bytes arrive for this long. The download as a
+    /// whole has no time limit, so a slow connection that keeps delivering can finish. Null never gives up.
+    /// </param>
     internal static async Task<string> DownloadSetupAsync(HttpClient client, ReleaseAsset asset, string directory,
-        Action<long, long>? progress, CancellationToken cancellationToken)
+        Action<long, long>? progress, CancellationToken cancellationToken, TimeSpan? stall = null)
     {
         // Validate even when called independently of discovery. No caller-selected executable URL or filename.
         if (!(StableTag().IsMatch("v" + asset.Version) || BetaTag().IsMatch("v" + asset.Version))
@@ -180,34 +187,41 @@ internal static partial class ReleaseUpdate
         if (File.Exists(destination)) throw new IOException("A setup download already exists in this folder. Choose a new folder.");
         Directory.CreateDirectory(directory);
         string partial = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".partial");
+        // Cancelled by the caller, or by the stall limit, which starts again whenever bytes arrive.
+        using var watchdog = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = watchdog.Token;
+        void Alive() { if (stall is { } limit) watchdog.CancelAfter(limit); }
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            token.ThrowIfCancellationRequested();
             progress?.Invoke(0, asset.Size);
-            using var response = await client.GetAsync(asset.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            Alive();
+            using var response = await client.GetAsync(asset.Url, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength is { } length && length != asset.Size)
                 throw new InvalidDataException("The setup download length does not match the release.");
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             await using (var file = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
-            await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
+            await using (var source = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false))
             {
                 byte[] buffer = new byte[81920];
                 long received = 0;
                 int read;
-                while ((read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                while ((read = await source.ReadAsync(buffer, token).ConfigureAwait(false)) > 0)
                 {
+                    Alive();
                     received += read;
                     if (received > asset.Size) throw new InvalidDataException("The setup download is larger than the release.");
-                    await file.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    await file.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
                     hash.AppendData(buffer, 0, read);
                     progress?.Invoke(received, asset.Size);
                 }
                 if (received != asset.Size) throw new InvalidDataException("The setup download is incomplete.");
                 if (!Convert.ToHexString(hash.GetHashAndReset()).Equals(asset.Sha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("The setup download failed SHA-256 verification. Download it again.");
-                await file.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await file.FlushAsync(token).ConfigureAwait(false);
             }
+            // Everything arrived and verified; from here only the caller can still cancel.
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(partial, destination); // Never replace an earlier download.
             return destination;
