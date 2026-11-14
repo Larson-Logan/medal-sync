@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.5.0 — 2026-11-14
+
 - The status view no longer says "Unknown / unreachable" on a PC that is not
   set up yet. Without a configuration it says so and points to Configure; with
   a configuration but before this PC's first command, it shows the library's
