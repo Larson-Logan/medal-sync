@@ -293,6 +293,43 @@ public sealed class ReleaseUpdateTests
     }
 
     [Fact]
+    public async Task SlowDownloadThatKeepsDeliveringFinishesHoweverLongItTakes()
+    {
+        using var fixture = new MedalFixture();
+        byte[] bytes = [1, 2, 3, 4, 5];
+        var asset = SetupAsset(bytes);
+        // One byte every half second: longer in total than the stall limit, but never silent for that long.
+        var stall = TimeSpan.FromSeconds(2);
+        using var client = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new SlowContent(bytes, TimeSpan.FromMilliseconds(500)) }));
+        var started = System.Diagnostics.Stopwatch.StartNew();
+
+        string path = await ReleaseUpdate.DownloadSetupAsync(client, asset, fixture.PathFor("downloads"), null, CancellationToken.None, stall);
+
+        Assert.True(started.Elapsed > stall, "The download must outlast the stall limit for this test to mean anything.");
+        Assert.Equal(bytes, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public async Task StalledDownloadIsGivenUpAndLeavesNoExecutableOrPartialFile()
+    {
+        using var fixture = new MedalFixture();
+        byte[] bytes = [1, 2, 3, 4, 5];
+        var asset = SetupAsset(bytes);
+        using var client = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new SlowContent(bytes, TimeSpan.Zero, silentAfter: 2) }));
+        string directory = fixture.PathFor("downloads");
+        var progress = new List<long>();
+
+        // The caller did not cancel; only the connection went silent.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ReleaseUpdate.DownloadSetupAsync(client, asset, directory,
+            (received, _) => progress.Add(received), CancellationToken.None, TimeSpan.FromMilliseconds(300)));
+
+        Assert.Equal(new long[] { 0, 1, 2 }, progress);
+        Assert.Empty(Directory.GetFiles(directory));
+    }
+
+    [Fact]
     public async Task DownloadRejectsUnexpectedHostFilenameOrDigestBeforeAnyNetworkOrDiskWork()
     {
         using var fixture = new MedalFixture();
@@ -378,6 +415,39 @@ public sealed class ReleaseUpdateTests
     {
         protected override bool TryComputeLength(out long length) { length = 0; return false; }
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => stream.WriteAsync(bytes).AsTask();
+    }
+
+    /// <summary>Delivers one byte per read after <paramref name="delay"/>, then nothing at all once <paramref name="silentAfter"/> bytes were sent.</summary>
+    private sealed class SlowContent(byte[] bytes, TimeSpan delay, int silentAfter = int.MaxValue) : HttpContent
+    {
+        protected override bool TryComputeLength(out long length) { length = bytes.Length; return true; }
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => throw new NotSupportedException();
+        protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new SlowStream(bytes, delay, silentAfter));
+    }
+
+    private sealed class SlowStream(byte[] bytes, TimeSpan delay, int silentAfter) : Stream
+    {
+        private int _sent;
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_sent >= silentAfter) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            if (_sent == bytes.Length) return 0;
+            await Task.Delay(delay, cancellationToken);
+            buffer.Span[0] = bytes[_sent++];
+            return 1;
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

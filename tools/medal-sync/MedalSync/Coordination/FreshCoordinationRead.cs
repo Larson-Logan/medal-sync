@@ -50,6 +50,13 @@ internal sealed class FreshCoordinationRead
     {
         string marker = MarkerPath(path);
         var pause = ReadPause(marker);
+        // No pause outlasts MaxPause. An end time further ahead was saved while this PC's clock was wrong, or the
+        // marker is damaged; obeying it would stop every read for hours or days, so it is dropped instead.
+        if (pause is { } saved && saved.Until - Now() > MaxPause)
+        {
+            TryDelete(marker);
+            pause = null;
+        }
         if (pause is { } paused && Now() < paused.Until) throw Stale(what, paused.Until);
         for (int attempt = 1; ; attempt++)
         {

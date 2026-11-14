@@ -211,6 +211,51 @@ public sealed class StatusReportTests : IDisposable
             @"C:\Tools\rclone.exe", new(5, 20, 20, 300, 30, 1000, 2, 53682), 4, []) { StorageMode = StorageMode.Local };
 
     [Fact]
+    public void StatusView_SaysNotSetUpBeforeThereIsAConfiguration()
+    {
+        var source = new DesktopStatusSource(() => State, () => false);
+
+        var status = source.Read();
+
+        Assert.Equal("Not set up yet", status.Title);
+        Assert.Contains("Configure", status.NextAction);
+        foreach (string word in new[] { "session", "cache", "storage" })
+            Assert.DoesNotContain(word, status.NextAction, StringComparison.OrdinalIgnoreCase);
+        // The view keeps it while it is fresh, and reading created nothing.
+        Assert.Equal("Not set up yet", status.At(DateTimeOffset.UtcNow).Title);
+        Assert.False(Directory.Exists(State.Root));
+    }
+
+    [Fact]
+    public void StatusView_ShowsTheLibraryBeforeThisPcHasAnIdentity()
+    {
+        var store = NewStore();
+        Directory.CreateDirectory(State.Root);
+        File.WriteAllBytes(State.ConfigPath, Json.Serialize(StatusConfig(_fixture.PathFor("coordination"))));
+        var source = new DesktopStatusSource(() => State, () => false);
+
+        Assert.Equal(SessionPhase.Ready, source.Read().Phase);
+
+        store.Update(r => Ownership.Acquire(r, Second, SessionA, _now), TimeSpan.FromSeconds(5));
+        var owned = source.Read();
+        Assert.Equal(SessionPhase.Waiting, owned.Phase);
+        Assert.Contains(Second.DisplayName, owned.NextAction);
+        Assert.False(File.Exists(Path.Combine(State.Root, "device.json")));
+    }
+
+    [Fact]
+    public void StatusView_StillRefusesADamagedIdentity()
+    {
+        NewStore();
+        Directory.CreateDirectory(State.Root);
+        File.WriteAllBytes(State.ConfigPath, Json.Serialize(StatusConfig(_fixture.PathFor("coordination"))));
+        File.WriteAllText(Path.Combine(State.Root, "device.json"), "not an identity");
+        var source = new DesktopStatusSource(() => State, () => false);
+
+        Assert.Throws<InvalidDataException>(() => source.Read());
+    }
+
+    [Fact]
     [SupportedOSPlatform("windows")]
     public void StatusCommand_WritesTheDocumentAndExitsThreeWithABodyWhenOffline()
     {

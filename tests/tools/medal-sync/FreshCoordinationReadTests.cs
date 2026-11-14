@@ -138,6 +138,38 @@ public sealed class FreshCoordinationReadTests : IDisposable
     }
 
     [Fact]
+    public void Read_IgnoresAPauseThatEndsLaterThanAnyPauseCanLast()
+    {
+        // The marker was saved while this PC's clock ran three days ahead; the clock has since been corrected.
+        _now += TimeSpan.FromDays(3);
+        var stale = Reader(_ => Bytes("old", Old), () => New);
+        Assert.Throws<StaleCoordinationReadException>(() => stale.Read(Path(), "journal"));
+        Assert.Single(Directory.GetFiles(PauseDirectory));
+        _now -= TimeSpan.FromDays(3);
+        int before = _opens;
+
+        var reader = Reader(_ => Bytes("new", New), () => New);
+        Assert.Equal("new", Encoding.UTF8.GetString(reader.Read(Path(), "journal")));
+        Assert.Equal(before + 1, _opens);
+        Assert.Empty(Directory.GetFiles(PauseDirectory));
+    }
+
+    [Fact]
+    public void Read_StillObeysAPauseOfTheLongestLength()
+    {
+        // The longest valid pause, just written: its end is exactly MaxPause ahead and must not be dropped.
+        var reader = Reader(_ => Bytes("old", Old), () => New);
+        Assert.Throws<StaleCoordinationReadException>(() => reader.Read(Path(), "journal"));
+        string marker = Assert.Single(Directory.GetFiles(PauseDirectory));
+        File.WriteAllText(marker, $"{(_now + FreshCoordinationRead.MaxPause).UtcTicks} {FreshCoordinationRead.MaxPause.Ticks}");
+        int before = _opens;
+
+        Assert.Throws<StaleCoordinationReadException>(() => reader.Read(Path(), "journal"));
+        Assert.Equal(before, _opens);
+        Assert.True(File.Exists(marker));
+    }
+
+    [Fact]
     public void Read_OnARealFileUsesTheListingAndTheSameOpen()
     {
         string path = Path();
