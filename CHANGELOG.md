@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Check for releases in the background at launch and reuse successful answers
+  for a day, so slow or offline update checks no longer delay opening Medal.
+  Explicit Check for updates still contacts GitHub directly (#198).
+
 ## 1.5.0 — 2026-11-14
 
 - The status view no longer says "Unknown / unreachable" on a PC that is not
