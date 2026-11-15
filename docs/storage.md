@@ -246,7 +246,13 @@ Cloud generations live under `.medal-sync/LIBRARY_ID/generations/` in the
 dedicated Drive folder. They contain clip titles, references and normalized
 library tables; keep that folder private. Full Medal databases, login/device
 settings and provider credentials are not uploaded. Optional cloud replicas
-still contain media only. History, ordinary launch/finish, explicit abandonment
+still contain media only. Each PC downloads only generations missing from its
+history cache; cached files are compared with Drive's listed checksums, and
+the committed history is verified before new generations become visible.
+Interrupted download folders are cleaned up on failure or the next attempt.
+After a verification refusal, the status view waits a minute before retrying
+the same head; a changed head or an explicit command can retry sooner.
+History, ordinary launch/finish, explicit abandonment
 and optional-copy retry work in cloud mode. Maintenance that needs an SMB
 writer lock (retention, replica pruning and persistent-media refresh) refuses
 cloud mode. Keep the previous primary until migration is independently verified;

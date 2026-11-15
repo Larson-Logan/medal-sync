@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Refuse out-of-date switch requests and generation retention records from
+  server storage. A stale request warns without interrupting recording;
+  history, numbering and retention wait for a fresh record (#194).
+- Download only missing cloud history generations and verify cached files
+  against Drive checksums. Failed downloads clean up their scratch folders,
+  and verification failures pause repeated status-view transfers (#195).
+
 - Remove published beta releases superseded by a stable release after stable
   publication. Keep their Git tags so beta numbers stay increasing, and retain
   every draft, stable release and beta of a newer version (#197).

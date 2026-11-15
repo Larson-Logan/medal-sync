@@ -88,7 +88,7 @@ internal static class GenerationHistory
     {
         GenerationRetention? retention;
         try { retention = generations.ReadRetention(); }
-        catch (Exception ex) when (ex is InvalidDataException or IOException) { return []; }
+        catch (Exception ex) when (ex is not StaleCoordinationReadException && ex is InvalidDataException or IOException) { return []; }
         var pruned = (retention?.Pruned ?? []).Where(p => !generations.Exists(p.Generation)).OrderBy(p => p.Generation).ToArray();
         var ranges = new List<PrunedRange>();
         foreach (var p in pruned)
@@ -132,7 +132,7 @@ internal static class GenerationHistory
         var chain = new Dictionary<long, (GenerationManifest?, string?)>();
         GenerationRetention? retention;
         try { retention = generations.ReadRetention(); }
-        catch (Exception ex) when (ex is InvalidDataException or IOException) { retention = null; }
+        catch (Exception ex) when (ex is not StaleCoordinationReadException && ex is InvalidDataException or IOException) { retention = null; }
         long? current = head;
         while (current is { } number)
         {
@@ -175,7 +175,7 @@ internal static class GenerationHistory
             }
             return false;
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException) { return null; }
+        catch (Exception ex) when (ex is not StaleCoordinationReadException && ex is InvalidDataException or IOException) { return null; }
     }
 
     private static HistoryEntry Uncommitted(GenerationStore generations, long number, bool? committed)
