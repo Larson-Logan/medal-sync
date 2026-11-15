@@ -8,6 +8,117 @@ namespace MedalSync.Tests;
 
 public sealed class ReleaseUpdateTests
 {
+    [Fact]
+    public async Task LaunchContinuesWhileAReleaseRequestIsStillWaiting()
+    {
+        using var fixture = new MedalFixture();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var notices = new List<string>();
+        var check = ReleaseUpdate.StartLaunchCheck(notices.Add, fixture.PathFor("release-check.json"), "0.2.0", false,
+            () => new HttpClient(new WaitingHandler(entered, release)));
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            Assert.False(check.IsCompleted); // The launch caller has already continued past StartLaunchCheck.
+            Assert.Empty(notices);
+        }
+        finally { release.TrySetResult(); }
+        await check;
+        Assert.Contains("0.3.0", Assert.Single(notices));
+    }
+
+    private sealed class WaitingHandler(TaskCompletionSource entered, TaskCompletionSource release) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            entered.TrySetResult();
+            await release.Task.WaitAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Release()) };
+        }
+    }
+
+    [Fact]
+    public async Task RecentSuccessfulAnswerAvoidsHttpAndUsesTheCurrentInstalledVersion()
+    {
+        using var fixture = new MedalFixture();
+        string cache = fixture.PathFor("release-check.json");
+        var now = DateTimeOffset.UtcNow;
+        int requests = 0;
+        Func<HttpClient> client = () => { requests++; return new HttpClient(new Handler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Release()) })); };
+        var notices = new List<string>();
+        // Even an answer saying the installed version is current must be cached.
+        await ReleaseUpdate.StartLaunchCheck(notices.Add, cache, "0.3.0", false, client, () => now);
+        await ReleaseUpdate.StartLaunchCheck(notices.Add, cache, "0.2.0", false, client, () => now.AddHours(23));
+        Assert.Equal(1, requests);
+        Assert.Contains("0.3.0", Assert.Single(notices));
+        notices.Clear();
+        await ReleaseUpdate.StartLaunchCheck(notices.Add, cache, "0.4.0", false, client, () => now.AddHours(23));
+        Assert.Empty(notices);
+        Assert.Equal(1, requests);
+        await ReleaseUpdate.StartLaunchCheck(notices.Add, cache, "0.3.0", false, client, () => now.AddDays(1));
+        Assert.Equal(2, requests);
+    }
+
+    [Theory]
+    [InlineData("corrupt")]
+    [InlineData("future")]
+    [InlineData("channel")]
+    public async Task InvalidOrDifferentChannelCacheIsRefreshed(string reason)
+    {
+        using var fixture = new MedalFixture();
+        string cache = fixture.PathFor("release-check.json");
+        var now = DateTimeOffset.UtcNow;
+        int requests = 0;
+        Func<HttpClient> client = () => { requests++; return new HttpClient(new Handler(request =>
+        {
+            bool betas = request.RequestUri!.AbsoluteUri == ReleaseUpdate.RecentUrl;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(betas ? "[" + Release() + "]" : Release()) };
+        })); };
+        await ReleaseUpdate.StartLaunchCheck(_ => { }, cache, "0.2.0", false, client, () => now);
+        if (reason == "corrupt") File.WriteAllText(cache, "bad JSON");
+        await ReleaseUpdate.StartLaunchCheck(_ => { }, cache, "0.2.0", reason == "channel", client,
+            () => reason == "future" ? now.AddHours(-1) : now);
+        Assert.Equal(2, requests);
+    }
+
+    [Fact]
+    public async Task FailedCheckStaysSilentAndDoesNotSuppressTheNextAttempt()
+    {
+        using var fixture = new MedalFixture();
+        string cache = fixture.PathFor("release-check.json");
+        int requests = 0;
+        for (int attempt = 0; attempt < 2; attempt++)
+            await ReleaseUpdate.StartLaunchCheck(_ => Assert.Fail("Offline checks must be silent."), cache, "0.2.0", false,
+                () => { requests++; return new HttpClient(new Handler(_ => throw new HttpRequestException("offline"))); });
+        Assert.Equal(2, requests);
+        Assert.False(File.Exists(cache));
+    }
+
+    [Fact]
+    public async Task ExplicitChecksBypassTheLaunchCache()
+    {
+        using var fixture = new MedalFixture();
+        await ReleaseUpdate.StartLaunchCheck(_ => { }, fixture.PathFor("release-check.json"), "0.2.0", false,
+            () => new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Release()) })));
+        using var client = new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Release("0.4.0")) }));
+        Assert.Equal("0.4.0", await ReleaseUpdate.CheckAsync(client, "0.2.0", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UnwritableCacheStillAllowsAnUpdateNotice()
+    {
+        using var fixture = new MedalFixture();
+        string obstruction = fixture.PathFor("not-a-folder");
+        File.WriteAllText(obstruction, "synthetic obstruction");
+        var notices = new List<string>();
+        await ReleaseUpdate.StartLaunchCheck(notices.Add, Path.Combine(obstruction, "release-check.json"), "0.2.0", false,
+            () => new HttpClient(new Handler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Release()) })));
+        Assert.Contains("0.3.0", Assert.Single(notices));
+        Assert.Equal("synthetic obstruction", File.ReadAllText(obstruction));
+    }
+
     private static string Release(string version = "0.3.0", bool draft = false, bool prerelease = false, string? digest = null) =>
         JsonSerializer.Serialize(new
         {

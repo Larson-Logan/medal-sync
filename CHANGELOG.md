@@ -5,6 +5,9 @@
 - Remove published beta releases superseded by a stable release after stable
   publication. Keep their Git tags so beta numbers stay increasing, and retain
   every draft, stable release and beta of a newer version (#197).
+- Check for releases in the background at launch and reuse successful answers
+  for a day, so slow or offline update checks no longer delay opening Medal.
+  Explicit Check for updates still contacts GitHub directly (#198).
 
 ## 1.5.0 — 2026-11-14
 

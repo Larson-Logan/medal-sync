@@ -297,12 +297,47 @@ internal static partial class ReleaseUpdate
     public static void NotifyAtLaunch(Action<string> notify)
     {
         if (OperatingSystem.IsWindows()) CleanupDownloads(DownloadsRoot(), ToolInfo.Version);
-        bool betas = BetaUpdatesEnabled();
-        using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
-        using var client = new HttpClient(handler) { Timeout = LaunchTimeout };
-        using var timeout = new CancellationTokenSource(LaunchTimeout);
-        string? version = CheckAsync(client, ToolInfo.Version, timeout.Token, betas).GetAwaiter().GetResult();
-        if (version is not null)
-            notify($"Medal Sync {version} is available. Choose Check for updates in the Medal Sync tray menu. It downloads the verified update and installs it for you after you quit Medal.");
+        _ = StartLaunchCheck(notify, Path.Combine(Config.LocalState.ForCurrentUser().Root, "release-check.json"),
+            ToolInfo.Version, BetaUpdatesEnabled(), () => new HttpClient(new HttpClientHandler
+                { AllowAutoRedirect = false, UseCookies = false }) { Timeout = LaunchTimeout });
     }
+
+    private sealed record LaunchCheck(int Format, string Version, bool Betas, DateTimeOffset CheckedAt);
+
+    /// <summary>Advisory only. Never awaited by launch; explicit updates still discover and verify their own release.</summary>
+    internal static Task StartLaunchCheck(Action<string> notify, string cachePath, string installed, bool betas,
+        Func<HttpClient> createClient, Func<DateTimeOffset>? clock = null) => Task.Run(async () =>
+    {
+        try
+        {
+            var now = clock?.Invoke() ?? DateTimeOffset.UtcNow;
+            LaunchCheck? cached = null;
+            try { cached = Util.Json.ReadFile<LaunchCheck>(cachePath, "Release check"); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { }
+            string version;
+            if (cached is { Format: 1 } && cached.Betas == betas && now >= cached.CheckedAt
+                && now - cached.CheckedAt < TimeSpan.FromDays(1)
+                && (StableTag().IsMatch("v" + cached.Version) || betas && BetaTag().IsMatch("v" + cached.Version)))
+                version = cached.Version;
+            else
+            {
+                using var client = createClient();
+                using var timeout = new CancellationTokenSource(LaunchTimeout);
+                var asset = await LatestAsync(client, timeout.Token, betas: betas).ConfigureAwait(false);
+                if (asset is null || timeout.IsCancellationRequested) return; // Failed or late checks never become fresh answers.
+                version = asset.Version;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(cachePath))!);
+                    Util.AtomicFile.Replace(cachePath, Util.Json.Serialize(new LaunchCheck(1, version, betas, now)));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* The notice still works. */ }
+            }
+            if (IsNewer(version, installed))
+                notify($"Medal Sync {version} is available. Choose Check for updates in the Medal Sync tray menu. It downloads the verified update and installs it for you after you quit Medal.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
+            or HttpRequestException or OperationCanceledException or InvalidOperationException or ArgumentException
+            or NotSupportedException or MedalSyncException) { /* Optional background work never interrupts launch. */ }
+    });
 }

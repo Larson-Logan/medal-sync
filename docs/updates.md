@@ -115,11 +115,14 @@ folder; uninstall before moving the programs to another folder.
 A destination containing a portable installation or user configuration
 is refused so that program and data locations remain separate.
 
-Each desktop launch checks the public GitHub endpoint for a newer stable release
-with a two-second network budget. Offline operation, private repositories, rate
-limits and missing or malformed releases continue normal launch. When an update
-is available, the launch notice points you to **Check for updates**. Nothing
-installs until you ask for it.
+Each desktop launch checks for updates in the background, using a successful
+answer from the past day when available. A changed beta preference, unreadable
+cache or clock correction triggers a fresh check, with a two-second network
+budget. Opening Medal never waits for the answer. Offline operation, rate limits
+and missing or malformed releases stay silent. When an update is available, a
+notice in the status view points you to **Check for updates**. That explicit
+command always contacts GitHub directly and verifies the selected release.
+Nothing installs until you ask for it.
 
 Update checks offer only stable releases unless this PC opts in to betas: add
 `"betaUpdates": true` to its [configuration](configuration.md#top-level-fields).
