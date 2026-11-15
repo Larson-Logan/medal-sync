@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using MedalSync.Config;
 using MedalSync.Library;
 using MedalSync.Platform;
@@ -14,17 +15,22 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
     private string GenerationsLocal => Path.Combine(config.LibraryCoordinationDirectory, "generations");
     private string? storageFolderId;
     public long HighWater { get; private set; } = -1;
+    private static readonly string[] GenerationFiles = ["library.json", "assets.json", "manifest.json"];
+    private (long Generation, string Hash, Exception Error, DateTimeOffset Until)? downloadRefusal;
+    internal bool HasHistoryRefusal => downloadRefusal is not null;
+    internal Func<DateTimeOffset> Now { get; init; } = () => DateTimeOffset.UtcNow;
 
     /// <summary>Drive permits duplicate names. Refuse ambiguous paths before copying; reserve even incomplete attempts' numbers.</summary>
-    private void InspectGenerations(bool allowMissing = false)
+    private Dictionary<string, string?> InspectGenerations(bool allowMissing = false, bool hashes = false)
     {
         string listing;
-        try { listing = Run("lsjson", GenerationsRemote, "--recursive", "--no-mimetype"); }
-        catch (RcloneFailedException ex) when (allowMissing && ex.ExitCode == 3) { return; }
+        try { listing = Run("lsjson", [GenerationsRemote, "--recursive", "--no-mimetype", .. hashes ? new[] { "--hash-type", "MD5" } : Array.Empty<string>()]); }
+        catch (RcloneFailedException ex) when (allowMissing && ex.ExitCode == 3) { return []; }
         try
         {
             using var json = JsonDocument.Parse(listing);
             var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var files = new Dictionary<string, string?>(StringComparer.Ordinal);
             foreach (var item in json.RootElement.EnumerateArray())
             {
                 string? path = item.GetProperty("Path").GetString();
@@ -33,7 +39,16 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
                     throw new InvalidDataException("Cloud history has duplicate or unsafe paths; handoff was refused.");
                 string first = path.Split('/')[0];
                 if (first.Length == 10 && first.All(char.IsAsciiDigit) && long.TryParse(first, out long number)) HighWater = Math.Max(HighWater, number);
+                if (!item.TryGetProperty("IsDir", out var directory) || directory.ValueKind != JsonValueKind.True)
+                {
+                    string? checksum = null;
+                    if (item.TryGetProperty("Hashes", out var checksums))
+                        foreach (var hash in checksums.EnumerateObject())
+                            if (hash.Name.Equals("md5", StringComparison.OrdinalIgnoreCase)) checksum = hash.Value.GetString();
+                    files.Add(path, checksum);
+                }
             }
+            return files;
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
         { throw new InvalidDataException("Google Drive returned an unreadable cloud history listing."); }
@@ -79,7 +94,19 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
     {
         var journal = value.Journal;
         // Download once for each newly observed head. Never infer Ready from this cache.
-        if (!Directory.Exists(Path.Combine(GenerationsLocal, GenerationStore.Name(journal.CommittedGeneration)))) Download();
+        if (!Directory.Exists(Path.Combine(GenerationsLocal, GenerationStore.Name(journal.CommittedGeneration))))
+        {
+            if (downloadRefusal is { } refused && refused.Generation == journal.CommittedGeneration
+                && refused.Hash == value.HeadManifestHash && Now() < refused.Until) throw refused.Error;
+            try { Download(); }
+            catch (Exception ex) when (ex is InvalidDataException or StorageActionRequiredException
+                || ex is RcloneFailedException failed && (failed.Hints & (RcloneHints.SignIn | RcloneHints.Config | RcloneHints.Quota | RcloneHints.Conflict)) != 0)
+            {
+                // A status poll still reads the authoritative journal, but retries a refused head at most once a minute.
+                downloadRefusal = (journal.CommittedGeneration, value.HeadManifestHash, ex, Now() + TimeSpan.FromMinutes(1));
+                throw;
+            }
+        }
         if (!ManifestHash(journal.CommittedGeneration).Equals(value.HeadManifestHash, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The local cloud generation differs from the committed Drive manifest. Preserve this cache and unpublished local work; recover with a fresh history cache before launching.");
     }
@@ -87,41 +114,97 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
     public void Download()
     {
         RequireOrdinaryCache();
-        InspectGenerations();
+        Directory.CreateDirectory(config.LibraryCoordinationDirectory);
+        // Status, history and launch can share this cache. Never clean another process's in-flight download.
+        using var gate = new FileStream(Path.Combine(config.LibraryCoordinationDirectory, ".download.lock"),
+            FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        foreach (string leftover in Directory.EnumerateDirectories(config.LibraryCoordinationDirectory, ".download-*"))
+            if (Guid.TryParseExact(Path.GetFileName(leftover)[10..], "N", out _)) RemoveDownload(leftover);
+        var remote = InspectGenerations(hashes: true);
         var head = Read().Value;
         long committed = head.Journal.CommittedGeneration;
         Directory.CreateDirectory(GenerationsLocal);
         string staging = Path.Combine(config.LibraryCoordinationDirectory, ".download-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
-        // A failed download never makes a partial numbered directory visible to readers.
-        Run("copy", GenerationsRemote, staging, "--immutable", "--checksum",
-            "--include", "/*/library.json", "--include", "/*/assets.json", "--include", "/*/manifest.json");
-        var downloaded = new GenerationStore(staging, config.LibraryId, config.AccountId);
-        if (!Hashing.Sha256File(Path.Combine(staging, GenerationStore.Name(committed), "manifest.json")).Equals(head.HeadManifestHash, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("The downloaded cloud head does not match its authoritative journal. Ownership and all local files are retained.");
-        var required = downloaded.Chain(committed).Select(entry => entry.Generation).ToHashSet();
-        foreach (long generation in required) _ = downloaded.Read(generation);
-        foreach (long generation in downloaded.Numbered())
+        try
         {
-            try { _ = downloaded.Read(generation); }
-            catch (Exception ex) when (!required.Contains(generation) && ex is InvalidDataException or FileNotFoundException or DirectoryNotFoundException)
+            var cached = new GenerationStore(GenerationsLocal, config.LibraryId, config.AccountId);
+            var cachedNumbers = cached.Numbered().ToHashSet();
+            foreach (long generation in cachedNumbers)
             {
-                // An abandoned upload may have only some of its files in Drive. Keep evidence but never reuse its number.
-                continue;
+                RequireOrdinaryGeneration(Path.Combine(GenerationsLocal, GenerationStore.Name(generation)));
+                // Drive supplies MD5 in its listing. Compare cached bytes without transferring their payloads again.
+                VerifyRemoteGeneration(generation, GenerationsLocal, remote, requireComplete: false);
             }
-            string source = Path.Combine(staging, GenerationStore.Name(generation));
-            string destination = Path.Combine(GenerationsLocal, GenerationStore.Name(generation));
-            if (!Directory.Exists(destination)) Directory.Move(source, destination);
-            else
+            // An exact file list avoids both filter-order surprises and command-line limits as history grows.
+            var missing = remote.Keys.Where(path => path.Length > 11 && path[10] == '/' && path[..10].All(char.IsAsciiDigit)
+                && GenerationFiles.Contains(path[11..]) && !cachedNumbers.Contains(long.Parse(path[..10], System.Globalization.CultureInfo.InvariantCulture))).ToArray();
+            if (missing.Length > 0)
             {
-                foreach (string file in new[] { "library.json", "assets.json", "manifest.json" })
-                    if (!File.ReadAllBytes(Path.Combine(source, file)).AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(destination, file))))
-                        throw new InvalidDataException("A cached cloud generation differs from Google Drive. Preserve both copies and review the library history.");
-                foreach (string file in Directory.GetFiles(source)) File.Delete(file);
-                Directory.Delete(source);
+                string files = Path.Combine(staging, ".files");
+                File.WriteAllLines(files, missing);
+                Run("copy", GenerationsRemote, staging, "--immutable", "--checksum", "--files-from-raw", files);
             }
+            var downloaded = new GenerationStore(staging, config.LibraryId, config.AccountId);
+            string HeadRoot(long generation) => cached.Exists(generation) ? GenerationsLocal : staging;
+            if (!Hashing.Sha256File(Path.Combine(HeadRoot(committed), GenerationStore.Name(committed), "manifest.json")).Equals(head.HeadManifestHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("The downloaded cloud head does not match its authoritative journal. Ownership and all local files are retained.");
+            // Follow the committed chain across both stores, loading every payload before making new folders visible.
+            var required = new HashSet<long>();
+            long previous = long.MaxValue;
+            for (long? number = committed; number is { } generation;)
+            {
+                if (generation >= previous) throw new InvalidDataException("Cloud history contains a later parent generation.");
+                previous = generation;
+                VerifyRemoteGeneration(generation, HeadRoot(generation), remote, requireComplete: true);
+                var content = (cached.Exists(generation) ? cached : downloaded).Read(generation);
+                required.Add(generation);
+                number = content.Manifest.ParentGeneration;
+            }
+            foreach (long generation in downloaded.Numbered())
+            {
+                try { _ = downloaded.Read(generation); }
+                catch (Exception ex) when (!required.Contains(generation) && ex is InvalidDataException or FileNotFoundException or DirectoryNotFoundException)
+                { continue; } // Incomplete abandoned uploads reserve a number, but never become cached generations.
+                Directory.Move(Path.Combine(staging, GenerationStore.Name(generation)), Path.Combine(GenerationsLocal, GenerationStore.Name(generation)));
+            }
+            downloadRefusal = null;
         }
-        if (!Directory.EnumerateFileSystemEntries(staging).Any()) Directory.Delete(staging);
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new InvalidDataException("The committed cloud history is missing a generation or payload. Ownership and all local files are retained.", ex);
+        }
+        finally { RemoveDownload(staging); }
+    }
+
+    private static void VerifyRemoteGeneration(long generation, string root, Dictionary<string, string?> remote, bool requireComplete)
+    {
+        foreach (string file in GenerationFiles)
+        {
+            string path = GenerationStore.Name(generation) + "/" + file;
+            if (!remote.TryGetValue(path, out string? hash) && !requireComplete) continue;
+            if (hash is null || hash.Length != 32 || !hash.All(char.IsAsciiHexDigit))
+                throw new InvalidDataException("Cloud history is missing a generation file or its Drive checksum. Ownership and all local files are retained.");
+            using var stream = File.OpenRead(Path.Combine(root, GenerationStore.Name(generation), file));
+            if (!Convert.ToHexString(MD5.HashData(stream)).Equals(hash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("A cached cloud generation differs from Google Drive. Preserve the cache and review the library history.");
+        }
+    }
+
+    private static void RequireOrdinaryGeneration(string directory)
+    {
+        if (new DirectoryInfo(directory).Attributes.HasFlag(FileAttributes.ReparsePoint)
+            || Directory.EnumerateFileSystemEntries(directory).Any(path => File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint)))
+            throw new UnsafeOperationException("The cloud generation cache cannot follow a link.");
+    }
+
+    private static void RemoveDownload(string directory)
+    {
+        // Only our scratch directories are removed. Refuse links at every level before recursive deletion.
+        RequireOrdinaryGeneration(directory);
+        foreach (string child in Directory.EnumerateDirectories(directory)) RemoveDownload(child);
+        foreach (string file in Directory.EnumerateFiles(directory)) File.Delete(file);
+        Directory.Delete(directory);
     }
 
     private void RequireOrdinaryCache()

@@ -73,6 +73,9 @@ internal sealed partial class CoordinationStore
     /// <summary>Refuses a stale copy of the journal that Windows serves from a cached open; replaced in tests.</summary>
     internal FreshCoordinationRead JournalReader { get; set; } = FreshCoordinationRead.Default;
 
+    /// <summary>Requests are replaced independently of the journal and use their own per-path read pauses.</summary>
+    internal FreshCoordinationRead RequestReader { get; set; } = FreshCoordinationRead.Default;
+
     private string LockPath => Path.Combine(Root, "writer.lock");
 
     private string RequestsPath => Path.Combine(Root, "requests");
@@ -228,7 +231,7 @@ internal sealed partial class CoordinationStore
             if (!IsValidId(name)) continue;
             try
             {
-                var request = Json.ReadFile<HandoffRequest>(file, "Handoff request");
+                var request = Json.Deserialize<HandoffRequest>(RequestReader.Read(file, "switch request"), $"'{file}': Handoff request");
                 if (request.Device?.DeviceId == name && request.Device.DisplayName is not null && IsValidId(request.RequestId))
                     requests.Add((request, new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero)));
             }

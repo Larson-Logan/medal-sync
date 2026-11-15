@@ -2,6 +2,7 @@ using System.Text;
 using MedalSync.Coordination;
 using MedalSync.Library;
 using MedalSync.Tests.Fixtures;
+using MedalSync.Util;
 
 namespace MedalSync.Tests;
 
@@ -204,4 +205,54 @@ public sealed class FreshCoordinationReadTests : IDisposable
         Assert.Equal(activeBytes, File.ReadAllBytes(journal));
         Assert.Equal(OwnershipState.Clean, clean.State);
     }
+
+    [Fact]
+    public void Store_StaleRequestIsUnknownAndDoesNotPauseTheJournalOrOtherRequests()
+    {
+        var store = NewStore();
+        var old = new HandoffRequest(1, Second, new string('2', 32), _now);
+        var current = old with { RequestId = new string('3', 32) };
+        store.WriteRequest(current);
+        store.RequestReader = Reader(_ => (Json.Serialize(old), Old), () => New);
+
+        Assert.Throws<StaleCoordinationReadException>(() => store.PendingRequests(_now));
+        Assert.Throws<StaleCoordinationReadException>(() => store.StaleRequests(_now));
+        Assert.Equal(OwnershipState.Clean, store.ReadJournal().State);
+        Assert.Equal(Json.Serialize(current), File.ReadAllBytes(System.IO.Path.Combine(store.Root, "requests", Second.DeviceId + ".json")));
+
+        _now += FreshCoordinationRead.FirstPause;
+        store.RequestReader = Reader(_ => (Json.Serialize(current), New), () => New);
+        Assert.Equal(current, Assert.Single(store.PendingRequests(_now)));
+        Assert.Empty(Directory.GetFiles(PauseDirectory));
+    }
+
+    [Fact]
+    public void Generations_StaleRetentionRefusesNumberingAndHistoryWithoutChangingFiles()
+    {
+        var store = NewStore();
+        var old = new GenerationRetention(1, 0, [0], []);
+        var current = new GenerationRetention(1, 4, [4, 0], [new(4, true, _now)]);
+        store.Generations.WriteRetention(current);
+        string path = System.IO.Path.Combine(store.Generations.Directory, "retention.json");
+        byte[] bytes = File.ReadAllBytes(path);
+        store.Generations.RetentionReader = Reader(_ => (Json.Serialize(old), Old), () => New);
+
+        var refused = Assert.Throws<StaleCoordinationReadException>(() => store.Generations.Next(0));
+        Assert.Contains("generation retention record", refused.Message);
+        Assert.Throws<StaleCoordinationReadException>(() => store.Generations.Chain(4).ToList());
+        Assert.Throws<StaleCoordinationReadException>(() => GenerationHistory.List(store.Generations, 0, 20, null, _now));
+        Assert.Throws<StaleCoordinationReadException>(() => GenerationHistory.Diff(store.Generations, 0, 0, 0, _now));
+        Assert.Equal(bytes, File.ReadAllBytes(path));
+        Assert.Equal([0L], store.Generations.Numbered());
+        Assert.Equal(OwnershipState.Clean, store.ReadJournal().State);
+
+        _now += FreshCoordinationRead.FirstPause;
+        store.Generations.RetentionReader = Reader(_ => (bytes, New), () => New);
+        Assert.Equal(5, store.Generations.Next(0));
+        Assert.Equal([4L, 0L], store.Generations.Chain(4).Select(e => e.Generation));
+    }
+
+    private CoordinationStore NewStore() => CoordinationStore.Create(_fixture.PathFor("library", LibraryId), LibraryId,
+        LibraryDatabase.ReadSnapshot(_fixture.CreateLibrary("seed"), MedalFixture.AccountId),
+        new AssetManifest(1, [], []), First, new string('1', 32), new MedalVersions("2643.583.1", "2643.3040.1"), _now);
 }

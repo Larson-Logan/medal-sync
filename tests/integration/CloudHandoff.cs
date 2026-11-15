@@ -54,12 +54,22 @@ internal static class CloudHandoff
         var runner = new RcloneRunner(rclone);
         runner.Run(["mkdir", remote, "--config", credentials], TimeSpan.FromMinutes(2));
         bool interrupt = false;
+        bool interruptDownload = false;
+        var downloadedFiles = new List<string>();
         string Execute(IReadOnlyList<string> args)
         {
             if (liveRemote is null && args[0] == "lsjson" && args.Contains("--stat")) return """{"ID":"synthetic-drive-folder","IsDir":true}""";
             if (interrupt && args[0] == "copy" && args[2].Contains("/.medal-sync/", StringComparison.Ordinal))
                 throw new OperationCanceledException("Synthetic interruption before journal commit");
-            return runner.Run(args, TimeSpan.FromMinutes(5), captureOutput: true);
+            string result = runner.Run(args, TimeSpan.FromMinutes(5), captureOutput: true);
+            if (args[0] == "copy" && args[1].Contains("/.medal-sync/", StringComparison.Ordinal))
+            {
+                downloadedFiles.AddRange(Directory.GetFiles(args[2], "*", SearchOption.AllDirectories)
+                    .Where(file => Path.GetFileName(file) != ".files")
+                    .Select(file => Path.GetRelativePath(args[2], file).Replace('\\', '/')));
+                if (interruptDownload) throw new OperationCanceledException("Synthetic interruption after history transfer");
+            }
+            return result;
         }
         GoogleDriveJournal Api(MedalSyncConfig settings) => liveRemote is null
             ? new(journalId, () => "synthetic-token", client) : GoogleDriveJournal.For(settings);
@@ -107,6 +117,24 @@ internal static class CloudHandoff
         check(File.ReadAllBytes(other.MountedCapture.Append(clip).Display).SequenceEqual(File.ReadAllBytes(config.MountedCapture.Append(clip).Display))
             && File.ReadAllBytes(other.MountedCapture.Append("new.mp4").Display).SequenceEqual(File.ReadAllBytes(config.MountedCapture.Append("new.mp4").Display)),
             "the second PC hydrates and byte-verifies both Google Drive media paths, including Unicode and filter characters");
+        store.Update(j => Ownership.Acquire(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
+        store.Update(j => Ownership.MarkActive(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
+        store.Update(j => Ownership.BeginDrain(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
+        store.Update(j => Ownership.BeginPublish(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
+        store.Generations.Publish(2, 1, session, first, changed, new(1, [], []), versions, DateTimeOffset.UtcNow);
+        store.Update(j => Ownership.CompletePublish(j, first, session, 2, DateTimeOffset.UtcNow), TimeSpan.Zero);
+        interruptDownload = true;
+        bool downloadInterrupted = false;
+        try { otherStore.ReadJournal(); }
+        catch (OperationCanceledException) { downloadInterrupted = true; }
+        check(downloadInterrupted && !otherStore.Generations.Exists(2)
+            && !Directory.GetDirectories(other.LibraryCoordinationDirectory, ".download-*").Any(),
+            "interrupted real history transfers remove scratch files and never expose partial generations");
+        interruptDownload = false;
+        downloadedFiles.Clear();
+        check(otherStore.ReadJournal().CommittedGeneration == 2 && downloadedFiles.Count == 3
+            && downloadedFiles.All(file => file.StartsWith(GenerationStore.Name(2) + "/", StringComparison.Ordinal)),
+            "a later handoff transfers only the missing generation with a real rclone file list");
         string secondSession = new('2', 32);
         otherStore.Update(j => Ownership.Acquire(j, second, secondSession, DateTimeOffset.UtcNow), TimeSpan.Zero);
         check(store.ReadJournal().Owner == second, "the first PC observes the second PC's authoritative cloud ownership");

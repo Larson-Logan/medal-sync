@@ -114,11 +114,14 @@ internal sealed partial class GenerationStore(string directory, string libraryId
 
     private string RetentionPath => Path.Combine(Directory, "retention.json");
 
+    internal FreshCoordinationRead RetentionReader { get; set; } = FreshCoordinationRead.Default;
+
     /// <summary>Null when retention has never run here.</summary>
     public GenerationRetention? ReadRetention()
     {
         if (!File.Exists(RetentionPath)) return null;
-        var record = Json.ReadFile<GenerationRetention>(RetentionPath, "Generation retention record");
+        var record = Json.Deserialize<GenerationRetention>(RetentionReader.Read(RetentionPath, "generation retention record"),
+            $"'{RetentionPath}': Generation retention record");
         if (record.Format != GenerationRetention.CurrentFormat || record.Ancestry is null || record.Pruned is null || record.HighWater < 0)
             throw new InvalidDataException("The generation retention record is from another version or incomplete.");
         return record;

@@ -214,7 +214,8 @@ internal sealed class DesktopStatusPublisher : IDisposable
 /// sign-in token and the Drive folder) and makes two extra Drive requests. The cloud connection, with its token and
 /// folder, is kept even while opening fails, so an outage costs one failed request per read. Generations never change
 /// once published, so the committed manifest is checked once per generation. An outage keeps everything; any other
-/// failure drops the store and the connection, so the next read opens the library afresh.
+/// failure drops the store and the connection, so the next read opens the library afresh. A refused history download
+/// keeps its connection's short retry pause, so every status poll does not start the same failed transfer again.
 /// </summary>
 internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> supervisorRunning,
     Func<MedalSyncConfig, CloudCoordination>? connect = null)
@@ -254,7 +255,7 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
                     _checkedGeneration = journal.CommittedGeneration;
                 }
             }
-            catch (Exception ex) when (ex is not IOException)
+            catch (Exception ex) when (ex is not IOException && _cloud?.HasHistoryRefusal is not true)
             {
                 Forget();
                 throw;

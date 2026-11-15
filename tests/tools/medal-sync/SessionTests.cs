@@ -2200,6 +2200,38 @@ public sealed partial class SessionTests : IDisposable
         Assert.Equal(SecondPc, Assert.Single(_store.PendingRequests(_clock.Now)).Device);
     }
 
+    [Fact]
+    public void StaleSwitchRequestWarnsOnceAndKeepsSupervisingMedal()
+    {
+        var pc = Computer(FirstPc, "first");
+        AssertStarted(pc.Coordinator.Launch());
+        string session = _store.ReadJournal().SessionId!;
+        var request = new HandoffRequest(1, SecondPc, SessionCoordinator.NewId(), _clock.Now);
+        _store.WriteRequest(request);
+        int opens = 0;
+        _store.RequestReader = new FreshCoordinationRead
+        {
+            ReadOpen = _ => { opens++; return (Json.Serialize(request), DateTime.UnixEpoch); },
+            ReadListing = _ => DateTime.UnixEpoch.AddSeconds(1),
+            Sleep = _ => { },
+            Now = () => _clock.Now,
+            PauseDirectory = _fixture.PathFor("request-pauses"),
+        };
+        int polls = 0;
+        using var cancel = new CancellationTokenSource();
+        _clock.OnSleep = () => { if (++polls == 3) cancel.Cancel(); };
+        List<string> notices = [];
+
+        Assert.Equal(FinishStatus.Pending, pc.Coordinator.Supervise(session, notices.Add, cancel.Token).Status);
+        Assert.Single(notices, n => n.StartsWith("Clip storage is unreachable", StringComparison.Ordinal));
+        Assert.DoesNotContain(notices, n => n.Contains("wants to use Medal", StringComparison.Ordinal));
+        Assert.Equal(FreshCoordinationRead.Attempts, opens);
+        Assert.True(pc.Medal.Running);
+        Assert.True(pc.Mount.IsRunning);
+        Assert.Empty(pc.Mount.Forgotten);
+        Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
+    }
+
     private sealed class StoppingClock(IClock inner, Action onSleep) : IClock
     {
         public DateTimeOffset Now => inner.Now;
