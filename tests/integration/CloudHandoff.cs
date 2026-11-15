@@ -173,6 +173,7 @@ internal static class CloudHandoff
         var mount = new RcloneClipMount(config, state, .01, clock);
         try
         {
+            long previousGeneration = store.ReadJournal().CommittedGeneration;
             string db = fixture.CreateLibrary("mounted-pc");
             var medal = new Medal();
             var checker = new RcloneAssetChecker(config, state);
@@ -187,7 +188,9 @@ internal static class CloudHandoff
             MedalFixture.AddContent(db, "mounted-new", video: config.Capture.Append("mounted-new.mp4").Display);
             medal.Running = false;
             var finished = coordinator.Finish(started.Session!);
-            check(finished.Status == FinishStatus.Published && !mount.IsRunning && store.ReadJournal() is { State: OwnershipState.Clean, CommittedGeneration: 2 },
+            var journal = store.ReadJournal();
+            check(finished.Status == FinishStatus.Published && !mount.IsRunning && journal.State == OwnershipState.Clean
+                && journal.CommittedGeneration == previousGeneration + 1,
                 "cloud mode drains the real mount, verifies rclone media and snapshot uploads, and only then releases ownership: " + finished.Message);
             var snapshot = firstStore.Generations.Read(firstStore.ReadJournal().CommittedGeneration).Snapshot;
             new StorageReplication(first, new(fixture.PathFor("return-state")), () => { }).Prepare(snapshot);
