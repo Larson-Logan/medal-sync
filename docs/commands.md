@@ -63,7 +63,7 @@ shows it too.
 | `medal-sync-launch.exe` | Checks storage and ownership, starts Medal, supervises the session and hands off after Medal exits. Waits up to 20 seconds for the server. Offers the configuration wizard when Medal Sync is not set up. |
 | `medal-sync-launch.exe --at-sign-in` | The same, as used by Medal's startup entry. Waits up to 2 minutes for the server, and exits quietly when Medal Sync is not set up. When another PC owns the library it sends no switch request, so that PC is not interrupted. |
 | `medal-sync-launch.exe medal://...` | Opens a Medal link through the same checks, or passes it to the running session. |
-| `medal-sync-launch.exe --configure` | Opens the configuration wizard. |
+| `medal-sync-launch.exe --configure` | Opens configuration or resumes pending library setup. After saving a new configuration, offers the existing init/enroll preview and a separate explicit confirmation. |
 | `medal-sync-launch.exe --status` | Opens the status panel. |
 | `medal-sync-launch.exe --tray` | Starts the status icon without opening the panel. |
 | `medal-sync startup [--apply \| --restore]` | Previews, turns on or turns off starting Medal through Medal Sync at sign-in (the tray menu's **Start Medal at sign-in**). Turning it on needs a configuration and saves Medal's original entries first. See [getting started](getting-started.md). |
@@ -130,6 +130,7 @@ library, for example a copy.
 | `--cloud-journal-id ID` | Required in cloud mode. Allocate once with `storage cloud-id`; use the same ID on every PC. |
 | `--capture-folder PATH` | Folder Medal records into on the clip drive. Default `M:\Clips`. |
 | `--rclone-path FILE` | rclone executable. Defaults to the bundled copy beside `medal-sync.exe`. |
+| `--device-label NAME` | Optional display name for this PC, up to 64 printable characters on one line. Keeps its device ID and copied-profile guard unchanged. |
 | `--local-copy-root DIR` | Keep a persistent local copy of the collection. |
 | `--cloud-remote NAME:FOLDER` | Add one cloud copy. Needs `--rclone-config`. Add more in the JSON. |
 | `--rclone-config FILE` | rclone credential file for cloud copies or an rclone primary. |

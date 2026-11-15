@@ -50,6 +50,7 @@ internal sealed class ConfigurationReview
     public string Text => $"Configuration location: {State.ConfigPath}\r\n"
         + $"{(ReplacesExisting ? "Change existing setup (identity retained)" : _newLibrary ? "New library (not initialized)" : "Join existing library (not enrolled)")}\r\n"
         + $"Library: {Config.LibraryId}; account: {Config.AccountId}\r\n"
+        + $"PC display name: {Config.DeviceLabel ?? "computer and user name"} (ownership ID unchanged)\r\n"
         + $"Storage mode: {Config.StorageMode}\r\nStorage: {Config.Remote}\r\nCoordination: {Config.CoordinationRoot}\r\n"
         + (Config.StorageMode == StorageMode.Cloud ? $"Google Drive journal ID: {Config.CloudJournalId} (reuse on every PC; local history cache is not ownership)\r\n" : "")
         + $"Capture: {Config.CaptureFolder} (drive {Config.Capture.Root})\r\nCache: {Config.CacheRoot}\r\n"

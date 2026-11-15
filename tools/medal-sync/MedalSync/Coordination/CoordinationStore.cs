@@ -200,7 +200,7 @@ internal sealed partial class CoordinationStore
             {
                 throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root) + " Generation 0 is incomplete or damaged: " + ex.Message);
             }
-            if (original.Manifest.Device != device || original.Manifest.ParentGeneration is not null
+            if (original.Manifest.Device.DeviceId != device.DeviceId || original.Manifest.ParentGeneration is not null
                 || original.Snapshot.Digest() != initial.Digest()
                 || !Json.Serialize(original.Assets).AsSpan().SequenceEqual(Json.Serialize(assets)))
                 throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root));

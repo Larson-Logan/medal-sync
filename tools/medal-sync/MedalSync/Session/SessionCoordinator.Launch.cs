@@ -73,7 +73,7 @@ internal sealed partial class SessionCoordinator
             if (outcome.Journal is { } journal)
             {
                 // A change such as in use to uploading usually comes shortly before release, so look again soon.
-                if (seenAt is not null && (journal.State != state || journal.Owner != owner)) interval = wait.FirstPoll;
+                if (seenAt is not null && (journal.State != state || journal.Owner?.DeviceId != owner?.DeviceId)) interval = wait.FirstPoll;
                 (owner, state, seenAt) = (journal.Owner, journal.State, clock.Now);
             }
             else if (fresh)

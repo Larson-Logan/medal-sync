@@ -33,9 +33,13 @@ first.
    **Server (SMB)**. On the first PC choose a new library; on every other PC
    enter the first PC's library ID. Review, then save. See
    [plan configuration](#plan-configuration-before-using-live-data).
-6. **Create or join the library.** On the first PC run `medal-sync init`, read
-   the preview, then `medal-sync init --apply`. On every other PC run
-   `medal-sync enroll --out DIR` and then the same command with `--apply`.
+6. **Create or join the library.** Keep Medal quit. After saving configuration,
+   choose **Review library** in the same window, read the preview, then explicitly
+   confirm creating or joining. Enrollment shows its private review folder;
+   unresolved conflicts stop here for manual review. You can close the window
+   and resume through **Configure** in the status panel or tray menu. Commands
+   remain available: `medal-sync init` then `init --apply` for a new library,
+   or `medal-sync enroll --out DIR` then the same command with `--apply` to join.
    Never run `init` on a library that already exists.
 7. **Record.** Open Medal from the **Medal Library** shortcut. After you quit
    Medal, wait for **Ready** in the status panel before switching PCs. When
@@ -236,7 +240,12 @@ shows a message and keeps the original value unless you edit that field.
 Review shows the actual values that will be saved.
 Press **Confirm and save** only after reviewing them; Enter in the review page
 does not save. **Back** discards that review; **Cancel** and Escape leave the
-existing setup untouched.
+existing setup untouched before saving. After saving a new setup, **Review
+library** shows the existing `init` or `enroll` preview. Confirmation is separate
+from saving configuration. Closing then keeps the saved configuration and
+records that library setup still needs to be completed; return through
+**Configure**. An enrollment needing manual review cannot be confirmed. Keep
+its displayed review folder; interrupted applies use `enroll recover --out DIR`.
 
 An existing setup displays and preserves its account, library and device
 identities. Before changes, both its original journal and the proposed
@@ -245,9 +254,11 @@ rechecks compatibility, storage and the exact reviewed config/device files,
 retains a verified configuration backup in `Backups`, and atomically replaces
 the configuration. Changed review state or a linked/reparse state path refuses
 saving. Recover missing configuration with an existing device identity from its
-original backup instead of creating a new identity. No wizard operation mounts
-storage, initializes a journal, enrolls a PC, changes Medal's database or edits
-startup entries. Continue with the separate reviewed steps below after saving.
+original backup instead of creating a new identity. Saving configuration alone
+does not change the library or startup entries. The separately confirmed
+library step runs the existing commands, including their ownership locks,
+backups and rechecks that Medal is quit. The command-line steps below remain
+available for scripted setup and recovery.
 
 The CLI configuration workflow remains available:
 
@@ -389,7 +400,7 @@ the reason on standard error.
 | --- | --- |
 | `format` | `1`. Later versions of format 1 only add fields; see [versions and schemas](versioning.md). |
 | `libraryId` | This PC's configured library. |
-| `storage` | `"reachable"` or `"unreachable"`; `message` explains the second. |
+| `storage` | `"reachable"`, `"unreachable"`, or `"not_checked"` while wizard library setup is pending; `message` explains pending setup or an outage. Pending setup exits 1 and never reports that it is safe to switch. |
 | `journal` | `null` when unreachable. Otherwise `state` (`CLEAN`, `STARTING`, `ACTIVE`, `DRAINING`, `PUBLISHING`, `RECOVERY_REQUIRED`), `owner` (display name or `null`), `ownedByThisPc`, `sessionId`, `committedGeneration`, `revision`, `updatedAt` and `reason`. |
 | `phase`, `title`, `nextAction` | The same phase, title and next step as the tray (`READY`, `STARTING`, `ACTIVE`, `UPLOADING`, `VERIFYING`, `WAITING`, `RECOVERY_NEEDED`, `UNKNOWN`, `WAITING_FOR_STORAGE`). A stale or unreadable progress feed is `UNKNOWN`, never `READY`. |
 | `safeToSwitch` | `true` only when the journal is `CLEAN` and the phase is `READY`. |

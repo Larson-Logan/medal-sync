@@ -19,6 +19,7 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         ConfigurationWizardTests.Run(Check);
+        LibrarySetupTests.Run(Check);
         UpdateTests.Run(Check);
         var gate = new object();
         DesktopStatus current = new(SessionPhase.Starting, "Synthetic startup", DateTimeOffset.UtcNow);

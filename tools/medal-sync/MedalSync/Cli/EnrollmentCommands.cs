@@ -38,8 +38,10 @@ internal static class EnrollmentCommands
             if (!held) throw new UnsafeOperationException("Another medal-sync operation is running on this PC.");
             try
             {
-                return RecoverInterrupted(config, install, state, CoordinationStore.Open(config), device, directory, rollback, apply, output,
+                int code = RecoverInterrupted(config, install, state, CoordinationStore.Open(config), device, directory, rollback, apply, output,
                     finish: () => SessionCommands.FinishOwnSession(output));
+                if (apply && !rollback && code == 0) LibrarySetupPending.Read(state, config)?.Complete(state, config);
+                return code;
             }
             finally { guard.ReleaseMutex(); }
         }
@@ -103,7 +105,9 @@ internal static class EnrollmentCommands
         if (!locked) throw new UnsafeOperationException("Another medal-sync operation is running on this PC.");
         try
         {
-            return Run(config, install, state, device, directory, apply, output);
+            int code = Run(config, install, state, device, directory, apply, output);
+            if (apply && code == 0) LibrarySetupPending.Read(state, config)?.Complete(state, config);
+            return code;
         }
         catch (StorageOfflineException ex) when (config.PrimaryIsRclone)
         {

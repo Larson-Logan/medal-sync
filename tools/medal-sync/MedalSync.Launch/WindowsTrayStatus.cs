@@ -126,6 +126,9 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         var guide = new Button { Text = "Setup &guide", AutoSize = true };
         guide.Click += (_, _) => OpenGuide();
         buttons.Controls.Add(guide);
+        var configure = new Button { Text = "&Configure", AccessibleName = "Configure or finish library setup", AutoSize = true };
+        configure.Click += (_, _) => StartLauncher("--configure");
+        buttons.Controls.Add(configure);
         var updates = new Button { Text = "Check for &updates", AutoSize = true };
         updates.Click += (_, _) => StartLauncher("--check-updates");
         buttons.Controls.Add(updates);

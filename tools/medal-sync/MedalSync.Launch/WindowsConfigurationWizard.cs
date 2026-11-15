@@ -3,10 +3,11 @@ using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Platform;
 using MedalSync.Storage;
+using MedalSync.Util;
 
 namespace MedalSync.Launch;
 
-/// <summary>Configuration only. Enrollment, provider authorization and startup remain explicit operations.</summary>
+/// <summary>Configuration and explicitly reviewed library setup through the existing commands.</summary>
 internal sealed class WindowsConfigurationWizard : Form
 {
     private readonly LocalState _state;
@@ -15,6 +16,7 @@ internal sealed class WindowsConfigurationWizard : Form
     private readonly Action<MedalSyncConfig> _validateExisting;
     private readonly Func<IDisposable> _acquireGuard;
     private readonly Func<string>? _detectAccount;
+    private readonly bool _readNameAdvice;
     private readonly Dictionary<string, TextBox> _fields = [];
     private readonly Dictionary<string, Row> _rows = [];
     private StorageMode _appliedMode;
@@ -34,6 +36,11 @@ internal sealed class WindowsConfigurationWizard : Form
     private ConfigurationReview? _proposal;
     private bool _busy;
     private bool _ending;
+    private LibrarySetupPending? _librarySetup;
+    private readonly Func<string[], (int Code, string Text)> _runSetupCommand;
+    private bool _setupReviewed;
+    private string? _setupConfigDigest;
+    private string? _setupReviewDirectory;
 
     public static int Run(LocalState state)
     {
@@ -52,15 +59,19 @@ internal sealed class WindowsConfigurationWizard : Form
     }
 
     internal WindowsConfigurationWizard(LocalState state, Action<MedalSyncConfig, bool>? validate = null, Func<IDisposable>? acquireGuard = null,
-        Func<string>? detectAccount = null)
+        Func<string>? detectAccount = null, Func<string[], (int Code, string Text)>? runSetupCommand = null)
     {
         _state = state;
+        _runSetupCommand = runSetupCommand ?? (validate is null ? RunSetupCommand
+            : _ => throw new InvalidOperationException("Tests must provide an isolated library setup command."));
         _validate = validate ?? ValidateEnvironment;
+        _readNameAdvice = validate is null;
         _validateExisting = validate is null ? RequireReady : config => validate(config, false);
         _acquireGuard = acquireGuard ?? AcquireGuard;
         // Tests that replace validation never read the real Medal profile unless they pass a detector.
         _detectAccount = detectAccount ?? (validate is null ? MedalEnvironment.SignedInAccountId : null);
         _existing = File.Exists(state.ConfigPath) ? MedalSyncConfig.Load(state.ConfigPath) : null;
+        _librarySetup = _existing is null ? null : LibrarySetupPending.Read(state, _existing);
         Text = "Medal Sync configuration";
         Icon = AppIcons.LoadApplicationIcon();
         AccessibleName = Text;
@@ -74,7 +85,7 @@ internal sealed class WindowsConfigurationWizard : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(750, 0), Text = $"Resolved configuration: {state.ConfigPath}\r\n"
-            + (_existing is null ? "Choose a storage mode; only the fields it uses are shown. Review, then confirm saving. Enrollment is a separate step."
+            + (_existing is null ? "Choose a storage mode; review and save it, then review creating or joining the library. Quit Medal before library setup."
                 : "Existing setup found. Account, library and device identities are preserved. Quit Medal and wait for Ready before changing it.") }, 0, 0);
         _edit = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         var fields = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Padding = new Padding(0, 12, 12, 12) };
@@ -96,6 +107,7 @@ internal sealed class WindowsConfigurationWizard : Form
         Button? detect = _existing is null && _detectAccount is not null
             ? new Button { Text = "De&tect", AutoSize = true, AccessibleName = "Detect the signed-in Medal account" } : null;
         Field(fields, "account", _existing?.AccountId ?? "", action: detect);
+        Field(fields, "deviceLabel", _existing?.DeviceLabel ?? "");
         _fields["account"].ReadOnly = _existing is not null;
         Field(fields, "remote", _existing?.Remote ?? "", Pick.Folder);
         Field(fields, "coordination", _existing?.CoordinationRoot ?? DefaultCoordination(SelectedMode), Pick.Folder);
@@ -134,12 +146,13 @@ internal sealed class WindowsConfigurationWizard : Form
         buttons.Controls.AddRange([_back, _next, _save, cancel]);
         CancelButton = cancel;
         AcceptButton = _next;
-        _next.Click += async (_, _) => await Review();
+        _next.Click += async (_, _) => { if (_librarySetup is null) await Review(); else await ReviewLibrary(); };
         _back.Click += (_, _) => { _proposal = null; _review.Visible = false; _edit.Visible = true; _next.Enabled = true; _save.Enabled = _back.Enabled = false; AcceptButton = _next; };
-        _save.Click += async (_, _) => await Save();
+        _save.Click += async (_, _) => { if (_librarySetup is null) await Save(); else await ApplyLibrary(); };
         FormClosing += (_, e) => { if (_busy && e.CloseReason == CloseReason.UserClosing) e.Cancel = true; };
         layout.Controls.Add(buttons, 0, 3);
         Controls.Add(layout);
+        if (_librarySetup is not null) ShowLibrarySetup();
     }
 
     private enum Pick { None, Folder, Executable, Credentials }
@@ -172,6 +185,7 @@ internal sealed class WindowsConfigurationWizard : Form
         "identity" => ("&Library choice", ""),
         "library" => ("&Existing library ID", ""),
         "account" => ("Medal &account ID", ""),
+        "deviceLabel" => ("PC display &name", "Optional name other PCs see, such as Desk PC or Living room. Up to 64 printable characters; ownership still uses this PC's unique ID."),
         "remote" => mode switch
         {
             StorageMode.Local => ("&Storage folder", @"Dedicated folder on this PC that keeps every clip, such as D:\MedalLibrary."),
@@ -190,7 +204,7 @@ internal sealed class WindowsConfigurationWizard : Form
         "rclone" => ("&Rclone executable", "The rclone.exe installed with Medal Sync is selected by default."),
         "copy" => mode == StorageMode.Cloud
             ? ("Persistent local cop&y", "Required. Medal records into this complete local copy; Drive receives verified uploads.")
-            : ("Persistent local cop&y (optional)", "Keeps a complete copy of the library on this PC. Required when storage is an rclone remote."),
+            : ("Persistent local cop&y (optional)", "Keeps the complete library on this PC and avoids uploading unreferenced replay-buffer segments. Needs space for every clip; recommended on slow links. Required for an rclone remote."),
         "cloudConfig" => mode == StorageMode.Cloud
             ? ("Provider credential &file", "rclone.conf holding the Google Drive sign-in from 'rclone config'. Required in this mode.")
             : ("Provider credential &file (optional)", "rclone.conf from 'rclone config'. Required for cloud copies or an rclone storage remote."),
@@ -372,6 +386,7 @@ internal sealed class WindowsConfigurationWizard : Form
             StorageMode = mode,
             CloudJournalId = Optional("cloudJournal"),
             BetaUpdates = _existing?.BetaUpdates ?? false,
+            DeviceLabel = Optional("deviceLabel"),
             Replication = replication.LocalCopyRoot is null && replication.RcloneConfigPath is null && targets.Count == 0 ? null : replication,
         };
     }
@@ -386,6 +401,15 @@ internal sealed class WindowsConfigurationWizard : Form
             _proposal = await Task.Run(() => { using var guard = _acquireGuard(); return ConfigurationReview.Prepare(_state, candidate, fresh, _validate, _validateExisting); });
             if (_ending) return;
             _review.Text = _proposal.Text;
+            if (_readNameAdvice && !fresh)
+            {
+                try
+                {
+                    string? advice = await Task.Run(() => DeviceNameAdvice.Read(candidate, _state, CoordinationStore.Open(candidate)));
+                    if (advice is not null) _review.AppendText("\r\n\r\n" + advice);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MedalSyncException) { /* Advisory only. */ }
+            }
             _edit.Visible = false;
             _review.Visible = true;
             _review.BringToFront();
@@ -398,12 +422,25 @@ internal sealed class WindowsConfigurationWizard : Form
     private async Task Save()
     {
         if (_busy || _ending || _proposal is null) return;
+        bool fresh = _identity.SelectedIndex == 0;
         await Work(async () =>
         {
-            string? backup = await Task.Run(() => { using var guard = _acquireGuard(); return _proposal.Save(true, _validate, _validateExisting); });
+            string? backup = await Task.Run(() =>
+            {
+                using var guard = _acquireGuard();
+                string? saved = _proposal.Save(true, _validate, _validateExisting);
+                if (!_proposal.ReplacesExisting)
+                    _librarySetup = LibrarySetupPending.Save(_state, _proposal.Config, fresh);
+                return saved;
+            });
             if (_ending) return;
+            if (!_proposal.ReplacesExisting)
+            {
+                ShowLibrarySetup();
+                return;
+            }
             MessageBox.Show(this, "Configuration saved and verified.\r\n" + (backup is null ? "" : $"Previous configuration: {backup}\r\n")
-                + "Follow the reviewed initialization or enrollment steps in Medal Sync Setup Guide before launching Medal.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                + "Launch Medal through Medal Sync when the library is Ready.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
             _busy = false;
             DialogResult = DialogResult.OK;
             Close();
@@ -423,7 +460,114 @@ internal sealed class WindowsConfigurationWizard : Form
             _review.Visible = false;
             _message.Text = ex.Message + " Keep the existing state and any configuration backup. Correct the input and review again.";
         }
-        finally { _busy = false; _next.Enabled = _proposal is null; _save.Enabled = _back.Enabled = _proposal is not null; }
+        finally
+        {
+            _busy = false;
+            if (_librarySetup is not null) ShowLibrarySetup();
+            else { _next.Enabled = _proposal is null; _save.Enabled = _back.Enabled = _proposal is not null; }
+        }
+    }
+
+    private void ShowLibrarySetup()
+    {
+        _edit.Visible = false;
+        _review.Visible = true;
+        _review.BringToFront();
+        _back.Enabled = false;
+        _next.Text = "&Review library";
+        _next.Enabled = !_busy;
+        _save.Text = _librarySetup!.NewLibrary ? "&Confirm and create library" : "&Confirm and join library";
+        _save.Enabled = !_busy && _setupReviewed;
+        AcceptButton = null;
+        if (!_setupReviewed)
+            _review.Text = $"Configuration saved at {_state.ConfigPath}.\r\nQuit Medal normally before continuing.\r\n"
+                + $"Review the existing command's preview to {_librarySetup.Action} this library. Confirm only after reading it.\r\n"
+                + "You can close this window and return through Configure. The setup guide and command-line operations remain available.";
+        _message.Text = "Library setup still needs review and explicit confirmation. Closing this window skips it for now.";
+    }
+
+    private static (int Code, string Text) RunSetupCommand(string[] arguments)
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        int code = CommandRunner.Run(arguments, output, error);
+        return (code, output + Environment.NewLine + error);
+    }
+
+    private string[] SetupArguments(bool apply) => _librarySetup!.NewLibrary
+        ? apply ? ["init", "--apply"] : ["init"]
+        : apply ? ["enroll", "--out", _setupReviewDirectory!, "--apply"] : ["enroll", "--out", _setupReviewDirectory!];
+
+    private void RequireSetupIntent()
+    {
+        var config = MedalSyncConfig.Load(_state.ConfigPath);
+        if (LibrarySetupPending.Read(_state, config) != _librarySetup)
+            throw new UnsafeOperationException("Pending setup changed. Reopen Configure before reviewing this library.");
+    }
+
+    private async Task ReviewLibrary()
+    {
+        if (_busy || _ending || _librarySetup is null) return;
+        _setupReviewed = false;
+        _setupConfigDigest = null;
+        _setupReviewDirectory = Path.Combine(_state.Root, "enrollment-reviews", Guid.NewGuid().ToString("N"));
+        await LibraryWork(async () =>
+        {
+            RequireSetupIntent();
+            string digest = Hashing.Sha256File(_state.ConfigPath);
+            var result = await Task.Run(() => _runSetupCommand(SetupArguments(false)));
+            if (_ending) return;
+            _review.Text = result.Text + (!_librarySetup.NewLibrary && Directory.Exists(_setupReviewDirectory)
+                ? $"\r\nPrivate review folder: {_setupReviewDirectory}" : "");
+            _setupReviewed = result.Code == 0 && Hashing.Sha256File(_state.ConfigPath) == digest;
+            _setupConfigDigest = _setupReviewed ? digest : null;
+            _message.Text = _setupReviewed ? "Read the entire preview. Confirm to apply, or close to skip. Medal must stay quit."
+                : "Setup was refused or needs manual review. Keep the review files, resolve the reported problem, then review again.";
+        });
+    }
+
+    private async Task ApplyLibrary()
+    {
+        if (_busy || _ending || _librarySetup is null || !_setupReviewed) return;
+        _setupReviewed = false; // Every retry needs a new preview, including after partial enrollment.
+        await LibraryWork(async () =>
+        {
+            RequireSetupIntent();
+            if (_setupConfigDigest != Hashing.Sha256File(_state.ConfigPath))
+                throw new UnsafeOperationException("Configuration changed after the preview. Reopen Configure and review again.");
+            var result = await Task.Run(() => _runSetupCommand(SetupArguments(true)));
+            if (_ending) return;
+            _review.AppendText("\r\n\r\n" + result.Text);
+            if (result.Code != 0)
+            {
+                _message.Text = "Setup did not complete. Keep the review files. If enrollment was interrupted, use enroll recover --out with the review folder shown above.";
+                return;
+            }
+            var config = MedalSyncConfig.Load(_state.ConfigPath);
+            if (LibrarySetupPending.Read(_state, config) is not null) _librarySetup.Complete(_state, config);
+            _librarySetup = null;
+            _next.Enabled = _save.Enabled = _back.Enabled = false;
+            _message.Text = "Library setup completed. You can close this window and launch Medal through Medal Sync.";
+        });
+    }
+
+    private async Task LibraryWork(Func<Task> work)
+    {
+        _busy = true;
+        _next.Enabled = _save.Enabled = _back.Enabled = false;
+        _message.Text = "Checking the library with Medal Sync's existing setup command. Keep Medal quit.";
+        try { await work(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or MedalSyncException or ArgumentException)
+        {
+            _setupReviewed = false;
+            _message.Text = ex.Message + " Keep setup and review files; correct the problem before reviewing again.";
+        }
+        finally
+        {
+            _busy = false;
+            _next.Enabled = _librarySetup is not null;
+            _save.Enabled = _librarySetup is not null && _setupReviewed;
+        }
     }
 
     private static void ValidateEnvironment(MedalSyncConfig config, bool fresh)

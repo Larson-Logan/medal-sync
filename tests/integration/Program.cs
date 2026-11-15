@@ -452,6 +452,11 @@ internal static class Program
                 Check(File.ReadAllBytes(config.Capture.Append("#clip [test].mp4").Display).SequenceEqual(Encoding.UTF8.GetBytes("synthetic media bytes")), "PC " + (pc + 1) + " reads committed media through the real mount");
                 if (pc == 0)
                 {
+                    string buffer = config.Capture.Append("Temp", "RecordingBuffer").Display;
+                    Directory.CreateDirectory(buffer);
+                    File.WriteAllText(Path.Combine(buffer, "kept-segment.bin"), "synthetic disposable replay segment");
+                    File.WriteAllText(Path.Combine(buffer, "deleted-segment.bin"), "synthetic deleted replay segment");
+                    File.Delete(Path.Combine(buffer, "deleted-segment.bin"));
                     File.WriteAllBytes(config.Capture.Append("new.mp4").Display, Encoding.UTF8.GetBytes("new synthetic recording"));
                     MedalFixture.AddContent(db, "new", video: config.Capture.Append("new.mp4").Display);
                 }
@@ -483,6 +488,16 @@ internal static class Program
                 Check(store.ReadJournal().State == OwnershipState.Clean, "PC " + (pc + 1) + " releases ownership only after verified copies");
                 Check(!Directory.Exists(config.SessionCacheDirectory(launch.Session!)), "PC " + (pc + 1) + " clears only its finished session cache");
                 Check(File.Exists(config.MountedCapture.Append("new.mp4").Display), "PC " + (pc + 1) + " retains the persistent local collection");
+                if (pc == 0 && !localOnly)
+                {
+                    Check(File.Exists(config.MountedCapture.Append("Temp", "RecordingBuffer", "kept-segment.bin").Display),
+                        "unreferenced replay-buffer bytes remain on the recording PC after local-copy handoff");
+                    Check(!File.Exists(config.ServerCapture.Append("Temp", "RecordingBuffer", "kept-segment.bin").Display)
+                        && !File.Exists(config.ServerCapture.Append("Temp", "RecordingBuffer", "deleted-segment.bin").Display),
+                        "neither kept nor deleted replay-buffer segments reach primary storage through a real mount");
+                    Check(File.ReadAllText(config.ServerCapture.Append("new.mp4").Display) == "new synthetic recording",
+                        "saved clips still reach and verify on primary storage while replay buffers stay local");
+                }
                 mount = null;
             }
             foreach (string remote in new[] { "onedrive", "dropbox", "gdrive" })

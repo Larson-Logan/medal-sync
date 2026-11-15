@@ -47,7 +47,9 @@ class PromotionError(Exception):
 
 
 def git(root, *args):
-    result = subprocess.run(['git', *args], cwd=root, capture_output=True, text=True)
+    # Tracked text and Git commit messages use UTF-8, including the changelog's
+    # em dash. The Windows locale can otherwise decode that heading as cp1252.
+    result = subprocess.run(['git', *args], cwd=root, capture_output=True, text=True, encoding='utf-8')
     if result.returncode:
         raise PromotionError(f'git {" ".join(args)} failed: {result.stderr.strip()}')
     return result.stdout

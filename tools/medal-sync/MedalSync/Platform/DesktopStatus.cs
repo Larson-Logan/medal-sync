@@ -71,6 +71,10 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         "Medal Sync is not set up on this PC yet. Right-click the Medal Sync icon in the notification area and choose Configure, "
         + "or open Medal Sync Setup Guide from the Start menu.", now) { Heading = "Not set up yet" };
 
+    public static DesktopStatus SetupPending(LibrarySetupPending pending, DateTimeOffset now) => new(SessionPhase.Unknown,
+        $"Configuration is saved. Quit Medal, then choose Configure to review and {pending.Action} the library. "
+        + "Nothing is applied until you confirm the library preview.", now) { Heading = "Finish library setup" };
+
     public static DesktopStatus Unknown(DateTimeOffset? lastConfirmed = null) => new(SessionPhase.Unknown,
         "Status is stale or unreadable. Keep this PC's session and cache; reconnect to storage or reopen status to retry.", lastConfirmed);
 
@@ -240,9 +244,13 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
                 return DesktopStatus.NotConfigured(DateTimeOffset.UtcNow);
             }
             var config = Config(local.ConfigPath);
+            var device = File.Exists(Path.Combine(local.Root, "device.json")) ? local.ExistingDevice() : null;
+            var pending = LibrarySetupPending.Read(local, config);
+            if (pending is { NewLibrary: true } && config.StorageMode != StorageMode.Cloud
+                && !Directory.Exists(config.LibraryCoordinationDirectory) && !LibrarySetupPending.HasSession(local) && !supervisorRunning())
+                return DesktopStatus.SetupPending(pending, DateTimeOffset.UtcNow);
             // The wizard saves only the configuration. A PC that has not run its first command has no identity yet,
             // and so owns nothing; a damaged or copied identity still refuses.
-            var device = File.Exists(Path.Combine(local.Root, "device.json")) ? local.ExistingDevice() : null;
             if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
             OwnershipRecord journal;
             try
@@ -261,6 +269,8 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
                 throw;
             }
             var now = DateTimeOffset.UtcNow;
+            if (pending is not null && journal.State == OwnershipState.Clean && !LibrarySetupPending.HasSession(local) && !supervisorRunning())
+                return DesktopStatus.SetupPending(pending, now);
             return DesktopStatus.Read(local, config.LibraryId, journal, device, supervisorRunning(), now,
                 ReplicaCheckStatus.Read(local, config.LibraryId, now, config.Replication?.Targets ?? []));
         }

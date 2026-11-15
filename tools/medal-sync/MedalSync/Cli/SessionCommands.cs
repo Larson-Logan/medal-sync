@@ -92,6 +92,11 @@ internal static class SessionCommands
         Func<bool>? supervisorRunning = null)
     {
         var now = DateTimeOffset.UtcNow;
+        var pending = LibrarySetupPending.Read(state, config);
+        if (pending is { NewLibrary: true } && config.StorageMode != StorageMode.Cloud
+            && !Directory.Exists(config.LibraryCoordinationDirectory) && !LibrarySetupPending.HasSession(state)
+            && !(supervisorRunning ?? AnotherInstanceRunning)())
+            return WritePendingSetup(config, pending, now, json, output);
         var cloudChecks = ReplicaCheckStatus.Read(state, config.LibraryId, now, config.Replication?.Targets ?? []);
         CoordinationStore store;
         OwnershipRecord journal;
@@ -114,9 +119,16 @@ internal static class SessionCommands
             }
             return 3;
         }
+        if (pending is not null && journal.State == OwnershipState.Clean && !LibrarySetupPending.HasSession(state)
+            && !(supervisorRunning ?? AnotherInstanceRunning)())
+            return WritePendingSetup(config, pending, now, json, output);
+        string? nameAdvice = null;
+        try { nameAdvice = DeviceNameAdvice.Read(config, state, store); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Advisory only. */ }
         if (json)
         {
             var desktop = DesktopStatus.Read(state, config.LibraryId, journal, device, (supervisorRunning ?? AnotherInstanceRunning)(), now, cloudChecks);
+            if (nameAdvice is not null) desktop = desktop with { NextAction = desktop.NextAction + " " + nameAdvice };
             var report = StatusReport.Reached(config.LibraryId, journal, device, desktop, store.PendingRequests(now), store.StaleRequests(now),
                 StorageReplication.Pending(state, config.LibraryId), StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now)
                 with { ReplicaRetry = ReplicaRetryStatus.Read(state, config.LibraryId, now), CloudCopies = cloudChecks };
@@ -124,6 +136,7 @@ internal static class SessionCommands
             return 0;
         }
         output.WriteLine(StatusText.For(journal, device ?? DesktopStatus.NoDevice, Directory.Exists(config.DriveRoot.Display)));
+        if (nameAdvice is not null) output.WriteLine(nameAdvice);
         foreach (var request in store.PendingRequests(now)) output.WriteLine($"Waiting to switch: {request.Device.DisplayName} since {request.RequestedAt:yyyy-MM-dd HH:mm} UTC.");
         foreach (var request in store.StaleRequests(now))
             output.WriteLine($"Old switch request from {request.Device.DisplayName} ({request.RequestedAt:yyyy-MM-dd HH:mm} UTC) is ignored; the next session removes it.");
@@ -135,6 +148,16 @@ internal static class SessionCommands
         foreach (var item in StorageCheckReport.Outstanding(state, config.LibraryId))
             output.WriteLine($"Storage needs attention: {item.Detail} Run 'medal-sync storage check' after fixing it.");
         return 0;
+    }
+
+    private static int WritePendingSetup(MedalSyncConfig config, LibrarySetupPending pending, DateTimeOffset now, bool json, TextWriter output)
+    {
+        var setup = DesktopStatus.SetupPending(pending, now);
+        if (json)
+            output.WriteLine((StatusReport.Offline(config.LibraryId, setup.NextAction, [], null, now) with
+            { Phase = setup.Phase, Title = setup.Title, NextAction = setup.NextAction, Storage = "not_checked" }).ToJson());
+        else output.WriteLine(setup.Title + ": " + setup.NextAction);
+        return 1;
     }
 
     /// <summary>
@@ -246,6 +269,7 @@ internal static class SessionCommands
             context.Device, SessionCoordinator.NewId(), context.Install.Versions, DateTimeOffset.UtcNow);
         context.Log.Write($"init: generation 0 created from {LibraryCommands.Counts(snapshot)}");
         output.WriteLine("Shared library created as generation 0.");
+        LibrarySetupPending.Read(context.State, context.Config)?.Complete(context.State, context.Config);
         return 0;
     }
 
@@ -276,6 +300,7 @@ internal static class SessionCommands
         }, primary: checker).Publish(snapshot);
         CoordinationStore.Create(config, snapshot, AssetManifest.From(report), context.Device, SessionCoordinator.NewId(), context.Install.Versions, DateTimeOffset.UtcNow);
         output.WriteLine("Google Drive library created. Reuse this library ID and cloud journal ID on the other PC; keep its own device identity.");
+        LibrarySetupPending.Read(context.State, config)?.Complete(context.State, config);
         return 0;
     }
 
@@ -504,6 +529,8 @@ internal static class SessionCommands
         mount.Attach(journal.SessionId!);
         var finished = coordinator.Finish(journal.SessionId!);
         Report(context, output, $"finish: {finished.Status}: {finished.Message}");
+        if (finished.Status is FinishStatus.Published or FinishStatus.Unchanged)
+            LibrarySetupPending.Read(context.State, context.Config)?.Complete(context.State, context.Config);
         return finished.Status is FinishStatus.Published or FinishStatus.Unchanged ? 0 : finished.Status == FinishStatus.Pending ? 3 : 1;
     }
 
@@ -523,7 +550,7 @@ internal static class SessionCommands
         var store = CoordinationStore.Open(config);
         var recovery = new AbortedStartRecovery(config, state, store, () =>
         {
-            if (Hashing.Sha256File(state.ConfigPath) != fingerprint || state.ExistingDevice() != device)
+            if (Hashing.Sha256File(state.ConfigPath) != fingerprint || state.ExistingDevice().DeviceId != device.DeviceId)
                 throw new UnsafeOperationException("Configuration or device identity changed; review recovery again.");
             if (new MedalProcess(install).IsRunning() || Directory.Exists(config.DriveRoot.Display))
                 throw new UnsafeOperationException("Quit Medal normally and stop its clip drive through session recovery before recovering an orphan login.");

@@ -119,7 +119,8 @@ internal sealed class LocalState(string root)
                 + "delete that file so this PC gets its own identity. If this PC or user was renamed, first finish any session it "
                 + $"owns, then change displayName in the file to \"{thisComputer}\".");
         }
-        return new DeviceIdentity(file.DeviceId, file.DisplayName);
+        string? label = File.Exists(ConfigPath) ? MedalSyncConfig.Load(ConfigPath).DeviceLabel : null;
+        return new DeviceIdentity(file.DeviceId, label ?? file.DisplayName);
     }
 
     public SessionSecret SessionSecret(string session, DateTimeOffset now)

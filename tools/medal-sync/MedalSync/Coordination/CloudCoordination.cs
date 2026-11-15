@@ -292,7 +292,7 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
             // Resume only this device's exact verified bootstrap. Never adopt a cached or edited library.
             var original = generations.Read(0);
             if (!Directory.EnumerateFileSystemEntries(config.LibraryCoordinationDirectory).SequenceEqual([GenerationsLocal], StringComparer.OrdinalIgnoreCase)
-                || !generations.Numbered().SequenceEqual([0L]) || original.Manifest.Device != device || original.Snapshot.Digest() != snapshot.Digest()
+                || !generations.Numbered().SequenceEqual([0L]) || original.Manifest.Device.DeviceId != device.DeviceId || original.Snapshot.Digest() != snapshot.Digest()
                 || !Json.Serialize(original.Assets).AsSpan().SequenceEqual(Json.Serialize(assets)))
                 throw new UnsafeOperationException("The retained cloud initialization differs from this PC's reviewed library. Preserve both and recover before retrying.");
             identity = new(1, config.LibraryId, config.AccountId, original.Manifest.CreatedAt, device);

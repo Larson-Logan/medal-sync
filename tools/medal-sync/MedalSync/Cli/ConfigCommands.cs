@@ -41,6 +41,7 @@ internal static class ConfigCommands
         bool apply = args.Flag("--apply");
         string capture = args.Value("--capture-folder") ?? @"M:\Clips";
         string? rclone = args.Value("--rclone-path");
+        string? deviceLabel = args.Value("--device-label");
         string? localCopy = args.Value("--local-copy-root");
         string? cloudConfig = args.Value("--rclone-config");
         string? cloudRemote = args.Value("--cloud-remote");
@@ -61,6 +62,7 @@ internal static class ConfigCommands
         {
             StorageMode = mode == "cloud" ? StorageMode.Cloud : mode == "local" ? StorageMode.Local : StorageMode.Server,
             CloudJournalId = journal,
+            DeviceLabel = deviceLabel,
             Replication = localCopy is null && cloudRemote is null && cloudConfig is null && conflicts == "stop" ? null
                 : new ReplicationConfig(localCopy, cloudConfig, cloudRemote is null ? [] : [new ReplicaTarget("cloud", cloudRemote)])
                     { ConflictPolicy = conflicts == "version" ? ReplicaConflictPolicy.Version : ReplicaConflictPolicy.Stop },

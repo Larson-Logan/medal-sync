@@ -77,6 +77,10 @@ internal sealed record MedalSyncConfig(
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool BetaUpdates { get; init; }
 
+    /// <summary>Optional display text for this PC. Never part of its ownership identity.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeviceLabel { get; init; }
+
     public string MountRemote => Replication?.LocalCopyRoot ?? Remote;
 
     /// <summary>The persistent clip collection on this PC: <c>localCopyRoot</c>, or local mode's storage folder. Null when recordings only pass through the cache.</summary>
@@ -193,6 +197,10 @@ internal sealed record MedalSyncConfig(
         {
             problems.Add("cacheRoot must be a local SSD folder, not the share or the virtual drive");
         }
+        if (DeviceLabel is not null && (string.IsNullOrWhiteSpace(DeviceLabel) || DeviceLabel.Length > 64
+            || DeviceLabel.Any(c => char.IsControl(c) || char.IsSurrogate(c) || char.GetUnicodeCategory(c) is
+                System.Globalization.UnicodeCategory.Format or System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator)))
+            problems.Add("deviceLabel must be 1-64 printable characters on one line");
         if (string.IsNullOrWhiteSpace(RclonePath)) problems.Add("rclonePath is required");
         if (Mount is null) problems.Add("mount settings are required");
         else if (Mount.DirCacheHours < 1 || Mount.DirCacheHours > TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerHour)

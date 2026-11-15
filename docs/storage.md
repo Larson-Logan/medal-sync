@@ -106,6 +106,41 @@ uploads, and the low disk space notices above still apply. Drain, verification
 and ownership work the same way. Cloud copies use `replication.bandwidthLimitMiB`
 instead.
 
+### Keep replay-buffer traffic off the server
+
+With server storage and no persistent local copy, Medal's disk replay buffer
+under `Temp\RecordingBuffer` uses the same clip drive as saved clips. Segments
+that survive the write-back delay can upload to the server before Medal deletes
+them. A bandwidth limit slows that traffic; increasing the delay cannot
+guarantee it stays local and also delays saved clips.
+
+On a slow uplink or VPN, use
+[a persistent local copy](#keep-a-local-copy-and-upload-to-the-server). In
+Configure, set **Persistent local copy** to a dedicated local folder while
+Medal is quit and the library is Ready. This is `replication.localCopyRoot` in
+the configuration. It needs room for the entire referenced clip collection,
+plus recording space. The drive then writes buffer segments locally, and
+finish copies only library-referenced files to primary storage. The recording
+path and Recording status stay the same. Local storage and cloud-primary modes
+already record locally.
+
+If a library record ever references a file inside the buffer folder, it is
+treated like any other referenced asset: it must exist and be verified before
+handoff. There is no blanket `Temp` exclusion; Medal also keeps referenced
+keyboard-overlay files there.
+
+Where supported by your Medal recording mode, its **Recording Buffer** setting
+can use memory instead of disk. This uses more RAM; see
+[Medal's buffer guide](https://support.medal.tv/support/solutions/articles/48001165759-what-is-the-recording-buffer-).
+Medal Sync does not change that preference.
+
+A separate mount just for the buffer folder is not supported. rclone's
+[combine](https://rclone.org/combine/) builds a synthetic directory layout and
+[union](https://rclone.org/union/) routes writes using upstream policies.
+Replacing the current backend with either would also require validating
+directory routing, drive identity, upload draining and interrupted-session
+recovery. The persistent-copy option uses the existing verified storage path.
+
 ### Play clips away from the server
 
 Playing a clip that is not in the SSD cache reads it from the server. The clip

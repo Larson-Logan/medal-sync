@@ -51,6 +51,7 @@ Ready-made examples, with placeholder values:
 | `syncExclusions` | `[]` | Syncthing folders that overlap the clip folder and must ignore it. Each entry is `{ "folderId": "ID", "pattern": "/Videos/Clips" }`, with one rooted folder pattern and no wildcards. `inspect` reports whether each ignore rule is in place. Most setups leave this empty. |
 | `replication` | Absent | Optional persistent local copy and cloud copies. See below. |
 | `betaUpdates` | Absent (`false`) | `true` lets this PC's update checks offer [betas](versioning.md#betas) built from `dev` as well as releases, whichever is newer. Betas are less tested than releases. Set it back to `false`, or remove it, to return to releases only: the next release at or above your beta is offered as usual. Earlier Medal Sync versions refuse a file with this field. |
+| `deviceLabel` | Absent | Optional PC display name, such as `Desk PC` or `Living room`: 1–64 printable characters on one line. Set it in the wizard or with `config create --device-label NAME`. Other PCs see it in new ownership, request and history records; earlier records keep their original names. It never changes the device ID or the computer/user check in `device.json`. Omitted unless set, so older versions can still load configurations without it; remove this field before downgrading. |
 
 ## `mount`: the clip drive
 

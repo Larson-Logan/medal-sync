@@ -33,6 +33,17 @@
 - The release workflow tests run the bash steps with Git for Windows' bash and
   never the WSL launcher; without a usable bash they are skipped locally and
   fail in CI (#196).
+- Create or join a library from the configuration wizard after saving settings,
+  using the existing init/enroll previews and explicit confirmation. Skipped
+  setup can be resumed through Configure; interrupted ownership still shows
+  recovery status (#200).
+- Give each PC an optional display name in the wizard or `deviceLabel` setting.
+  Labels do not change its identity or the copied-profile guard. Status suggests
+  a label when another PC has published under the same name (#199).
+- Document how a persistent local copy keeps unreferenced replay-buffer files
+  off primary storage, including the disk-space trade-off and Medal's memory
+  buffer option (#201).
+- Decode Git text as UTF-8 when checking promotion changelog headings on Windows.
 
 ## 1.5.0 — 2026-11-14
 

@@ -96,6 +96,8 @@ includes .NET and rclone, and offers the WinFsp driver.
    setting before saving. [Getting started](docs/getting-started.md) walks
    through creating or joining a library, and includes a prompt for letting an
    AI coding agent prepare the configuration with you.
+   After saving, the wizard offers the library preview and a separate
+   confirmation to create or join it. Quit Medal before this step.
 4. **Record.** Launch Medal through Medal Sync. After you quit Medal, wait for
    **Ready** before switching PCs, updating or uninstalling.
 

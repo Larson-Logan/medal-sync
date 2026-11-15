@@ -148,6 +148,19 @@ public sealed class CoordinationTests : IDisposable
             .Select(p => Path.GetRelativePath(root, p) + ":" + (File.Exists(p) ? Convert.ToHexString(File.ReadAllBytes(p)) : "dir"))
             .Order(StringComparer.Ordinal).ToArray();
 
+    [Fact]
+    public void Store_RetriedInitAcceptsANewDisplayLabelForTheSameDevice()
+    {
+        var reference = NewStore("clip-a");
+        string root = _fixture.PathFor("renamed-bootstrap", LibraryId);
+        CopyTree(reference.Root, root, path => path != "library.json");
+        var renamed = First with { DisplayName = "Desk PC" };
+        var store = CoordinationStore.Create(root, LibraryId, Snapshot("clip-a"), NoAssets, renamed, SessionB, Versions, Now.AddHours(1));
+        Assert.Equal(OwnershipState.Clean, store.ReadJournal().State);
+        Assert.Equal(First.DeviceId, store.Generations.ReadManifest(0).Device.DeviceId);
+        Assert.Equal(renamed, store.Identity.CreatedBy);
+    }
+
     /// <summary>An interrupted init after the lock, after generation 0 (with a staging leftover), after a partial and a whole journal.</summary>
     [Theory]
     [InlineData("lock")]
