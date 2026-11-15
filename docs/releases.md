@@ -368,4 +368,24 @@ promoting it runs every suite.
 Publishing a beta never closes a
 milestone, and the release workflow ignores betas when it chooses the next
 hotfix number. Release notes for a stable release start at the previous stable
-release, never at a beta. Betas are never deleted automatically.
+release, never at a beta.
+
+After a stable release is successfully published, the release workflow removes
+published beta releases of that version and older versions. Only prereleases
+with the exact `vMAJOR.MINOR.PATCH.NN-beta.N` tag form qualify. Stable releases,
+drafts and betas of newer versions remain. The cleanup keeps all Git tags, so
+version planning still sees every counter that was used. It rechecks each
+release before deletion, and refuses to run until the named stable release is
+published. Cleanup failure does not undo the stable publication; rerun the
+failed job or use the helper below.
+
+Preview cleanup for a published stable tag with an authenticated GitHub CLI:
+
+```powershell
+python scripts/cleanup-beta-releases.py --repository Larson-Logan/medal-sync --released-tag v1.5.0.00
+```
+
+Replace the tag with the stable release to use as the cutoff. The default is a
+dry run; add `--apply` to delete the listed release records and their assets.
+Deleting a release cannot be undone. Tags remain available, but their packaged
+beta downloads do not.

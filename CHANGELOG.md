@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Remove published beta releases superseded by a stable release after stable
+  publication. Keep their Git tags so beta numbers stay increasing, and retain
+  every draft, stable release and beta of a newer version (#197).
+
 ## 1.5.0 — 2026-11-14
 
 - The status view no longer says "Unknown / unreachable" on a PC that is not

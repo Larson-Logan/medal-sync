@@ -1,5 +1,7 @@
 """Exercise the actual release and beta workflow steps with disposable files and a stubbed gh."""
 import hashlib
+import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -7,6 +9,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,6 +21,101 @@ PWSH_REQUIRED = (os.environ.get('GITHUB_ACTIONS') == 'true'
                  or os.environ.get('MEDAL_SYNC_REQUIRE_PWSH') == '1')
 requires_pwsh = unittest.skipUnless(
     PWSH_REQUIRED or shutil.which('pwsh'), 'PowerShell 7 (pwsh) is not installed')
+
+
+class BetaCleanupTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('beta_cleanup', ROOT / 'scripts/cleanup-beta-releases.py')
+        cls.cleanup = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.cleanup)
+
+    @staticmethod
+    def release(identity, tag, *, draft=False, prerelease=True):
+        return dict(id=identity, tag_name=tag, draft=draft, prerelease=prerelease,
+                    published_at=None if draft else '2026-11-14T00:00:00Z')
+
+    def run_cleanup(self, releases, *, apply=False, changed=None, published=True, pages=None):
+        stable = self.release(999, 'v1.5.0.00', draft=not published, prerelease=False)
+        calls = []
+
+        def gh(command, **kwargs):
+            self.assertEqual(['gh', 'api', '--method'], command[:3])
+            method, path = command[3:]
+            calls.append((method, path))
+            prefix = 'repos/example/project/releases'
+            self.assertTrue(path.startswith(prefix))
+            if method == 'DELETE':
+                payload = None
+            elif '/tags/' in path:
+                payload = stable
+            elif '?per_page=100&page=' in path:
+                page = int(path.rsplit('=', 1)[1])
+                payload = (pages or {1: releases}).get(page, [])
+            else:
+                identity = int(path.rsplit('/', 1)[1])
+                payload = next(release for release in releases if release['id'] == identity)
+                if changed is not None:
+                    payload = changed(payload)
+            return subprocess.CompletedProcess(command, 0, json.dumps(payload) if payload is not None else '', '')
+
+        with patch.object(self.cleanup.subprocess, 'run', side_effect=gh):
+            result = self.cleanup.cleanup('example/project', 'v1.5.0.00', apply)
+        return result, calls
+
+    def test_dry_run_only_lists_superseded_published_beta_releases(self):
+        releases = [self.release(1, 'v1.4.0.01-beta.2'), self.release(2, 'v1.5.0.00-beta.3'),
+                    self.release(3, 'v1.5.0.01-beta.1'), self.release(4, 'v1.5.0.00', prerelease=False),
+                    self.release(5, 'v1.4.0.01-beta.4', draft=True),
+                    self.release(6, 'v1.4.0.01-beta.5', prerelease=False),
+                    self.release(7, 'v1.4.0-beta.1'), self.release(8, 'v1.4.0.01-beta.0'),
+                    self.release(9, 'v01.4.0.01-beta.1'), self.release(10, 'v1.4.0.01-rc.1')]
+        messages, calls = self.run_cleanup(releases)
+        self.assertEqual(2, len(messages))
+        self.assertIn('v1.4.0.01-beta.2', messages[0])
+        self.assertIn('v1.5.0.00-beta.3', messages[1])
+        self.assertTrue(all(method == 'GET' for method, _ in calls))
+
+    def test_apply_deletes_only_release_ids_and_never_tags(self):
+        releases = [self.release(1, 'v1.4.0.01-beta.9'), self.release(2, 'v1.5.0.00-beta.3'),
+                    self.release(3, 'v1.5.0.01-beta.1'), self.release(4, 'v1.5.0.00', prerelease=False),
+                    self.release(5, 'v1.4.0.01-beta.4', draft=True)]
+        messages, calls = self.run_cleanup(releases, apply=True)
+        self.assertEqual([('DELETE', 'repos/example/project/releases/1'),
+                          ('DELETE', 'repos/example/project/releases/2')],
+                         [call for call in calls if call[0] == 'DELETE'])
+        self.assertTrue(all('kept its tag' in message for message in messages))
+
+    def test_rechecks_metadata_before_deletion(self):
+        for change in (dict(draft=True), dict(prerelease=False), dict(tag_name='v1.5.0.01-beta.1')):
+            with self.subTest(change=change):
+                messages, calls = self.run_cleanup([self.release(1, 'v1.5.0.00-beta.1')], apply=True,
+                                                   changed=lambda value: {**value, **change})
+                self.assertIn('changed during cleanup', messages[0])
+                self.assertFalse(any(method == 'DELETE' for method, _ in calls))
+
+    def test_no_cleanup_before_stable_publication(self):
+        with self.assertRaisesRegex(ValueError, 'fully published'):
+            self.run_cleanup([self.release(1, 'v1.4.0.01-beta.1')], apply=True, published=False)
+
+    def test_lists_every_page_before_deleting(self):
+        releases = [self.release(i, f'v1.4.0.01-beta.{i}') for i in range(1, 102)]
+        _, calls = self.run_cleanup(releases, apply=True, pages={1: releases[:100], 2: releases[100:]})
+        page_two = calls.index(('GET', 'repos/example/project/releases?per_page=100&page=2'))
+        first_delete = next(i for i, call in enumerate(calls) if call[0] == 'DELETE')
+        self.assertLess(page_two, first_delete)
+        self.assertEqual(101, sum(method == 'DELETE' for method, _ in calls))
+
+    def test_cleanup_job_requires_successful_stable_publication(self):
+        workflow = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+        job = workflow.split('\n  cleanup-betas:\n', 1)[1]
+        self.assertIn('needs: [plan, release]', job)
+        self.assertIn('GH_TOKEN: ${{ github.token }}', job)
+        self.assertIn('contents: write', job)
+        self.assertIn('--released-tag "$RELEASED_TAG" --apply', job)
+        self.assertNotIn('always()', job)
+        beta = (ROOT / '.github/workflows/beta.yml').read_text(encoding='utf-8')
+        self.assertIn('betaUpdates enabled', beta)
 
 
 def step_script(name, workflow='release.yml'):
@@ -282,6 +380,11 @@ class BetaPlanTests(unittest.TestCase):
         releases = ('v1.3.1.00', 'v1.3.1.01', 'v1.3.1.01-beta.7', 'v1.3.1.02-beta.1', 'v1.3.1.02-beta.2')
         tags = releases + ('v1.3.1.02-beta.3',)
         self.assertEqual('1.3.1.02-beta.4', self.planned(releases=releases, tags=tags))
+
+    def test_after_beta_cleanup_the_next_beta_is_newer_than_removed_releases(self):
+        # Cleanup keeps tags, including the highest counter of a now-superseded beta series.
+        self.assertEqual('1.3.1.03-beta.1', self.planned(releases=('v1.3.1.02',),
+                         tags=('v1.3.1.02', 'v1.3.1.02-beta.99')))
 
     def test_betas_never_raise_the_stable_counter(self):
         releases = ('v1.3.1.00', 'v1.3.1.01-beta.1', 'v1.3.1.01-beta.2')
