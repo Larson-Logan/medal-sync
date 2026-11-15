@@ -235,6 +235,34 @@ public sealed class CoordinationTests : IDisposable
         Assert.False(variant != "marker" && File.Exists(Path.Combine(root, "library.json")));
     }
 
+    /// <summary>Two PCs initialize the same empty folder: the second sees it empty, then the first fills it before the lock.</summary>
+    [Theory]
+    [InlineData("generation-and-journal")]
+    [InlineData("complete-library")]
+    [InlineData("claimed-library")]
+    public void Store_FreshInitRevalidatesUnderTheLockWhenAnotherPcFilledTheFolder(string variant)
+    {
+        var reference = CoordinationStore.Create(_fixture.PathFor("other-pc", LibraryId), LibraryId, Snapshot("clip-b"), NoAssets, Second, SessionB, Versions, Now);
+        if (variant == "claimed-library") reference.Update(r => Ownership.Acquire(r, Second, SessionB, Now), TimeSpan.FromSeconds(5));
+        string root = _fixture.PathFor("raced", LibraryId);
+        string[]? before = null;
+
+        Assert.Throws<UnsafeOperationException>(() => CoordinationStore.Create(root, LibraryId, Snapshot("clip-a"), NoAssets, First, SessionA, Versions,
+            Now.AddHours(1), beforeLock: () =>
+            {
+                CopyTree(reference.Root, root, path => variant != "generation-and-journal" || path != "library.json");
+                before = Listing(root);
+            }));
+
+        Assert.Equal(before, Listing(root));
+        if (variant != "generation-and-journal")
+        {
+            var opened = CoordinationStore.Open(root, LibraryId, MedalFixture.AccountId);
+            Assert.Equal(Second, opened.Identity.CreatedBy);
+            Assert.Equal(variant == "claimed-library" ? OwnershipState.Starting : OwnershipState.Clean, opened.ReadJournal().State);
+        }
+    }
+
     [Fact]
     public void Store_UpdateAppliesTransitionsUnderTheLock()
     {

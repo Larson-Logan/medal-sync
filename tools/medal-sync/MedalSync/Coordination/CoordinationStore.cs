@@ -118,7 +118,12 @@ internal sealed partial class CoordinationStore
     /// initialization of the same reviewed snapshot, which it completes. A library marker is never replaced.
     /// </summary>
     public static CoordinationStore Create(string root, string libraryId, LibrarySnapshot initial, AssetManifest assets,
-        DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now)
+        DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now) =>
+        Create(root, libraryId, initial, assets, device, session, medal, now, beforeLock: null);
+
+    /// <param name="beforeLock">Test seam: runs after the first check, before the writer lock, as another PC's init could.</param>
+    internal static CoordinationStore Create(string root, string libraryId, LibrarySnapshot initial, AssetManifest assets,
+        DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now, Action? beforeLock)
     {
         if (!IsValidId(libraryId)) throw new ArgumentException("A library ID is 32 lowercase hex characters.", nameof(libraryId));
         string marker = Path.Combine(root, "library.json");
@@ -127,13 +132,15 @@ internal sealed partial class CoordinationStore
         {
             throw new UnsafeOperationException($"'{root}' is not empty. An existing library is never reinitialized.");
         }
+        beforeLock?.Invoke();
         Directory.CreateDirectory(root);
         var bootstrap = new CoordinationStore(root, new LibraryIdentity(LibraryIdentity.CurrentFormat, libraryId, initial.AccountId, now, device));
         LibraryIdentity identity;
         using (bootstrap.AcquireWriterLock(TimeSpan.FromSeconds(5)))
         {
-            // Checked again under the lock: only this device's exact bootstrap of the same reviewed library is resumed.
-            DateTimeOffset createdAt = resume ? bootstrap.ResumableCreatedAt(initial, assets, device, now) : now;
+            // Always checked again under the lock, even when the folder looked empty above: another PC's init can fill
+            // it in between. Only the lock itself or this device's exact bootstrap of the same reviewed library is accepted.
+            DateTimeOffset createdAt = bootstrap.ResumableCreatedAt(initial, assets, device, now);
             if (!bootstrap.Generations.Exists(0)) bootstrap.Generations.Publish(0, null, session, device, initial, assets, medal, createdAt);
             byte[] journal = Json.Serialize(Ownership.Initial(libraryId, initial.AccountId, createdAt));
             // An earlier version wrote the journal in place, so an interruption can leave a truncated copy of these bytes.
