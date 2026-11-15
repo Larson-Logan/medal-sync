@@ -155,7 +155,7 @@ See the [storage guide](docs/storage.md).
 
 ## Development
 
-You'll need Windows, PowerShell 7, the .NET SDK pinned in
+You'll need Windows, PowerShell 7, Git for Windows, the .NET SDK pinned in
 [global.json](global.json), Node 24 and Python 3.11+. Tests use synthetic
 databases and isolated scratch folders; no credentials or real Medal library
 are needed.

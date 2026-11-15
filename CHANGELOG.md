@@ -8,6 +8,24 @@
 - Check for releases in the background at launch and reuse successful answers
   for a day, so slow or offline update checks no longer delay opening Medal.
   Explicit Check for updates still contacts GitHub directly (#198).
+- Setup, uninstall and Check for updates no longer refuse on a PC that saved
+  the configuration wizard but has not run `init` or `enroll` yet. Without a
+  device identity it cannot own the library; a retained session, recovery
+  evidence or session cache still refuses (#188).
+- Running `init --apply` again after an interrupted first attempt in server
+  or local mode now completes this PC's own unfinished library instead of
+  refusing a non-empty folder. A folder left by another PC, a different
+  library or an edited initialization is still refused unchanged, an existing
+  library marker is never replaced, and opening an unfinished library now says
+  so instead of suggesting the share is unreachable (#191).
+- A storage failure while marking a prepared session Active now gives the
+  start back in the same run (stopping the clip drive) and reports Waiting for
+  storage or Blocked, instead of exiting with the drive mounted. Failing to
+  remove this PC's own switch request no longer stops Medal from starting; the
+  request expires by itself (#192).
+- The release workflow tests run the bash steps with Git for Windows' bash and
+  never the WSL launcher; without a usable bash they are skipped locally and
+  fail in CI (#196).
 
 ## 1.5.0 — 2026-11-14
 

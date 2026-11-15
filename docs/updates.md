@@ -78,8 +78,11 @@ Setup checks the initiating user's library readiness before copying programs.
 Quit Medal normally, wait for Ready, then choose **Exit Medal Sync** in the
 status panel or tray menu first. Older versions call this **Exit status view
 (supervision continues)** in the tray menu. Running companion processes,
-retained session credentials, incomplete configuration, unavailable coordination
-storage and non-CLEAN ownership refuse installation. Setup never force-closes
+retained session credentials, a device identity without a configuration,
+unavailable coordination storage and non-CLEAN ownership refuse installation.
+A configuration saved by the wizard before the first `init` or `enroll` does
+not block setup, uninstall or **Check for updates**: without a device identity
+this PC cannot own the library. Setup never force-closes
 Medal or automatically reboots. While setup or uninstall is open, new companion
 library operations are blocked.
 

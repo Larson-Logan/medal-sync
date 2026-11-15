@@ -143,6 +143,74 @@ public sealed class WindowsSetupTests : IDisposable
         Assert.False(File.Exists(Path.Combine(partial, "device.json")));
     }
 
+    private MedalSyncConfig SavedWizardConfiguration(string root)
+    {
+        var settings = new MedalSyncConfig(1, new string('a', 32), MedalFixture.AccountId,
+            @"\\192.0.2.10\Data\Coordination", @"\\192.0.2.10\Data\Videos", @"M:\Clips", _fixture.PathFor("wizard-cache"),
+            @"C:\Tools\rclone.exe", new MountConfig(5, 20, 20, 300, 30, 1000, 2, 53682), 4, []);
+        File.WriteAllBytes(Path.Combine(root, "config.json"), Json.Serialize(settings));
+        return settings;
+    }
+
+    [Fact]
+    public void ConfigurationOnlyFromTheWizardDoesNotBlockSetupAndIsNeverChanged()
+    {
+        string root = DirectoryFor("wizard-saved");
+        SavedWizardConfiguration(root);
+        byte[] config = File.ReadAllBytes(Path.Combine(root, "config.json"));
+        // No journal read: a PC without an identity cannot own the library.
+        SetupMaintenance.RequireReady(root, false, false, _ => throw new InvalidOperationException("journal must not be read"));
+        Assert.Equal(config, File.ReadAllBytes(Path.Combine(root, "config.json")));
+        Assert.False(File.Exists(Path.Combine(root, "device.json")));
+        Assert.Equal(["config.json"], Directory.EnumerateFileSystemEntries(root).Select(Path.GetFileName));
+    }
+
+    [Fact]
+    public void IdentityWithoutConfigurationStillRefusesAndNamesTheState()
+    {
+        string root = DirectoryFor("identity-only");
+        new LocalState(root).Device();
+        var refusal = Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(root, false, false));
+        Assert.Equal(SetupMaintenance.IdentityWithoutConfigurationMessage, refusal.Message);
+    }
+
+    [Fact]
+    public void ConfigurationOnlyWithSessionEvidenceOrCacheStillRefuses()
+    {
+        string sessions = DirectoryFor("wizard-sessions");
+        SavedWizardConfiguration(sessions);
+        Directory.CreateDirectory(Path.Combine(sessions, "sessions"));
+        File.WriteAllText(Path.Combine(sessions, "sessions", "pending.json"), "synthetic");
+        Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(sessions, false, false));
+
+        foreach (string evidence in new[] { "aborted-starts", "finished-sessions" })
+        {
+            string root = DirectoryFor("wizard-" + evidence);
+            SavedWizardConfiguration(root);
+            Directory.CreateDirectory(Path.Combine(root, evidence, new string('1', 32)));
+            Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(root, false, false));
+        }
+
+        string cached = DirectoryFor("wizard-cached");
+        var settings = SavedWizardConfiguration(cached);
+        string cache = settings.SessionCacheDirectory(new string('2', 32));
+        Directory.CreateDirectory(cache);
+        File.WriteAllText(Path.Combine(cache, "unpublished.mp4"), "synthetic");
+        var refusal = Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(cached, false, false));
+        Assert.Contains("session cache", refusal.Message);
+        Assert.True(File.Exists(Path.Combine(cache, "unpublished.mp4")));
+    }
+
+    [Fact]
+    public void UnreadableConfigurationWithoutIdentityNamesTheNextStep()
+    {
+        string root = DirectoryFor("wizard-damaged");
+        File.WriteAllText(Path.Combine(root, "config.json"), "synthetic");
+        var refusal = Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(root, false, false));
+        Assert.Contains("configuration wizard", refusal.Message);
+        Assert.Equal("synthetic", File.ReadAllText(Path.Combine(root, "config.json")));
+    }
+
     [Fact]
     public void AnOpenSetupBlocksLibraryOperationsUntilClosed()
     {

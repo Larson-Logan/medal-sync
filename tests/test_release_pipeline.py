@@ -23,6 +23,55 @@ requires_pwsh = unittest.skipUnless(
     PWSH_REQUIRED or shutil.which('pwsh'), 'PowerShell 7 (pwsh) is not installed')
 
 
+def _is_windows_launcher(path):
+    """The WSL launcher in System32 and the Store alias in WindowsApps are not a bash that runs these steps."""
+    parts = [part.lower() for part in Path(path).parts]
+    return 'windowsapps' in parts or any(
+        a == 'windows' and b in ('system32', 'sysnative', 'syswow64') for a, b in zip(parts, parts[1:]))
+
+
+def find_bash():
+    """A real bash for the workflows' bash steps: on Windows, Git for Windows' bash, never a launcher."""
+    override = os.environ.get('MEDAL_SYNC_BASH')
+    if override:
+        return override
+    if os.name != 'nt':
+        return shutil.which('bash')
+    candidates = []
+    git = shutil.which('git')
+    if git:
+        # git.exe lives in <Git>\cmd, <Git>\bin or <Git>\mingw64\bin; bash sits in <Git>\bin and <Git>\usr\bin.
+        for root in Path(git).resolve().parents:
+            candidates += [root / 'bin' / 'bash.exe', root / 'usr' / 'bin' / 'bash.exe']
+    for variable in ('ProgramFiles', 'ProgramW6432', 'LOCALAPPDATA'):
+        if os.environ.get(variable):
+            base = Path(os.environ[variable]) / ('Programs' if variable == 'LOCALAPPDATA' else '') / 'Git'
+            candidates += [base / 'bin' / 'bash.exe', base / 'usr' / 'bin' / 'bash.exe']
+    for directory in os.environ.get('PATH', '').split(os.pathsep):
+        if directory:
+            candidates.append(Path(directory) / 'bash.exe')
+    for candidate in candidates:
+        if candidate.is_file() and not _is_windows_launcher(candidate.resolve()):
+            return str(candidate)
+    return None
+
+
+# The bash classes follow the same rule as PowerShell: skipped locally without a usable bash,
+# but failed on GitHub Actions or with MEDAL_SYNC_REQUIRE_BASH=1.
+BASH = find_bash()
+BASH_REQUIRED = (os.environ.get('GITHUB_ACTIONS') == 'true'
+                 or os.environ.get('MEDAL_SYNC_REQUIRE_BASH') == '1')
+requires_bash = unittest.skipUnless(
+    BASH_REQUIRED or BASH,
+    'No usable bash: install Git for Windows (the System32 WSL launcher cannot run these steps)')
+
+
+def bash():
+    if BASH is None:
+        raise AssertionError('No usable bash was found. Install Git for Windows, or set MEDAL_SYNC_BASH to its bash.exe.')
+    return BASH
+
+
 class BetaCleanupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -324,6 +373,7 @@ class BetaPublishTests(unittest.TestCase):
         self.assertEqual([], calls)
 
 
+@requires_bash
 class BetaPlanTests(unittest.TestCase):
     """Runs the actual beta planning step against a fake gh with a synthetic release history."""
 
@@ -358,7 +408,7 @@ class BetaPlanTests(unittest.TestCase):
                            'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(summary),
                            'STUB_PREFIX': prefix, 'STUB_HEAD': head, 'STUB_EXISTING': existing,
                            'STUB_RELEASES': ' '.join(releases), 'STUB_TAGS': ' '.join(tags)}
-            result = subprocess.run(['bash', script.name], cwd=root, env=environment,
+            result = subprocess.run([bash(), script.name], cwd=root, env=environment,
                                     capture_output=True, text=True)
             values = dict(line.split('=', 1) for line in output.read_text(encoding='utf-8').splitlines())
             return result, values
@@ -417,6 +467,7 @@ class BetaPlanTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
 
 
+@requires_bash
 class PromotionReuseTests(unittest.TestCase):
     """Runs the actual suite choice for a promotion against a fake gh and a disposable merge."""
 
@@ -475,7 +526,7 @@ class PromotionReuseTests(unittest.TestCase):
             environment = {**self.ENV, 'EVENT_NAME': 'pull_request', 'BASE_REF': 'main', 'REPO': 'example/project',
                            'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(summary), 'CALLS': str(calls),
                            'STUB_RUN': run, 'STUB_JOB': job, 'STUB_PENDING': str(pending), 'STUB_FAIL': fail}
-            result = subprocess.run(['bash', str(script)], cwd=repo, env=environment, capture_output=True, text=True)
+            result = subprocess.run([bash(), str(script)], cwd=repo, env=environment, capture_output=True, text=True)
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             values = dict(line.split('=', 1) for line in output.read_text(encoding='utf-8').splitlines())
             return (values, summary.read_text(encoding='utf-8'), calls.read_text(encoding='utf-8'),
@@ -542,6 +593,7 @@ class PromotionReuseTests(unittest.TestCase):
         self.assertIn('"Validate beta / validate"', workflow)
 
 
+@requires_bash
 class ReleasePlanTests(unittest.TestCase):
     """Runs the actual release planning step against a fake gh with a synthetic release history."""
 
@@ -587,7 +639,7 @@ class ReleasePlanTests(unittest.TestCase):
                            'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(summary),
                            'STUB_PREFIX': prefix, 'STUB_PREVIOUS': previous or prefix, 'STUB_HEAD': head,
                            'STUB_EXISTING': existing, 'STUB_RELEASES': ' '.join(releases), 'STUB_TAGS': ' '.join(tags)}
-            result = subprocess.run(['bash', script.name], cwd=root, env=environment,
+            result = subprocess.run([bash(), script.name], cwd=root, env=environment,
                                     capture_output=True, text=True)
             values = dict(line.split('=', 1) for line in output.read_text(encoding='utf-8').splitlines())
             return result, values

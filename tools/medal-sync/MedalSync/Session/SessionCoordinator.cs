@@ -449,6 +449,9 @@ internal sealed class SessionCoordinator(
             if (shutdown?.SuppressUi == true) throw new UnsafeOperationException(ShutdownMessage);
             // A wait cancelled while storage was being prepared must not open Medal later.
             if (WaitCancelled()) throw new OperationCanceledException(WaitCancelledMessage);
+            // Inside the guard: a storage failure here gives the start back now, instead of leaving the drive mounted
+            // with nothing supervising it. If the write landed but its read-back failed, cleanup keeps the session here.
+            store.Update(r => Ownership.MarkActive(r, Me, session, clock.Now), options.LockTimeout);
         }
         catch (Exception ex)
         {
@@ -462,8 +465,9 @@ internal sealed class SessionCoordinator(
             if (!IsExpected(ex)) throw;
             return new LaunchOutcome(LaunchStatus.Blocked, ex.Message + cleanup);
         }
-        store.Update(r => Ownership.MarkActive(r, Me, session, clock.Now), options.LockTimeout);
-        store.RemoveRequest(Me);
+        // Housekeeping only: an unremoved request expires by itself and a later session removes it, so it never stops Medal.
+        try { store.RemoveRequest(Me); }
+        catch (Exception ex) when (IsExpected(ex)) { }
         // Both updates above can take a storage round trip, so a cancelled wait is checked again at the final decision.
         // Medal never ran: the normal finish releases the library, or keeps it here if storage is unavailable.
         bool cancelled = WaitCancelled();

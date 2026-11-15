@@ -97,6 +97,9 @@ internal sealed partial class CoordinationStore
         string marker = Path.Combine(root, "library.json");
         if (!File.Exists(marker))
         {
+            if (IsUnfinishedInit(root))
+                throw new UnsafeOperationException(
+                    $"'{root}' holds an unfinished library initialization and no library marker. Run 'medal-sync init --apply' again on the PC that started it to complete it; nothing was started.");
             throw new UnsafeOperationException(
                 $"No Medal library marker at '{root}'. The server share may be unreachable; nothing was started.");
         }
@@ -111,27 +114,120 @@ internal sealed partial class CoordinationStore
 
     /// <summary>
     /// Creates a new shared library from a reviewed snapshot as generation 0.
-    /// Refuses if anything already exists at <paramref name="root"/>.
+    /// Refuses if anything already exists at <paramref name="root"/>, except this device's own unfinished
+    /// initialization of the same reviewed snapshot, which it completes. A library marker is never replaced.
     /// </summary>
     public static CoordinationStore Create(string root, string libraryId, LibrarySnapshot initial, AssetManifest assets,
         DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now)
     {
         if (!IsValidId(libraryId)) throw new ArgumentException("A library ID is 32 lowercase hex characters.", nameof(libraryId));
-        if (Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any())
+        string marker = Path.Combine(root, "library.json");
+        bool resume = Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any();
+        if (resume && (File.Exists(marker) || !IsUnfinishedInit(root)))
         {
             throw new UnsafeOperationException($"'{root}' is not empty. An existing library is never reinitialized.");
         }
         Directory.CreateDirectory(root);
-        var identity = new LibraryIdentity(LibraryIdentity.CurrentFormat, libraryId, initial.AccountId, now, device);
-        var store = new CoordinationStore(root, identity);
-        using (store.AcquireWriterLock(TimeSpan.FromSeconds(5)))
+        var bootstrap = new CoordinationStore(root, new LibraryIdentity(LibraryIdentity.CurrentFormat, libraryId, initial.AccountId, now, device));
+        LibraryIdentity identity;
+        using (bootstrap.AcquireWriterLock(TimeSpan.FromSeconds(5)))
         {
-            store.Generations.Publish(0, null, session, device, initial, assets, medal, now);
-            AtomicFile.CreateNew(store.JournalPath, Json.Serialize(Ownership.Initial(libraryId, initial.AccountId, now)));
-            AtomicFile.CreateNew(Path.Combine(root, "library.json"), Json.Serialize(identity));
+            // Checked again under the lock: only this device's exact bootstrap of the same reviewed library is resumed.
+            DateTimeOffset createdAt = resume ? bootstrap.ResumableCreatedAt(initial, assets, device, now) : now;
+            if (!bootstrap.Generations.Exists(0)) bootstrap.Generations.Publish(0, null, session, device, initial, assets, medal, createdAt);
+            byte[] journal = Json.Serialize(Ownership.Initial(libraryId, initial.AccountId, createdAt));
+            // An earlier version wrote the journal in place, so an interruption can leave a truncated copy of these bytes.
+            if (!File.Exists(bootstrap.JournalPath)) CreateAtomically(bootstrap.JournalPath, journal);
+            else if (!File.ReadAllBytes(bootstrap.JournalPath).AsSpan().SequenceEqual(journal)) AtomicFile.Replace(bootstrap.JournalPath, journal);
+            identity = new LibraryIdentity(LibraryIdentity.CurrentFormat, libraryId, initial.AccountId, createdAt, device);
+            CreateAtomically(marker, Json.Serialize(identity));
         }
-        return store;
+        return new CoordinationStore(root, identity);
     }
+
+    /// <summary>
+    /// True when <paramref name="root"/> holds only what an interrupted <see cref="Create(string, string, LibrarySnapshot, AssetManifest, DeviceIdentity, string, MedalVersions, DateTimeOffset)"/>
+    /// can leave: the writer lock, generation 0 or its staging folders, the initial journal and temporary files, and no library marker.
+    /// </summary>
+    internal static bool IsUnfinishedInit(string root)
+    {
+        try
+        {
+            if (!Directory.Exists(root) || File.Exists(Path.Combine(root, "library.json"))) return false;
+            bool any = false;
+            foreach (string entry in Directory.EnumerateFileSystemEntries(root))
+            {
+                any = true;
+                string name = Path.GetFileName(entry);
+                bool known = name switch
+                {
+                    "writer.lock" or "journal.json" => File.Exists(entry),
+                    "generations" => Directory.Exists(entry) && Directory.EnumerateFileSystemEntries(entry)
+                        .All(g => Directory.Exists(g) && UnfinishedGenerationName().IsMatch(Path.GetFileName(g))),
+                    _ => File.Exists(entry) && TemporaryMarkerName().IsMatch(name),
+                };
+                if (!known) return false;
+            }
+            return any;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    /// <summary>
+    /// The creation time of this device's unfinished bootstrap of exactly <paramref name="initial"/> and <paramref name="assets"/>,
+    /// or <paramref name="now"/> when generation 0 was never published. Anything else refuses.
+    /// </summary>
+    private DateTimeOffset ResumableCreatedAt(LibrarySnapshot initial, AssetManifest assets, DeviceIdentity device, DateTimeOffset now)
+    {
+        const string differs = "The unfinished library initialization in '{0}' was not started by this PC from the same reviewed library. Preserve it and recover before retrying; it was not changed.";
+        if (!IsUnfinishedInit(Root)) throw new UnsafeOperationException($"'{Root}' is not empty. An existing library is never reinitialized.");
+        DateTimeOffset createdAt = now;
+        if (Generations.Exists(0))
+        {
+            GenerationContent original;
+            try { original = Generations.Read(0); }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException)
+            {
+                throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root) + " Generation 0 is incomplete or damaged: " + ex.Message);
+            }
+            if (original.Manifest.Device != device || original.Manifest.ParentGeneration is not null
+                || original.Snapshot.Digest() != initial.Digest()
+                || !Json.Serialize(original.Assets).AsSpan().SequenceEqual(Json.Serialize(assets)))
+                throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root));
+            createdAt = original.Manifest.CreatedAt;
+        }
+        else if (File.Exists(JournalPath))
+        {
+            throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root) + " It has a journal but no generation 0.");
+        }
+        if (File.Exists(JournalPath))
+        {
+            byte[] expected = Json.Serialize(Ownership.Initial(Identity.LibraryId, initial.AccountId, createdAt));
+            byte[] existing = File.ReadAllBytes(JournalPath);
+            if (existing.Length > expected.Length || !expected.AsSpan(0, existing.Length).SequenceEqual(existing))
+                throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root) + " Its journal is not the initial one.");
+        }
+        return createdAt;
+    }
+
+    /// <summary>Writes a complete file under a temporary name, then moves it into place without ever replacing one.</summary>
+    private static void CreateAtomically(string path, byte[] bytes)
+    {
+        string temp = Path.Combine(Path.GetDirectoryName(path)!, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        AtomicFile.CreateNew(temp, bytes);
+        try { File.Move(temp, path, overwrite: false); }
+        catch
+        {
+            try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            throw;
+        }
+    }
+
+    [GeneratedRegex(@"\A(?:0000000000|\.staging-0000000000-[0-9a-f]{32})\z")]
+    private static partial Regex UnfinishedGenerationName();
+
+    [GeneratedRegex(@"\A\.(?:journal|library)\.json\.[0-9a-f]{32}\.tmp\z")]
+    private static partial Regex TemporaryMarkerName();
 
     public OwnershipRecord ReadJournal()
     {

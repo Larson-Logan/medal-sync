@@ -1,7 +1,7 @@
 # Tests
 
 Run `pwsh -File scripts/validate.ps1` on Windows with the SDK pinned in
-global.json, PowerShell 7, Node 24 and Python 3.11+. To rerun one area, pass
+global.json, PowerShell 7, Git for Windows, Node 24 and Python 3.11+. To rerun one area, pass
 `-Part` with `Unit`, `Desktop`, `Scripts` or `Repository` (for example
 `-Part Unit, Desktop`); CI runs these as parallel jobs.
 
@@ -9,7 +9,11 @@ The Python tests also run on Linux and macOS with
 `python3 -m unittest discover -s tests -p 'test_*.py'`. The release and beta
 workflow step tests in `test_release_pipeline.py` run PowerShell, so they are
 skipped when `pwsh` is not installed. On GitHub Actions, or with
-`MEDAL_SYNC_REQUIRE_PWSH=1`, they fail instead of being skipped.
+`MEDAL_SYNC_REQUIRE_PWSH=1`, they fail instead of being skipped. The workflows'
+bash steps run under Git for Windows' `bash.exe`, found next to `git` on `PATH`,
+never the `System32` WSL launcher or the `WindowsApps` alias. Set
+`MEDAL_SYNC_BASH` to use another bash. Without a usable bash those tests are
+skipped locally; on GitHub Actions, or with `MEDAL_SYNC_REQUIRE_BASH=1`, they fail.
 
 - .NET tests use synthetic SQLite fixtures and cover ownership, restoration,
   upload verification, configuration, library review, shutdown and release checks.

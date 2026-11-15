@@ -131,6 +131,110 @@ public sealed class CoordinationTests : IDisposable
         Assert.Throws<IncompatibleLibraryException>(() => CoordinationStore.Open(store.Root, LibraryId, "999"));
     }
 
+    private static void CopyTree(string source, string target, Func<string, bool> include)
+    {
+        Directory.CreateDirectory(target);
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(source, file);
+            if (!include(relative.Replace('\\', '/'))) continue;
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(target, relative))!);
+            File.Copy(file, Path.Combine(target, relative));
+        }
+    }
+
+    private static string[] Listing(string root) =>
+        Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories)
+            .Select(p => Path.GetRelativePath(root, p) + ":" + (File.Exists(p) ? Convert.ToHexString(File.ReadAllBytes(p)) : "dir"))
+            .Order(StringComparer.Ordinal).ToArray();
+
+    /// <summary>An interrupted init after the lock, after generation 0 (with a staging leftover), after a partial and a whole journal.</summary>
+    [Theory]
+    [InlineData("lock")]
+    [InlineData("generation")]
+    [InlineData("partial-journal")]
+    [InlineData("journal")]
+    public void Store_RetriedInitCompletesThisDevicesUnfinishedBootstrap(string step)
+    {
+        var reference = NewStore("clip-a");
+        string root = _fixture.PathFor("interrupted-" + step, LibraryId);
+        CopyTree(reference.Root, root, path => path == "writer.lock"
+            || (step != "lock" && path.StartsWith("generations/0000000000/", StringComparison.Ordinal))
+            || (step == "journal" && path == "journal.json"));
+        if (step != "lock")
+        {
+            string staging = Path.Combine(root, "generations", ".staging-0000000000-" + new string('c', 32));
+            Directory.CreateDirectory(staging);
+            File.WriteAllText(Path.Combine(staging, "library.json"), "{");
+        }
+        byte[] journal = File.ReadAllBytes(Path.Combine(reference.Root, "journal.json"));
+        if (step == "partial-journal") File.WriteAllBytes(Path.Combine(root, "journal.json"), journal[..(journal.Length / 2)]);
+
+        var refusal = Assert.Throws<UnsafeOperationException>(() => CoordinationStore.Open(root, LibraryId, MedalFixture.AccountId));
+        Assert.Contains("unfinished library initialization", refusal.Message);
+
+        var store = CoordinationStore.Create(root, LibraryId, Snapshot("clip-a"), NoAssets, First, SessionB, Versions, Now.AddHours(1));
+        var opened = CoordinationStore.Open(root, LibraryId, MedalFixture.AccountId);
+        var record = opened.ReadJournal();
+        Assert.Equal(OwnershipState.Clean, record.State);
+        Assert.Equal(0, record.CommittedGeneration);
+        Assert.Equal(store.Identity, opened.Identity);
+        Assert.Equal(First, opened.Identity.CreatedBy);
+        if (step == "lock") Assert.Equal(Now.AddHours(1), opened.Identity.CreatedAt);
+        else
+        {
+            // Generation 0 is kept, never republished, and the journal and marker name its creation time.
+            Assert.Equal(journal, File.ReadAllBytes(Path.Combine(root, "journal.json")));
+            Assert.Equal(File.ReadAllBytes(Path.Combine(reference.Root, "library.json")), File.ReadAllBytes(Path.Combine(root, "library.json")));
+            Assert.Equal(SessionA, opened.Generations.ReadManifest(0).SessionId);
+        }
+        Assert.Throws<UnsafeOperationException>(() =>
+            CoordinationStore.Create(root, LibraryId, Snapshot("clip-a"), NoAssets, First, SessionB, Versions, Now));
+    }
+
+    [Theory]
+    [InlineData("other-device")]
+    [InlineData("other-snapshot")]
+    [InlineData("damaged-generation")]
+    [InlineData("later-generation")]
+    [InlineData("unknown-file")]
+    [InlineData("journal-without-generation")]
+    [InlineData("edited-journal")]
+    [InlineData("marker")]
+    public void Store_RetriedInitRefusesAForeignOrEditedFolderAndLeavesItUnchanged(string variant)
+    {
+        var reference = NewStore("clip-a");
+        string root = _fixture.PathFor("foreign-" + variant, LibraryId);
+        CopyTree(reference.Root, root, path => path == "writer.lock" || path.StartsWith("generations/0000000000/", StringComparison.Ordinal)
+            || variant is "journal-without-generation" or "edited-journal" && path == "journal.json"
+            || variant == "marker" && path == "library.json");
+        var device = variant == "other-device" ? Second : First;
+        var snapshot = variant == "other-snapshot" ? Snapshot("clip-b") : Snapshot("clip-a");
+        switch (variant)
+        {
+            case "damaged-generation":
+                File.AppendAllText(Path.Combine(root, "generations", "0000000000", "library.json"), " ");
+                break;
+            case "later-generation":
+                Directory.CreateDirectory(Path.Combine(root, "generations", "0000000001"));
+                break;
+            case "unknown-file":
+                File.WriteAllText(Path.Combine(root, "notes.txt"), "someone else's");
+                break;
+            case "journal-without-generation":
+                Directory.Delete(Path.Combine(root, "generations"), recursive: true);
+                break;
+            case "edited-journal":
+                File.WriteAllText(Path.Combine(root, "journal.json"), "{\"edited\":true}");
+                break;
+        }
+        var before = Listing(root);
+        Assert.Throws<UnsafeOperationException>(() =>
+            CoordinationStore.Create(root, LibraryId, snapshot, NoAssets, device, SessionB, Versions, Now.AddHours(1)));
+        Assert.Equal(before, Listing(root));
+        Assert.False(variant != "marker" && File.Exists(Path.Combine(root, "library.json")));
+    }
+
     [Fact]
     public void Store_UpdateAppliesTransitionsUnderTheLock()
     {

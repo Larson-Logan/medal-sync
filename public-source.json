@@ -127,6 +127,7 @@
     "tests/tools/medal-sync/GenerationHistoryTests.cs": ["unit"],
     "tests/tools/medal-sync/HandoffWaitTests.cs": ["unit"],
     "tests/tools/medal-sync/IncrementalVerificationTests.cs": ["unit"],
+    "tests/tools/medal-sync/LaunchCompletionTests.cs": ["unit"],
     "tests/tools/medal-sync/LauncherAndRelocationTests.cs": ["unit"],
     "tests/tools/medal-sync/LauncherSetupTests.cs": ["unit"],
     "tests/tools/medal-sync/LibraryChangeReviewTests.cs": ["unit"],

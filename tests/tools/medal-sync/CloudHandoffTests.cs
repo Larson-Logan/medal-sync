@@ -45,6 +45,8 @@ public sealed class CloudHandoffTests : IDisposable
         public CloudJournal? Value;
         public bool Offline, IgnoreConditions, ApplyThenDisconnect;
         public HttpStatusCode? Failure;
+        /// <summary>When it returns true, a journal write is lost before it applies, as a dropped connection would.</summary>
+        public Func<bool>? DropWrite;
         public int Revision = 1, Writes, Reads;
         public readonly List<HttpMethod> Methods = [];
         private readonly object gate = new();
@@ -83,6 +85,7 @@ public sealed class CloudHandoffTests : IDisposable
                 using var patch = JsonDocument.Parse(body);
                 if (patch.RootElement.TryGetProperty("description", out var description))
                 {
+                    if (DropWrite?.Invoke() == true) throw new HttpRequestException("Synthetic dropped write");
                     Value = Json.Deserialize<CloudJournal>(Encoding.UTF8.GetBytes(description.GetString()!), "synthetic");
                     Writes++;
                 }
@@ -615,5 +618,107 @@ public sealed class CloudHandoffTests : IDisposable
         using (var connection = MedalFixture.Open(secondDb)) MedalFixture.SetSetting(connection, "ClipFolder", JsonSerializer.Serialize(@"C:\OriginalClips"));
         Assert.Equal(settingsBefore, MedalFixture.Settings(secondDb)); // All other device settings survived the restore.
         Assert.NotEmpty(DatabaseBackup.List(fixture.PathFor("second", "backups"), MedalFixture.AccountId));
+    }
+
+    private sealed class LaunchMount : IClipMount
+    {
+        public bool IsRunning { get; private set; }
+        public List<string> Starts { get; } = [];
+        public List<string> Retained { get; } = [];
+        public List<string> Forgotten { get; } = [];
+        public void Start(string session, bool forRecording) { Starts.Add(session); IsRunning = true; }
+        public MountHealth Health() => new(true, "synthetic");
+        public DrainVerdict Drain() => new(DrainState.Drained, [], 0, 0);
+        public bool Stop() { IsRunning = false; return true; }
+        public void Forget(string session, long generation) => Forgotten.Add(session);
+        public void RetainAbortedStart(string session) => Retained.Add(session);
+    }
+
+    private sealed class LaunchMedal : IMedalProcess
+    {
+        public int Launches { get; private set; }
+        public bool IsRunning() => false;
+        public void Launch() => Launches++;
+    }
+
+    private sealed class NoAssets : IAssetChecker
+    {
+        private static AssetReport Report(LibrarySnapshot snapshot) => new(AssetInventory.Collect(snapshot)
+            .Select(r => new AssetStatus(r, AssetProblem.None, 1, DateTime.UnixEpoch, null)).ToArray());
+        public AssetReport ThroughMount(LibrarySnapshot snapshot) => Report(snapshot);
+        public AssetReport OnServer(LibrarySnapshot snapshot) => Report(snapshot);
+        public bool ExistsOnServer(string capturePath) => true;
+        public void RequireServer() { }
+    }
+
+    /// <summary>A cloud launch on the first PC; <paramref name="beforeActive"/> runs after storage is prepared, just before the session is marked Active.</summary>
+    private (CoordinationStore Store, LaunchMount Mount, LaunchMedal Medal, LaunchOutcome Outcome) CloudLaunch(Drive drive, Action<CoordinationStore> beforeActive)
+    {
+        var store = Seed(drive, Config("first"), Snapshot("seed"));
+        var mount = new LaunchMount();
+        var medal = new LaunchMedal();
+        var clock = new SystemClock();
+        var coordinator = new SessionCoordinator(store,
+            new SqliteLocalLibrary(fixture.CreateLibrary("launching"), MedalFixture.AccountId, fixture.PathFor("first", "backups"), clock),
+            mount, medal, new NoAssets(), clock,
+            new SessionOptions(First, WindowsPath.Parse(@"M:\Clips"), Versions, TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(1), TimeSpan.FromMilliseconds(1)),
+            prepareNativeBackup: () => beforeActive(store));
+        return (store, mount, medal, coordinator.Launch());
+    }
+
+    [Fact]
+    public void LaunchGivesTheStartBackWhenTheActiveWriteIsLost()
+    {
+        using var drive = new Drive();
+        bool dropped = false;
+        var (_, mount, medal, outcome) = CloudLaunch(drive, _ => drive.DropWrite = () => !dropped && (dropped = true));
+
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.True(outcome.StorageOffline);
+        Assert.DoesNotContain("stay on this PC", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal(0, medal.Launches);
+        Assert.False(mount.IsRunning);
+        Assert.Equal(mount.Starts, mount.Retained);
+        Assert.Equal(OwnershipState.Clean, drive.Value!.Journal.State);
+        Assert.Null(drive.Value.Journal.Owner);
+    }
+
+    [Fact]
+    public void LaunchKeepsOwnershipAndCacheWhenTheDriveStaysUnreachableAfterTheActiveWriteFails()
+    {
+        using var drive = new Drive();
+        var (_, mount, medal, outcome) = CloudLaunch(drive, _ => drive.Offline = true);
+        drive.Offline = false;
+
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.True(outcome.StorageOffline);
+        Assert.Contains("stay on this PC", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal(0, medal.Launches);
+        Assert.False(mount.IsRunning);
+        Assert.Empty(mount.Retained);
+        Assert.Empty(mount.Forgotten);
+        Assert.Equal(OwnershipState.Starting, drive.Value!.Journal.State);
+        Assert.Equal(First, drive.Value.Journal.Owner);
+    }
+
+    [Fact]
+    public void LaunchStartsMedalWhenItsOwnSwitchRequestCannotBeRemoved()
+    {
+        using var drive = new Drive();
+        // Every write after the Active one, which is this PC's own request removal, is lost.
+        int writesBefore = 0;
+        var (store, mount, medal, outcome) = CloudLaunch(drive, s =>
+        {
+            s.WriteRequest(new HandoffRequest(1, First, new string('9', 32), DateTimeOffset.UtcNow));
+            writesBefore = drive.Writes;
+            drive.DropWrite = () => drive.Writes > writesBefore;
+        });
+
+        Assert.True(outcome.Status == LaunchStatus.Started, $"{outcome.Status}: {outcome.Message}");
+        Assert.Equal(1, medal.Launches);
+        Assert.True(mount.IsRunning);
+        drive.DropWrite = null;
+        Assert.Equal(OwnershipState.Active, drive.Value!.Journal.State);
+        Assert.Single(drive.Value.Requests);
     }
 }
