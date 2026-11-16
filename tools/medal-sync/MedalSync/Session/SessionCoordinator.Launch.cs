@@ -60,6 +60,7 @@ internal sealed partial class SessionCoordinator
         DeviceIdentity? owner = null;
         OwnershipState? state = null;
         DateTimeOffset? seenAt = null;
+        DateTimeOffset? quietSince = null;
         HandoffWaitUpdate? last = null;
         _waitDeadline = deadline;
         while (!WaitStopped())
@@ -74,14 +75,14 @@ internal sealed partial class SessionCoordinator
             {
                 // A change such as in use to uploading usually comes shortly before release, so look again soon.
                 if (seenAt is not null && (journal.State != state || journal.Owner?.DeviceId != owner?.DeviceId)) interval = wait.FirstPoll;
-                (owner, state, seenAt) = (journal.Owner, journal.State, clock.Now);
+                (owner, state, seenAt, quietSince) = (journal.Owner, journal.State, clock.Now, Ownership.QuietSince(journal, clock.Now));
             }
             else if (fresh)
             {
                 // Another waiting PC acquired first; the next check reads who owns it now.
-                (owner, state, seenAt, interval) = (null, null, clock.Now, wait.FirstPoll);
+                (owner, state, seenAt, quietSince, interval) = (null, null, clock.Now, null, wait.FirstPoll);
             }
-            var update = new HandoffWaitUpdate(owner, state, seenAt, fresh, deadline - clock.Now);
+            var update = new HandoffWaitUpdate(owner, state, seenAt, fresh, deadline - clock.Now, quietSince);
             last = update;
             if (clock.Now >= deadline) return WaitTimedOut(wait, update);
             Report(fresh ? SessionPhase.Waiting : SessionPhase.WaitingForStorage, update.Describe());
@@ -207,7 +208,7 @@ internal sealed partial class SessionCoordinator
             }
             bool asked = _waitRequest is not null || options.AskOwnerToSwitch;
             if (asked && !SendRequest()) return StorageOfflineLaunch();
-            return new LaunchOutcome(LaunchStatus.Waiting, OwnedElsewhereMessage(journal.State, where, asked),
+            return new LaunchOutcome(LaunchStatus.Waiting, OwnedElsewhereMessage(journal.State, where, asked, Ownership.QuietSince(journal, clock.Now)),
                 Wait: LaunchWait.OwnedElsewhere, Journal: journal);
         }
         return StartSession();
@@ -217,8 +218,9 @@ internal sealed partial class SessionCoordinator
     /// Why Medal did not start here, matched to what the owner is doing: a PC that is only uploading hands off by
     /// itself, so nobody needs to quit Medal there, and a launch that sent no request must not claim it did.
     /// </summary>
-    internal static string OwnedElsewhereMessage(OwnershipState state, string where, bool asked)
+    internal static string OwnedElsewhereMessage(OwnershipState state, string where, bool asked, DateTimeOffset? quietSince = null)
     {
+        if (quietSince is { } since) return Ownership.QuietFinishMessage(where, since);
         if (Ownership.IsFinishing(state))
         {
             return $"{where} is finishing its last session ({Ownership.Describe(state)}). It hands off the library by itself, "

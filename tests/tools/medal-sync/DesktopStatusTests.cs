@@ -162,6 +162,29 @@ public sealed class DesktopStatusTests
     }
 
     [Fact]
+    public void AnotherPcFinishingQuietlyForLongIsDescribedAsPossiblyOff()
+    {
+        var other = new DeviceIdentity(new string('d', 32), "Other PC");
+        foreach (var state in new[] { OwnershipState.Draining, OwnershipState.Publishing })
+        {
+            var finishing = Journal with { State = state };
+            Assert.StartsWith("Synthetic PC is finishing its uploads",
+                DesktopStatus.Resolve(finishing, other, null, false, Now + Ownership.QuietFinish - TimeSpan.FromSeconds(1)).NextAction,
+                StringComparison.Ordinal);
+            var quiet = DesktopStatus.Resolve(finishing, other, null, false, Now + Ownership.QuietFinish);
+            Assert.Equal(SessionPhase.Waiting, quiet.Phase);
+            Assert.False(quiet.CanRetry);
+            Assert.Equal(Ownership.QuietFinishMessage("Synthetic PC", Now), quiet.NextAction);
+        }
+        // An owner with Medal open, or a clock running ahead on the owner, is never described as possibly off.
+        Assert.StartsWith("Quit Medal and finish the handoff on Synthetic PC.",
+            DesktopStatus.Resolve(Journal, other, null, false, Now + TimeSpan.FromDays(1)).NextAction, StringComparison.Ordinal);
+        Assert.StartsWith("Synthetic PC is finishing its uploads",
+            DesktopStatus.Resolve(Journal with { State = OwnershipState.Draining, UpdatedAt = Now + TimeSpan.FromHours(2) }, other, null, false, Now).NextAction,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StartupDoesNotFlashReadyBeforeAcquiringOwnership()
     {
         var clean = Ownership.Initial(Journal.LibraryId, Journal.AccountId, Now);

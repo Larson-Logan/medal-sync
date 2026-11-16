@@ -183,6 +183,22 @@ internal static class Ownership
     /// <summary>Medal was quit on the owning PC and it is uploading: it releases the library by itself, with nobody needing to quit Medal there.</summary>
     public static bool IsFinishing(OwnershipState state) => state is OwnershipState.Draining or OwnershipState.Publishing;
 
+    /// <summary>
+    /// A finishing owner normally hands off within minutes. A journal unchanged for this long suggests it was switched off,
+    /// slept or signed out before finishing; it finishes at its next sign-in. Only wording changes: nothing is handed over.
+    /// </summary>
+    public static readonly TimeSpan QuietFinish = TimeSpan.FromMinutes(30);
+
+    /// <summary>The journal's last change when another PC's finishing session has been quiet for <see cref="QuietFinish"/>.</summary>
+    public static DateTimeOffset? QuietSince(OwnershipRecord journal, DateTimeOffset now) =>
+        IsFinishing(journal.State) && journal.Owner is not null && now - journal.UpdatedAt >= QuietFinish ? journal.UpdatedAt : null;
+
+    /// <summary>What a waiting PC says about a quiet finishing owner: where the unuploaded clips are and how the handoff resumes.</summary>
+    public static string QuietFinishMessage(string where, DateTimeOffset since) =>
+        $"{where} has not handed off the library since {since.UtcDateTime:yyyy-MM-dd HH:mm} UTC. If it is off, asleep or signed out, "
+        + "turn it on and sign in: it finishes its uploads and hands off by itself. Clips it has not uploaded yet are only on that PC, "
+        + "so this PC keeps waiting. Only if that PC is lost for good, see 'medal-sync abandon'.";
+
     public static string Describe(OwnershipState state) => state switch
     {
         OwnershipState.Clean => "ready",

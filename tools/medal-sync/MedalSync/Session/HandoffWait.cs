@@ -60,7 +60,8 @@ internal sealed record HandoffWait(TimeSpan Timeout, Func<bool>? Cancelled = nul
 /// What the waiting PC last saw. <paramref name="Fresh"/> is false when the latest check could not reach the journal,
 /// so <paramref name="Owner"/> and <paramref name="State"/> are only what was seen at <paramref name="SeenAt"/>.
 /// </summary>
-internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? State, DateTimeOffset? SeenAt, bool Fresh, TimeSpan Remaining)
+internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? State, DateTimeOffset? SeenAt, bool Fresh, TimeSpan Remaining,
+    DateTimeOffset? QuietSince = null)
 {
     public string Describe()
     {
@@ -70,6 +71,7 @@ internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? 
         if (Fresh)
         {
             if (seen is null) return "Another PC took the library first. Still waiting for it to hand off.";
+            if (QuietSince is { } since) return $"{seen}. {Ownership.QuietFinishMessage(Owner!.DisplayName, since)}";
             return State is { } current && Ownership.IsFinishing(current)
                 ? $"{seen}. It hands off by itself once its uploads finish; this PC then opens Medal."
                 : $"{seen}. Quit Medal there; this PC opens Medal once the handoff is complete.";
@@ -86,6 +88,8 @@ internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? 
         string title = $"Waiting for {who} to hand off the library";
         string detail = (Fresh, State, SeenAt) switch
         {
+            (true, { } state, _) when Ownership.IsFinishing(state) && QuietSince is { } since =>
+                $"{who}: no change since {since.UtcDateTime:yyyy-MM-dd HH:mm} UTC. It may be off; turn it on to hand off.",
             (true, { } state, { } at) when Ownership.IsFinishing(state) => $"{who}: {Ownership.Describe(state)}, hands off by itself. Checked at {Clock(at)}.",
             (true, { } state, { } at) => $"{who}: {Ownership.Describe(state)}, checked at {Clock(at)}.",
             (true, _, _) => "Another PC took the library first; still waiting.",

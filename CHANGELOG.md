@@ -6,6 +6,10 @@
   holds the library. Setup changes only this PC's programs, so it now refuses
   only an active process, a retained session login or a session this PC holds,
   and still refuses when the journal cannot be read (#211).
+- When another PC's upload has not changed for 30 minutes, the status, launch
+  message and handoff wait window say that PC may be off, asleep or signed out,
+  and to turn it on and sign in so it finishes, instead of saying it is still
+  uploading. It keeps the library either way (#211).
 - Refuse out-of-date switch requests and generation retention records from
   server storage. A stale request warns without interrupting recording;
   history, numbering and retention wait for a fresh record (#194).

@@ -358,7 +358,12 @@ supervisor refusal stays available when reopening status for that same session.
 When you open Medal while another PC owns the library, Medal Sync sends a switch
 request and asks whether to **wait and open Medal when ready**. No is the
 default. If that PC has already quit Medal and is only uploading, the message
-says it hands off by itself; nobody needs to go to it. Yes shows a waiting window that names the PC that has the library,
+says it hands off by itself; nobody needs to go to it. If its upload has not
+changed for 30 minutes, the status, the message and the waiting window say it
+may be off, asleep or signed out instead. A PC switched off before it finished
+keeps the library: its clips that are not uploaded yet exist only there. Turn
+it on and sign in, and it finishes and hands off by itself. Use `abandon` only
+for a PC that is lost for good. Yes shows a waiting window that names the PC that has the library,
 when it was last checked and whether the server can be reached. Medal opens by
 itself once that PC finishes its handoff, after the usual startup checks. Cancel,
 Windows shutdown or 15 minutes without a handoff stop the wait and withdraw the

@@ -480,6 +480,38 @@ public sealed partial class SessionTests
     }
 
     [Fact]
+    public void AQuietUploadingOwnerIsDescribedAsPossiblyOffButKeepsTheLibrary()
+    {
+        var (first, session) = FirstPcHoldsTheLibrary();
+        first.Medal.Running = false;
+        _store.Update(r => Ownership.BeginDrain(r, FirstPc, session, _clock.Now), TimeSpan.FromSeconds(1));
+        var drainedAt = _store.ReadJournal().UpdatedAt;
+        var second = Computer(SecondPc, "second");
+
+        _clock.Sleep(Ownership.QuietFinish - TimeSpan.FromMinutes(1));
+        Assert.StartsWith("First PC is finishing its last session (uploading).", second.Coordinator.Launch().Message, StringComparison.Ordinal);
+
+        _clock.Sleep(TimeSpan.FromMinutes(1));
+        var outcome = second.Coordinator.Launch();
+        Assert.Equal(LaunchWait.OwnedElsewhere, outcome.Wait);
+        Assert.Equal(Ownership.QuietFinishMessage("First PC", drainedAt), outcome.Message);
+        Assert.StartsWith($"First PC has not handed off the library since {drainedAt.UtcDateTime:yyyy-MM-dd HH:mm} UTC.", outcome.Message, StringComparison.Ordinal);
+
+        var updates = new List<HandoffWaitUpdate>();
+        second.Coordinator.LaunchWhenReleased(WaitFor(TimeSpan.FromMinutes(5), updates, () => updates.Count >= 1));
+        var update = Assert.Single(updates);
+        Assert.Equal(drainedAt, update.QuietSince);
+        Assert.Contains("If it is off, asleep or signed out, turn it on and sign in", update.Describe(), StringComparison.Ordinal);
+        Assert.Contains("It may be off; turn it on to hand off.", update.Lines().Detail, StringComparison.Ordinal);
+
+        // Only wording changed: the quiet owner keeps its session and nothing started here.
+        var journal = _store.ReadJournal();
+        Assert.Equal((OwnershipState.Draining, FirstPc.DeviceId, session), (journal.State, journal.Owner!.DeviceId, journal.SessionId!));
+        Assert.Equal(0, second.Medal.Launches);
+        Assert.Empty(second.Mount.Starts);
+    }
+
+    [Fact]
     public void AnOwnerThatIsOnlyUploadingIsNotDescribedAsNeedingMedalQuit()
     {
         var (first, session) = FirstPcHoldsTheLibrary();
