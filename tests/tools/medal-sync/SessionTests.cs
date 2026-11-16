@@ -256,7 +256,10 @@ public sealed partial class SessionTests : IDisposable
             new(5, 20, 20, 300, 30, 1000, 2, 53682), 4, []) { StorageMode = StorageMode.Local };
         Directory.CreateDirectory(state.Root);
         File.WriteAllBytes(state.ConfigPath, Json.Serialize(config));
-        _ = state.Device();
+        // This state is FirstPc's, so setup readiness recognizes the sessions the tests start as this PC's own.
+        File.WriteAllBytes(Path.Combine(state.Root, "device.json"),
+            Json.Serialize(new DeviceFile(1, FirstPc.DeviceId, $"{Environment.MachineName} ({Environment.UserName})")));
+        Assert.Equal(FirstPc.DeviceId, state.Device().DeviceId);
         return (state, config);
     }
 

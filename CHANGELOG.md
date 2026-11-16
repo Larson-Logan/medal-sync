@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Setup, uninstall and Check for updates no longer refuse because another PC
+  holds the library. Setup changes only this PC's programs, so it now refuses
+  only an active process, a retained session login or a session this PC holds,
+  and still refuses when the journal cannot be read.
 - Refuse out-of-date switch requests and generation retention records from
   server storage. A stale request warns without interrupting recording;
   history, numbering and retention wait for a fresh record (#194).

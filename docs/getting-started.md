@@ -461,7 +461,8 @@ After a stopped aborted start, its control login and recovery receipt are
 retained under `aborted-starts/SESSION/` in this PC's resolved state folder.
 The session's cache stays at its original location, even when upload state is
 unknown; retained evidence is not a successful-upload receipt. Setup checks
-still refuse an active process, unfinished login or non-Ready journal. Run
+still refuse an active process, an unfinished login, or a session this PC
+holds; another PC's session does not stop setup on this PC. Run
 `finish` on the owning PC to recover an interrupted STARTING session without
 launching Medal; a failed stop or evidence write keeps ownership for retry.
 

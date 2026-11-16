@@ -12,6 +12,46 @@ namespace MedalSync.Tests;
 /// <summary>Finish: drain, review, verification, publication and release.</summary>
 public sealed partial class SessionTests
 {
+    [Theory]
+    [InlineData("Starting")]
+    [InlineData("Active")]
+    [InlineData("Draining")]
+    [InlineData("RecoveryRequired")]
+    public void SetupProceedsWhileAnotherPcHoldsTheLibrary(string state)
+    {
+        var (local, _) = RecoverySetup();
+        var journal = _store.ReadJournal() with { State = Enum.Parse<OwnershipState>(state), Owner = SecondPc, SessionId = SessionCoordinator.NewId() };
+        SetupMaintenance.RequireReady(local.Root, false, false, _ => journal);
+    }
+
+    [Fact]
+    public void SetupRefusesWhileThisPcHoldsTheLibraryEvenWithoutALocalLogin()
+    {
+        var (local, _) = RecoverySetup();
+        var journal = _store.ReadJournal() with
+        {
+            State = OwnershipState.Draining, Owner = local.ExistingDevice(), SessionId = SessionCoordinator.NewId(),
+        };
+        Assert.False(Directory.Exists(Path.Combine(local.Root, "sessions")));
+        var refusal = Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(local.Root, false, false, _ => journal));
+        Assert.Equal(SetupMaintenance.HeldByThisPcMessage, refusal.Message);
+    }
+
+    [Theory]
+    [InlineData("Clean", true, true)]     // A Ready journal never names an owner.
+    [InlineData("Draining", true, false)] // A session without its ID cannot be told apart.
+    [InlineData("Draining", false, true)] // An unowned session.
+    public void SetupRefusesAMalformedJournalEvenWhenAnotherPcIsNamed(string state, bool owner, bool session)
+    {
+        var (local, _) = RecoverySetup();
+        var journal = _store.ReadJournal() with
+        {
+            State = Enum.Parse<OwnershipState>(state), Owner = owner ? SecondPc : null, SessionId = session ? SessionCoordinator.NewId() : null,
+        };
+        var refusal = Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(local.Root, false, false, _ => journal));
+        Assert.Equal(SetupMaintenance.NotReadyMessage, refusal.Message);
+    }
+
     [Fact]
     public void IncompatibleUpdateStillDrainsButRetainsOwnershipAndCacheUntilRetry()
     {

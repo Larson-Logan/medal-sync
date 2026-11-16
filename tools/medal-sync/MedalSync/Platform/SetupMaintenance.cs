@@ -56,12 +56,20 @@ internal static class SetupMaintenance
         }
         var state = new LocalState(root);
         var settings = MedalSyncConfig.Load(state.ConfigPath);
-        _ = state.ExistingDevice(); // Strictly read-only, including a concurrent missing-file race.
+        var thisPc = state.ExistingDevice(); // Strictly read-only, including a concurrent missing-file race.
         var journal = readJournal is not null ? readJournal(settings)
             : CoordinationStore.Open(settings).ReadJournal();
-        if (journal.State != OwnershipState.Clean || journal.Owner is not null || journal.SessionId is not null)
-            throw new UnsafeOperationException("The shared library is not Ready. Cancel setup, finish its session and wait for Ready, then run setup again.");
+        if (journal.State == OwnershipState.Clean && journal.Owner is null && journal.SessionId is null) return;
+        // Setup changes only this PC's programs, never the journal, cache or library, so another PC's session
+        // cannot be harmed by it. This PC's own retained login was refused above; its ownership is refused here.
+        if (journal.State != OwnershipState.Clean && journal.SessionId is not null
+            && journal.Owner is { } owner && owner.DeviceId != thisPc.DeviceId) return;
+        throw new UnsafeOperationException(journal.Owner?.DeviceId == thisPc.DeviceId ? HeldByThisPcMessage : NotReadyMessage);
     }
+
+    internal const string HeldByThisPcMessage = "This PC holds the shared library, so it is not Ready. Cancel setup, finish this PC's session and wait for Ready, then run setup again.";
+
+    internal const string NotReadyMessage = "The shared library is not Ready. Cancel setup, finish its session and wait for Ready, then run setup again.";
 
     internal const string IdentityWithoutConfigurationMessage = "This PC has a Medal Sync device identity (device.json) but no configuration (config.json). Recover that installation before continuing.";
 

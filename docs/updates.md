@@ -159,9 +159,10 @@ update now:
 4. When setup ends, it reopens the Medal Sync status panel, including after a
    refused or failed installation. Open Medal again when you are ready.
 
-If the library still is not Ready after Medal and supervision stop, for example
-because a session needs recovery or another PC owns the library, the update
-stops with that guidance and opens the saved installer folder. Fix it, then
+If this PC still holds the library after Medal and supervision stop, for
+example because its session needs recovery, the update stops with that
+guidance and opens the saved installer folder. A session held by another PC
+does not stop the update: setup changes only this PC's programs. Fix it, then
 choose **Check for updates** again. A program folder that is not a standard
 installation location opens the normal setup wizard instead of installing
 unattended. Download folders holding only setups for the installed version or
