@@ -218,7 +218,7 @@ internal sealed partial class SessionCoordinator
         // Folders above the committed generation are either this session's own
         // publish from before a crash (reused) or left by an abandoned session
         // (skipped: never committed, never read).
-        var later = store.Generations.Numbered().Where(g => g > committed).ToList();
+        var later = store.Generations.Numbered().Where(g => g > committed).OrderDescending().ToList();
         var manifest = AssetManifest.From(onServer);
         long generation = later.FirstOrDefault(g => IsThisAttempt(g, committed, session, digest, versions, manifest), -1L);
         if (generation < 0)
@@ -234,10 +234,13 @@ internal sealed partial class SessionCoordinator
     {
         try
         {
+            // Most Active checkpoints are superseded. Reject their small manifests before reading library payloads,
+            // and try the newest first so an idle-complete shutdown does not load an entire session's checkpoints.
+            var manifest = store.Generations.ReadManifest(generation);
+            if (manifest.SessionId != session || manifest.ParentGeneration != parent || manifest.SnapshotDigest != digest || manifest.Medal != versions)
+                return false;
             var content = store.Generations.Read(generation);
-            var manifest = content.Manifest;
-            return manifest.SessionId == session && manifest.ParentGeneration == parent && manifest.SnapshotDigest == digest && manifest.Medal == versions
-                && Json.Serialize(content.Assets).AsSpan().SequenceEqual(Json.Serialize(assets));
+            return Json.Serialize(content.Assets).AsSpan().SequenceEqual(Json.Serialize(assets));
         }
         catch (InvalidDataException)
         {
