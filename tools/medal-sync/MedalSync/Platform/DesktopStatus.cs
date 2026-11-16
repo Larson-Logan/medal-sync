@@ -49,10 +49,11 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
 {
     /// <summary>Replaces the phase's own title when the phase alone would mislead, as before this PC is set up.</summary>
     public string? Heading { get; init; }
+    public bool ClipsSynced { get; init; }
 
     public string Title => Heading ?? Phase switch
     {
-        SessionPhase.Active => Recording ? "Recording" : "Medal open",
+        SessionPhase.Active => Recording ? "Recording" : ClipsSynced ? "All clips uploaded" : "Medal open",
         SessionPhase.Waiting => "Waiting for another PC",
         SessionPhase.RecoveryNeeded => "Recovery needed",
         SessionPhase.Unknown => "Unknown / unreachable",
@@ -158,7 +159,8 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         if (progress is null || report is null || progress.SessionId != journal.SessionId) return Unknown(report?.ConfirmedAt);
         if (!Enum.IsDefined(progress.Phase) || progress.Phase is SessionPhase.Ready or SessionPhase.Waiting) return Unknown(report.ConfirmedAt);
         return new(progress.Phase, progress.NextAction, report.ConfirmedAt, progress.QueuedFiles, progress.QueuedBytes, progress.Replica,
-            Recording: progress.Phase == SessionPhase.Active && progress.Recording);
+            Recording: progress.Phase == SessionPhase.Active && progress.Recording)
+        { ClipsSynced = progress.Phase == SessionPhase.Active && !progress.Recording && progress.ClipsSynced };
     }
 }
 

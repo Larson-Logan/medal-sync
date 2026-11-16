@@ -24,7 +24,7 @@ internal sealed record MountConfig(
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? SpaceWarningGiB { get; init; }
 
-    /// <summary>Optional upload limit, in MiB/s, for the clip drive while Medal runs. Null is unlimited.</summary>
+    /// <summary>Upload limit, in MiB/s, for the clip drive while Medal runs. When absent, 2 MiB/s.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? BandwidthLimitMiB { get; init; }
 
@@ -33,7 +33,7 @@ internal sealed record MountConfig(
     public int? FinishBandwidthLimitMiB { get; init; }
 
     /// <summary>The configured upload limit while recording, or while finishing uploads.</summary>
-    public int? UploadLimitMiB(bool recording) => recording ? BandwidthLimitMiB : FinishBandwidthLimitMiB;
+    public int? UploadLimitMiB(bool recording) => recording ? BandwidthLimitMiB ?? 2 : FinishBandwidthLimitMiB;
 }
 
 /// <summary>A Syncthing folder that overlaps the clip destination and must ignore it.</summary>
@@ -208,7 +208,7 @@ internal sealed record MedalSyncConfig(
         if (Mount?.SpaceWarningGiB is { } warning && (warning <= Mount.MinFreeGiB || warning > 1_000_000))
             problems.Add("mount.spaceWarningGiB must be more than mount.minFreeGiB and at most 1000000");
         if (Mount?.BandwidthLimitMiB is < MountPlan.MinimumBandwidthMiB or > MountPlan.MaximumBandwidthMiB)
-            problems.Add("mount.bandwidthLimitMiB must be 1 to 10000, or null for unlimited");
+            problems.Add("mount.bandwidthLimitMiB must be 1 to 10000, or null for the 2 MiB/s default");
         if (Mount?.FinishBandwidthLimitMiB is < MountPlan.MinimumBandwidthMiB or > MountPlan.MaximumBandwidthMiB)
             problems.Add("mount.finishBandwidthLimitMiB must be 1 to 10000, or null for unlimited");
         if (SyncExclusions is null) problems.Add("syncExclusions must be an array");

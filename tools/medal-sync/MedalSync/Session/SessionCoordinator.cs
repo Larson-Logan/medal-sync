@@ -82,7 +82,10 @@ internal sealed partial class SessionCoordinator(
     ISessionCompatibility? compatibility = null,
     Action<SessionProgress>? progress = null,
     SpacePressureMonitor? space = null,
-    Func<LaunchPreflight>? preflight = null)
+    Func<LaunchPreflight>? preflight = null,
+    Func<bool>? isIdle = null,
+    Func<LibrarySnapshot, Action, bool>? idleSync = null,
+    Func<Action, IAssetChecker>? idleAssets = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
     private const string ActiveMessage = "Medal is open. Quit Medal normally from its tray icon when you want to switch PCs.";
@@ -107,7 +110,7 @@ internal sealed partial class SessionCoordinator(
     private static bool IsExpected(Exception ex) =>
         ex is MedalSyncException or IOException or InvalidDataException or UnauthorizedAccessException or DbException;
 
-    /// <summary>Whether Medal is recording a game. Only changes the status shown, so a failed check means "open".</summary>
+    /// <summary>Recording for the advisory status; idle sync separately refuses a failed activity check.</summary>
     private bool IsRecording()
     {
         try { return medal.IsRecording(); }
@@ -115,10 +118,10 @@ internal sealed partial class SessionCoordinator(
     }
 
     private void Report(SessionPhase phase, string action, string? session = null, int? files = null, long? bytes = null, string? replica = null,
-        bool isOutcome = false, bool recording = false)
+        bool isOutcome = false, bool recording = false, bool clipsSynced = false)
     {
         // A disconnected or failed view must never change ownership, uploads or recovery.
-        try { progress?.Invoke(new(phase, action, session, files, bytes, replica, isOutcome, recording)); }
+        try { progress?.Invoke(new(phase, action, session, files, bytes, replica, isOutcome, recording, clipsSynced)); }
         catch (Exception) { /* Telemetry is advisory. */ }
     }
 

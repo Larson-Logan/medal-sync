@@ -100,7 +100,10 @@ internal sealed partial class SessionCoordinator
                     // Also restores the recording limit if Medal reopened while uploads were finishing.
                     if (mount.UseUploadLimit(recording: true) is { } limitProblem) Once(limitProblem);
                     bool recording = IsRecording();
-                    Report(SessionPhase.Active, ActiveStatus(recording, waiting), session, recording: recording);
+                    SyncWhileIdle(session, recording, cancellation);
+                    if (shutdown?.Ending == true || !medal.IsRunning()) continue;
+                    Report(SessionPhase.Active, ActiveStatus(recording, waiting) + (idleSync is null ? "" : " " + _idleStatus), session,
+                        recording: recording, clipsSynced: _idleSynced);
                 }
                 else
                 {

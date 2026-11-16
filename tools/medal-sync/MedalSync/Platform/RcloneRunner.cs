@@ -7,7 +7,7 @@ namespace MedalSync.Platform;
 internal sealed class RcloneRunner(string rclonePath)
 {
     /// <summary>Returns standard output when <paramref name="captureOutput"/> is set; throws <see cref="RcloneFailedException"/> otherwise.</summary>
-    public string Run(IReadOnlyList<string> arguments, TimeSpan timeout, Action? requireIdle = null, bool captureOutput = false)
+    public string Run(IReadOnlyList<string> arguments, TimeSpan timeout, Action? requireIdle = null, bool captureOutput = false, bool lowPriority = false)
     {
         var start = new ProcessStartInfo(rclonePath) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
@@ -24,6 +24,11 @@ internal sealed class RcloneRunner(string rclonePath)
         try { child = Process.Start(start); }
         catch (System.ComponentModel.Win32Exception ex) { throw new RcloneFailedException("Cannot start rclone. Check rclonePath and retry.", inner: ex); }
         using var process = child ?? throw new RcloneFailedException("rclone did not start.");
+        if (lowPriority)
+        {
+            try { process.PriorityClass = ProcessPriorityClass.Idle; }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { /* Rate remains capped. */ }
+        }
         try { process.StandardInput.Close(); }
         catch (IOException) { /* The child may have already closed its input. */ }
         var output = ReadOutput(process.StandardOutput, captureOutput);

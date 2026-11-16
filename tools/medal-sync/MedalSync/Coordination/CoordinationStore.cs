@@ -68,6 +68,9 @@ internal sealed partial class CoordinationStore
 
     public GenerationStore Generations { get; }
 
+    /// <summary>Discover cloud attempts before allocating an idle checkpoint, just as BeginPublish does at finish.</summary>
+    internal void RefreshGenerationHistory() => cloud?.Download();
+
     private string JournalPath => Path.Combine(Root, "journal.json");
 
     /// <summary>Refuses a stale copy of the journal that Windows serves from a cached open; replaced in tests.</summary>

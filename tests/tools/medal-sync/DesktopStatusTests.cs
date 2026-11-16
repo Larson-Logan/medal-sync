@@ -17,6 +17,18 @@ public sealed class DesktopStatusTests
     private static ProgressEnvelope Report(SessionPhase phase) => new(1, Journal.LibraryId, Journal.AccountId,
         Me.DeviceId, Now, new(phase, "Synthetic next action", Session, 3, 4096, "cloud-backup"));
 
+    [Fact]
+    public void SyncedActiveStatusDoesNotClaimReadyAndExpiresWithTheHeartbeat()
+    {
+        var report = Report(SessionPhase.Active);
+        report = report with { Progress = report.Progress with { ClipsSynced = true } };
+        var status = DesktopStatus.Resolve(Journal, Me, report, true, Now);
+        Assert.Equal("All clips uploaded", status.Title);
+        Assert.Equal(SessionPhase.Active, status.Phase);
+        Assert.Equal(SessionPhase.Unknown, DesktopStatus.Resolve(Journal, Me, report, true, Now.AddSeconds(21)).Phase);
+        Assert.Equal(SessionPhase.RecoveryNeeded, DesktopStatus.Resolve(Journal, Me, report, false, Now).Phase);
+    }
+
     [Theory]
     [InlineData((int)SessionPhase.Starting)]
     [InlineData((int)SessionPhase.Active)]

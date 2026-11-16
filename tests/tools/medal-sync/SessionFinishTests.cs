@@ -420,7 +420,7 @@ public sealed partial class SessionTests
         _store.Update(r => Ownership.BeginDrain(r, FirstPc, session, _clock.Now), TimeSpan.FromSeconds(1));
         _store.Update(r => Ownership.BeginPublish(r, FirstPc, session, _clock.Now), TimeSpan.FromSeconds(1));
         var snapshot = LibraryDatabase.ReadSnapshot(pc.Database, MedalFixture.AccountId);
-        _store.Generations.Publish(1, 0, session, FirstPc, snapshot, new AssetManifest(1, [], []), Versions, _clock.Now);
+        _store.Generations.Publish(1, 0, session, FirstPc, snapshot, AssetManifest.From(_assets.OnServer(snapshot)), Versions, _clock.Now);
 
         Assert.Equal(FinishStatus.Published, pc.Coordinator.Finish(session).Status);
         Assert.Equal(1, _store.ReadJournal().CommittedGeneration);

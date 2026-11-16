@@ -164,6 +164,24 @@ public sealed class CloudHandoffTests : IDisposable
         store.Update(j => Ownership.CompletePublish(j, First, session, number, Now), TimeSpan.Zero);
     }
 
+    [Fact]
+    public void IdleCheckpointRefreshReservesCloudAttemptsWithoutChangingTheActiveJournal()
+    {
+        using var drive = new Drive();
+        var store = Seed(drive, Config("first"), Snapshot("seed", "one"));
+        string session = new('2', 32);
+        store.Update(j => Ownership.Acquire(j, First, session, Now), TimeSpan.Zero);
+        var active = store.Update(j => Ownership.MarkActive(j, First, session, Now), TimeSpan.Zero);
+        Assert.Equal(1, store.Generations.Next(0));
+        string partial = fixture.PathFor("drive", "MedalSync", ".medal-sync", LibraryId, "generations", GenerationStore.Name(10));
+        Directory.CreateDirectory(partial);
+        File.WriteAllText(Path.Combine(partial, "manifest.json"), "incomplete abandoned attempt");
+        store.RefreshGenerationHistory();
+        Assert.Equal(11, store.Generations.Next(0));
+        Assert.Equal(active, store.ReadJournal());
+        Assert.False(store.Generations.Exists(10));
+    }
+
     [Theory]
     [InlineData("md5")]
     [InlineData("MD5")]

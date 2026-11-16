@@ -69,7 +69,7 @@ The defaults suit most PCs.
 | `dirCacheHours` | `1000` | At least 1 | How long folder listings are cached (`--dir-cache-time`). |
 | `transfers` | `2` | 1 to 8 | Uploads run in parallel (`--transfers`). |
 | `controlPort` | `53684` | 1024 to 65535 | Local port for rclone's control API, on 127.0.0.1 only. `config create --spike` uses `53683`. Avoid `53682` (browser sign-in) and `5572` (rclone's default control API). |
-| `bandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Upload limit in MiB/s while Medal runs. See [limit upload speed while recording](storage.md#limit-upload-speed-while-recording). |
+| `bandwidthLimitMiB` | `null` (2 MiB/s) | 1 to 10000 | Upload limit in MiB/s while Medal runs. See [limit upload speed while recording](storage.md#limit-upload-speed-while-recording). |
 | `finishBandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Upload limit in MiB/s after Medal exits, while uploads finish. |
 
 Older setups may use `53682`. rclone's [browser sign-in server](https://github.com/rclone/rclone/blob/v1.75.2/lib/oauthutil/oauthutil.go)
@@ -97,9 +97,9 @@ cache. See the [storage guide](storage.md) for how each choice behaves.
 | `targets` | `[]` | At most 8 | Cloud copies; see below. |
 | `conflictPolicy` | `"STOP"` | `"STOP"` or `"VERSION"` | What to do when a destination already has a different file. `"STOP"` refuses; `"VERSION"` moves the old file into `.medal-sync-history/` first. See [verification, conflicts and recovery](storage.md#verification-conflicts-and-recovery). |
 | `timeoutMinutes` | `240` | 1 to 1440 | Time limit for each copy or verification command. |
-| `fullVerifyEveryHandoffs` | `1` | 1 to 100 | Verify all media bytes every N replication passes per destination. `1` keeps always-full verification; larger values opt into incremental checks between full passes. Retries also count as passes. |
+| `fullVerifyEveryHandoffs` | `1` | 1 to 100 | Verify all media bytes every N replication passes per destination. A due full check may run during idle; finish reuses that evidence once. Idle repeats do not consume the interval. Larger values opt into incremental checks between full passes. Retries outside idle also count as passes. |
 | `fullVerifyEveryDays` | `7` | 1 to 30 | Maximum age in days of a full verification when incremental checks are enabled. Missing, invalid or failed receipts always force a full pass sooner. |
-| `bandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Transfer limit in MiB/s for copies to rclone remotes: cloud targets and an rclone primary. Copies to an SMB share are not limited. |
+| `bandwidthLimitMiB` | `null` (unlimited at finish) | 1 to 10000 | Transfer limit in MiB/s for copies to rclone remotes at finish. Idle replication to any destination, including SMB, uses at most 2 MiB/s or this limit if lower. |
 | `credentialCheck` | `"WARN"` | `"WARN"` or `"REFUSE"` | What launch does when an rclone primary or a required target fails its sign-in check. `"WARN"` starts Medal with a notice; `"REFUSE"` keeps Medal closed and the library Ready. Optional targets and outages only ever produce a notice. See [check sign-in before recording](storage.md#check-sign-in-before-recording). |
 
 Each entry in `targets`:

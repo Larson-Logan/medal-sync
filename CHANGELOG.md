@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Upload settled clips to primary storage and replicas while the owning PC is
+  idle, and prepare an uncommitted library checkpoint for finish to reuse.
+  The tray shows All clips uploaded; quit and shutdown reuse verified media
+  instead of copying it again. Recording and user activity pause idle work;
+  outages keep ownership and local clips for retry (#PR).
 - Setup, uninstall and Check for updates no longer refuse because another PC
   holds the library. Setup changes only this PC's programs, so it now refuses
   only an active process, a retained session login or a session this PC holds,

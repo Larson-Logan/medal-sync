@@ -13,7 +13,7 @@ internal interface IMedalProcess
 
     /// <summary>
     /// True while Medal is recording a game. Medal's recorder runs whenever Medal is open, so this is read from
-    /// its replay buffer instead. Advisory: it only changes the status shown, never ownership or uploads.
+    /// its replay buffer instead. Advisory: it changes status and pauses optional idle sync, never releases ownership.
     /// </summary>
     bool IsRecording() => false;
 

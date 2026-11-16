@@ -673,6 +673,8 @@ internal static class SessionCommands
         var library = new SqliteLocalLibrary(context.Install.DatabasePath, context.Install.AccountId, context.State.BackupDirectory, clock,
             context.Config.StorageMode == StorageMode.Cloud ? context.Config.CaptureFolder : null);
         var checker = PrimaryStorage.Checker(context.Config, context.State, () => shutdown?.RequireTime());
+        var idle = new WindowsIdle();
+        var idleMedia = new IdleMediaSync(context.Config, context.State, clock);
         var options = new SessionOptions(context.Device, context.Config.Capture, context.Install.Versions,
             TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal)
         {
@@ -693,7 +695,8 @@ internal static class SessionCommands
                 shutdown?.RequireTime();
                 if (new MedalProcess(context.Install).IsRunning())
                     throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
-            }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress, SpaceMonitor(context.Config, bitrate), preflight), store, mount);
+            }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress, SpaceMonitor(context.Config, bitrate), preflight,
+            idle.IsIdle, idleMedia.Sync, guard => PrimaryStorage.Checker(context.Config, context.State, guard)), store, mount);
     }
 
     /// <summary>

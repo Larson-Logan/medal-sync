@@ -226,7 +226,8 @@ public sealed partial class SessionTests : IDisposable
     private Pc Computer(DeviceIdentity device, string machine, bool acceptChanges = false, bool replaceLocal = false, string? database = null, Action? prepareNativeBackup = null,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null,
         ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null, SpacePressureMonitor? space = null,
-        Func<LaunchPreflight>? preflight = null, string? enrollmentFolder = null, bool askOwnerToSwitch = true)
+        Func<LaunchPreflight>? preflight = null, string? enrollmentFolder = null, bool askOwnerToSwitch = true,
+        Func<bool>? isIdle = null, Func<LibrarySnapshot, Action, bool>? idleSync = null)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
@@ -238,7 +239,7 @@ public sealed partial class SessionTests : IDisposable
             AskOwnerToSwitch = askOwnerToSwitch,
         };
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
-        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space, preflight));
+        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space, preflight, isIdle, idleSync));
     }
 
     private void Record(Pc pc, string id)

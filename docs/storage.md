@@ -22,6 +22,72 @@ dedicated storage root, for example `E:\MedalLibrary`; with capture folder
 either folder in a provider's desktop sync folder. Provider access uses rclone
 directly. Allow disk space for the collection, cache and new recordings.
 
+## Background sync and shutdown
+
+While this PC owns an **Active** session, Medal Sync checks for idle work every
+30 seconds. Windows must have had no keyboard or mouse input for a minute,
+CPU use must be below 20 percent, and Medal must not be recording. Persistent
+local media is copied to primary storage and configured replicas, using one
+transfer at a time, at most 2 MiB/s (or a lower `replication.bandwidthLimitMiB`).
+The copy process runs at idle priority. Recording detection uses Medal's disk
+replay buffer; memory buffering can understate recording, so the Windows
+activity gate and transfer limit also apply.
+
+A file must have unchanged size and modification time across observations
+at least 30 seconds apart, and its modification time must be at least that
+old. A read handle excludes writers and deletion throughout the copy and byte
+check. Files still being written or encoded are skipped; other settled clips
+can upload. Only known library media is copied, never arbitrary cache files,
+database backups or credentials. The VFS cache first writes closed files back
+to its backing folder after `mount.writeBackSeconds`, as documented by
+[rclone](https://rclone.org/commands/rclone_mount/#vfs-file-caching). In direct
+server mode this already uploads to the share while Medal is open; that path
+uses `mount.bandwidthLimitMiB`, defaulting to 2 MiB/s.
+
+New input, recording, cancellation, Medal exit or shutdown interrupts idle
+transfers. Transfer guards run every 200 milliseconds; the supervisor then
+continues its normal finish path. Failed or interrupted verification leaves
+no reusable evidence for that destination. An unreachable share or provider
+keeps this PC's session and local media and retries later, with a one-minute
+pause after an idle failure. Idle work never deletes local clips or releases
+ownership.
+
+Once every referenced file is settled and verified, the supervisor prepares
+an immutable generation containing the current library and asset manifest.
+This is an **uncommitted checkpoint**, not a published head: the journal stays
+Active, `CommittedGeneration` stays unchanged, and no other PC may acquire the
+library. Generation files use the existing staging-and-rename protocol;
+`writer.lock` still serializes the final journal transitions. A crash or
+explicit abandon can leave an uncommitted attempt, which other PCs ignore.
+No deletion or cleared media path bypasses the existing finish review.
+In Google Drive cloud mode the prepared generation stays in this PC's history
+cache until finish uploads and commits it through the existing conditional
+journal update.
+
+The tray shows **All clips uploaded** after primary storage and required
+copies verify and the library checkpoint is prepared. New library edits or
+queued uploads clear that indication on the next supervisor poll. This means
+the remaining handoff is small; only **Ready** means another PC can start.
+Quit Medal normally so its recorder and encoder can finish saving.
+
+At quit or Windows shutdown, Draining reuses rclone's existing queue, and
+Publishing reuses the exact matching checkpoint (including the asset manifest
+and Medal versions). Replication checks destination sizes and copies or byte
+checks only changed media from the idle receipts. Idle checks do not consume
+the handoff verification interval: a due full verification runs during idle,
+and finish consumes that evidence once. Missing evidence, source changes,
+expired full verification or failed destination checks require verification
+again. New work after the last idle sync still has to finish. Windows' existing
+25-second shutdown budget is unchanged; if Medal has not exited, storage is
+offline or verification runs out of time, ownership and cached clips remain
+for automatic recovery at next sign-in on this PC.
+
+The shared journal and generation formats remain version 1. Older installed
+versions on the other PC continue to ignore uncommitted attempts and wait for
+Clean. They do not perform idle sync themselves. Private verification receipts
+with the new idle marker fail older builds' integrity checks and safely fall
+back to full verification; downgrading does not authorize an early release.
+
 ## Choose drives and file systems
 
 Free space is measured on the disk that actually holds each folder, not on its
@@ -87,12 +153,13 @@ settings:
 }
 ```
 
-- `mount.bandwidthLimitMiB` applies while Medal runs.
+- `mount.bandwidthLimitMiB` applies while Medal runs; absent or `null` means
+  2 MiB/s.
 - `mount.finishBandwidthLimitMiB` applies once Medal exits and uploads finish.
   Leave it `null` to finish at full speed, or set the same value as
   `bandwidthLimitMiB` to keep one limit throughout.
 
-Each is 1 to 10000 MiB/s, or `null` (the default) for unlimited. The limit
+Explicit limits are 1 to 10000 MiB/s. The finishing default is unlimited. The limit
 moves to the finishing value when Medal exits, and back if Medal reopens before
 the switch completes. If the drive does not accept a change, a notice says so
 and the session continues at the previous speed; the limit never blocks
@@ -120,7 +187,7 @@ Configure, set **Persistent local copy** to a dedicated local folder while
 Medal is quit and the library is Ready. This is `replication.localCopyRoot` in
 the configuration. It needs room for the entire referenced clip collection,
 plus recording space. The drive then writes buffer segments locally, and
-finish copies only library-referenced files to primary storage. The recording
+idle sync and finish copy only library-referenced files to primary storage. The recording
 path and Recording status stay the same. Local storage and cloud-primary modes
 already record locally.
 

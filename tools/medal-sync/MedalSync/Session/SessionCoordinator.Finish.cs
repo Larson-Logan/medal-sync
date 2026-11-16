@@ -201,19 +201,7 @@ internal sealed partial class SessionCoordinator
 
     private FinishOutcome Publish(OwnershipRecord journal, string session, LibrarySnapshot snapshot, AssetReport onServer, MedalVersions versions)
     {
-        long committed = journal.CommittedGeneration;
-        string digest = snapshot.Digest();
-        // Folders above the committed generation are either this session's own
-        // publish from before a crash (reused) or left by an abandoned session
-        // (skipped: never committed, never read).
-        var later = store.Generations.Numbered().Where(g => g > committed).ToList();
-        long generation = later.FirstOrDefault(g => IsThisAttempt(g, committed, session, digest, versions), -1L);
-        if (generation < 0)
-        {
-            // Also above the retention high-water mark, so a pruned attempt's number is never reused.
-            generation = store.Generations.Next(committed);
-            store.Generations.Publish(generation, committed, session, Me, snapshot, AssetManifest.From(onServer), versions, clock.Now);
-        }
+        long generation = PrepareGeneration(journal, session, snapshot, onServer, versions);
         shutdown?.RequireTime();
         store.Update(r =>
         {
@@ -223,12 +211,33 @@ internal sealed partial class SessionCoordinator
         return new FinishOutcome(FinishStatus.Published, $"Ready to switch: generation {generation} published." + Forget(session, generation), generation);
     }
 
-    private bool IsThisAttempt(long generation, long parent, string session, string digest, MedalVersions versions)
+    private long PrepareGeneration(OwnershipRecord journal, string session, LibrarySnapshot snapshot, AssetReport onServer, MedalVersions versions)
+    {
+        long committed = journal.CommittedGeneration;
+        string digest = snapshot.Digest();
+        // Folders above the committed generation are either this session's own
+        // publish from before a crash (reused) or left by an abandoned session
+        // (skipped: never committed, never read).
+        var later = store.Generations.Numbered().Where(g => g > committed).ToList();
+        var manifest = AssetManifest.From(onServer);
+        long generation = later.FirstOrDefault(g => IsThisAttempt(g, committed, session, digest, versions, manifest), -1L);
+        if (generation < 0)
+        {
+            // Also above the retention high-water mark, so a pruned attempt's number is never reused.
+            generation = store.Generations.Next(committed);
+            store.Generations.Publish(generation, committed, session, Me, snapshot, manifest, versions, clock.Now);
+        }
+        return generation;
+    }
+
+    private bool IsThisAttempt(long generation, long parent, string session, string digest, MedalVersions versions, AssetManifest assets)
     {
         try
         {
-            var manifest = store.Generations.Read(generation).Manifest;
-            return manifest.SessionId == session && manifest.ParentGeneration == parent && manifest.SnapshotDigest == digest && manifest.Medal == versions;
+            var content = store.Generations.Read(generation);
+            var manifest = content.Manifest;
+            return manifest.SessionId == session && manifest.ParentGeneration == parent && manifest.SnapshotDigest == digest && manifest.Medal == versions
+                && Json.Serialize(content.Assets).AsSpan().SequenceEqual(Json.Serialize(assets));
         }
         catch (InvalidDataException)
         {
@@ -345,7 +354,7 @@ internal sealed partial class SessionCoordinator
     }
 
     /// <summary>Library entries the session lost although their files still exist on the server.</summary>
-    private List<string> LostEntries(LibrarySnapshot start, LibrarySnapshot now)
+    private List<string> LostEntries(LibrarySnapshot start, LibrarySnapshot now, IAssetChecker? checker = null)
     {
         var contents = start.Table("contents");
         int id = contents.ColumnIndex("local_content_id");
@@ -356,7 +365,7 @@ internal sealed partial class SessionCoordinator
             IEnumerable<string?> paths = change.Kind == MediaChangeKind.PathCleared
                 ? [change.Before]
                 : AssetInventory.PathColumns.Select(c => TableSnapshot.Text(rows[change.ContentId][contents.ColumnIndex(c)]));
-            if (paths.Any(p => p is not null && assets.ExistsOnServer(p))) lost.Add(change.Before ?? change.ContentId);
+            if (paths.Any(p => p is not null && (checker ?? assets).ExistsOnServer(p))) lost.Add(change.Before ?? change.ContentId);
         }
         return lost;
     }
