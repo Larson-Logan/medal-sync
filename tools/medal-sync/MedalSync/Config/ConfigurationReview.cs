@@ -30,6 +30,7 @@ internal sealed class ConfigurationReview
     {
         config.Validate();
         var review = new ConfigurationReview(state, config, newLibrary);
+        review.RequireUnchanged();
         if (review._previous is not null)
         {
             var existing = Json.Deserialize<MedalSyncConfig>(review._previous, "Existing configuration");
@@ -139,6 +140,13 @@ internal sealed class ConfigurationReview
         RequireOrdinaryPath(State.ConfigPath);
         RequireOrdinaryPath(Path.Combine(State.Root, "device.json"));
         RequireOrdinaryPath(State.BackupDirectory);
+        if (_previous is null)
+        {
+            string pending = LibrarySetupPending.PathFor(State);
+            RequireOrdinaryPath(pending);
+            if (Path.Exists(pending))
+                throw new UnsafeOperationException("A pending library setup (library-setup.json) already exists. Recover its matching config.json before reviewing a new setup.");
+        }
         RequireNoSessions(State);
         if (Fingerprint(State.ConfigPath) != (_previous is null ? null : Convert.ToHexString(SHA256.HashData(_previous)))
             || Fingerprint(Path.Combine(State.Root, "device.json")) != _device)

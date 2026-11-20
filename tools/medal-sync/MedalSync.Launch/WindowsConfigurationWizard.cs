@@ -408,7 +408,7 @@ internal sealed class WindowsConfigurationWizard : Form
                     string? advice = await Task.Run(() => DeviceNameAdvice.Read(candidate, _state, CoordinationStore.Open(candidate)));
                     if (advice is not null) _review.AppendText("\r\n\r\n" + advice);
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MedalSyncException) { /* Advisory only. */ }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or MedalSyncException) { /* Advisory only. */ }
             }
             _edit.Visible = false;
             _review.Visible = true;

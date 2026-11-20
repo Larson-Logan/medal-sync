@@ -1,35 +1,35 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using MedalSync.Util;
 
 namespace MedalSync.Library;
 
 /// <summary>One library path that moves from an old folder to the capture folder.</summary>
-internal sealed record Relocation(string ContentId, string Column, string Original, WindowsPath From, WindowsPath To);
+internal sealed record Relocation(string ContentId, string Field, string Original, WindowsPath From, WindowsPath To);
 
 /// <summary>
 /// Rewrites library file paths from a folder outside the capture tree (files
 /// Medal's own storage move left behind) to the same relative path inside it.
-/// Only the path columns change; metadata and every other cell stay as they are.
+/// Only Medal's path columns and its keyboard overlay path are rewritten.
 /// </summary>
 internal static class ReferenceRelocation
 {
+    private const string OverlayProperty = "keyboardOverlayFilePath";
+    private const string OverlayField = "metadata:$." + OverlayProperty;
+    private static readonly JsonDocumentOptions MetadataOptions = new() { MaxDepth = 256 };
+
     public static IReadOnlyList<Relocation> Plan(LibrarySnapshot snapshot, WindowsPath fromRoot, WindowsPath toRoot)
     {
         if (fromRoot.IsWithin(toRoot) || toRoot.IsWithin(fromRoot))
         {
             throw new UnsafeOperationException($"{fromRoot.Display} and {toRoot.Display} must not contain each other.");
         }
-        var contents = snapshot.Table("contents");
-        int id = contents.ColumnIndex("local_content_id");
-        var columns = AssetInventory.PathColumns.Select(c => (Name: c, Index: contents.ColumnIndex(c))).ToArray();
         var moves = new List<Relocation>();
-        foreach (var row in contents.Rows)
+        foreach (var reference in AssetInventory.Collect(snapshot))
         {
-            foreach (var (name, index) in columns)
-            {
-                if (TableSnapshot.Text(row[index]) is not { Length: > 0 } value) continue;
-                if (!WindowsPath.TryParse(value, out WindowsPath? path, out _) || !path.IsWithin(fromRoot) || path.Equals(fromRoot)) continue;
-                moves.Add(new Relocation(TableSnapshot.Text(row[id])!, name, value, path, path.Rebase(fromRoot, toRoot)));
-            }
+            if (reference.Role != AssetRole.Required && reference.Field != OverlayField) continue;
+            if (!WindowsPath.TryParse(reference.Path, out WindowsPath? path, out _) || !path.IsWithin(fromRoot) || path.Equals(fromRoot)) continue;
+            moves.Add(new Relocation(reference.ContentId, reference.Field, reference.Path, path, path.Rebase(fromRoot, toRoot)));
         }
         return moves;
     }
@@ -38,6 +38,7 @@ internal static class ReferenceRelocation
     {
         var contents = snapshot.Table("contents");
         int id = contents.ColumnIndex("local_content_id");
+        int metadata = contents.ColumnIndex("metadata");
         var byRow = moves.ToLookup(m => m.ContentId, StringComparer.Ordinal);
         int applied = 0;
         var rows = contents.Rows.Select(row =>
@@ -47,7 +48,18 @@ internal static class ReferenceRelocation
             var copy = row.ToArray();
             foreach (var move in changes)
             {
-                int index = contents.ColumnIndex(move.Column);
+                if (move.Field == OverlayField)
+                {
+                    if (copy[metadata] is not JsonbCell json
+                        || JsonNode.Parse(json.Json, documentOptions: MetadataOptions) is not JsonObject node
+                        || node[OverlayProperty] is not JsonValue overlay || !overlay.TryGetValue<string>(out string? value)
+                        || value != move.Original) continue;
+                    node[OverlayProperty] = move.To.Display;
+                    copy[metadata] = new JsonbCell(node.ToJsonString());
+                    applied++;
+                    continue;
+                }
+                int index = contents.ColumnIndex(move.Field);
                 // A path that changed since the plan was made is left alone and fails the count check below.
                 if (TableSnapshot.Text(copy[index]) != move.Original) continue;
                 copy[index] = new TextCell(move.To.Display);

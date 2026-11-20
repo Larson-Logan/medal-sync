@@ -57,6 +57,15 @@ internal static class SetupMaintenance
         var state = new LocalState(root);
         var settings = MedalSyncConfig.Load(state.ConfigPath);
         var thisPc = state.ExistingDevice(); // Strictly read-only, including a concurrent missing-file race.
+        // Older init previews could leave an identity before creating a library. Check that storage can
+        // confirm the library is absent and still refuse if this PC has session recovery evidence.
+        if (LibrarySetupPending.Read(state, settings)?.AwaitsInitialization(state, settings, () => false) == true
+            && (settings.StorageMode == StorageMode.Cloud ? !GoogleDriveJournal.For(settings).Exists()
+                : CoordinationDirectoryMissing(settings)))
+        {
+            RequireNoRecoveryEvidence(root, settings);
+            return;
+        }
         var journal = readJournal is not null ? readJournal(settings)
             : CoordinationStore.Open(settings).ReadJournal();
         if (journal.State == OwnershipState.Clean && journal.Owner is null && journal.SessionId is null) return;
@@ -84,13 +93,26 @@ internal static class SetupMaintenance
         catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException or MedalSyncException)
         {
             throw new UnsafeOperationException("The saved configuration (config.json) cannot be read and this PC has no device identity yet. "
-                + "Open the configuration wizard and save it again, or remove that config.json, then try again.");
+                + "Restore the saved configuration before opening the configuration wizard. If library-setup.json exists, keep it with its matching configuration.");
         }
+        RequireNoRecoveryEvidence(root, settings);
+    }
+
+    private static bool CoordinationDirectoryMissing(MedalSyncConfig settings)
+    {
+        try { _ = File.GetAttributes(settings.LibraryCoordinationDirectory); }
+        catch (FileNotFoundException) { return Directory.Exists(settings.CoordinationRoot); }
+        catch (DirectoryNotFoundException) { return Directory.Exists(settings.CoordinationRoot); }
+        return false;
+    }
+
+    private static void RequireNoRecoveryEvidence(string root, MedalSyncConfig settings)
+    {
         foreach (string evidence in new[] { "aborted-starts", "finished-sessions" })
             if (HasEntries(Path.Combine(root, evidence)))
-                throw new UnsafeOperationException($"Session recovery evidence ({evidence}) is retained but this PC has no device identity. Recover that installation before continuing.");
+                throw new UnsafeOperationException($"Session recovery evidence ({evidence}) is retained. Recover that installation before continuing.");
         if (HasEntries(WindowsPath.Parse(settings.CacheRoot).Append(settings.LibraryId).Display))
-            throw new UnsafeOperationException("A session cache for this library is retained but this PC has no device identity. Recover that installation before continuing.");
+            throw new UnsafeOperationException("A session cache for this library is retained. Recover that installation before continuing.");
     }
 
     private static bool HasEntries(string directory) =>

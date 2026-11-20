@@ -1,3 +1,5 @@
+using System.Runtime.Versioning;
+using MedalSync.Cli;
 using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Platform;
@@ -163,6 +165,57 @@ public sealed class WindowsSetupTests : IDisposable
         Assert.Equal(config, File.ReadAllBytes(Path.Combine(root, "config.json")));
         Assert.False(File.Exists(Path.Combine(root, "device.json")));
         Assert.Equal(["config.json"], Directory.EnumerateFileSystemEntries(root).Select(Path.GetFileName));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [SupportedOSPlatform("windows")]
+    public void InitPreviewDoesNotCreateIdentityOrBlockMaintenance(bool missingMedia)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var state = new LocalState(DirectoryFor("init-preview"));
+        var settings = SavedWizardConfiguration(state.Root) with
+        {
+            StorageMode = StorageMode.Local,
+            Remote = DirectoryFor("media"),
+            CoordinationRoot = DirectoryFor("coordination"),
+        };
+        File.WriteAllBytes(state.ConfigPath, Json.Serialize(settings));
+        LibrarySetupPending.Save(state, settings, true);
+        string db = _fixture.CreateLibrary("init-db");
+        if (missingMedia) MedalFixture.AddContent(db, "clip", video: @"M:\Clips\missing.mp4");
+        var install = new MedalInstall(_fixture.PathFor("install"), db, settings.AccountId,
+            _fixture.PathFor("install", "Medal.exe"), new(null, null));
+        var output = new StringWriter();
+        if (missingMedia)
+            Assert.Throws<UnsafeOperationException>(() => SessionCommands.InitLibrary(state, settings, install, false, output));
+        else
+            Assert.Equal(0, SessionCommands.InitLibrary(state, settings, install, false, output));
+
+        Assert.False(File.Exists(Path.Combine(state.Root, "device.json")));
+        SetupMaintenance.RequireReady(state.Root, false, false, _ => throw new InvalidOperationException("journal must not be read"));
+        Assert.False(Directory.Exists(settings.LibraryCoordinationDirectory));
+    }
+
+    [Fact]
+    public void MaintenanceRecognizesAnOldPreviewIdentityWhilePreservingRecoveryEvidence()
+    {
+        var state = new LocalState(DirectoryFor("old-preview"));
+        var settings = SavedWizardConfiguration(state.Root) with
+        {
+            StorageMode = StorageMode.Local,
+            Remote = DirectoryFor("media"),
+            CoordinationRoot = DirectoryFor("coordination"),
+        };
+        File.WriteAllBytes(state.ConfigPath, Json.Serialize(settings));
+        LibrarySetupPending.Save(state, settings, true);
+        state.Device();
+
+        SetupMaintenance.RequireReady(state.Root, false, false, _ => throw new InvalidOperationException("journal must not be read"));
+        Directory.CreateDirectory(settings.SessionCacheDirectory(new string('2', 32)));
+        var refusal = Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(state.Root, false, false));
+        Assert.Contains("session cache", refusal.Message);
     }
 
     [Fact]

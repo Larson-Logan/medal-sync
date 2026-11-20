@@ -11,7 +11,8 @@ internal sealed record RestoreOptions(
     string BackupDirectory,
     int BackupsToKeep = 10,
     bool AllowEmptyReplacement = false,
-    bool KeepBackup = false);
+    bool KeepBackup = false,
+    string? ExpectedCurrentDigest = null);
 
 internal sealed record RestoreResult(bool Changed, string? BackupPath, string Digest, int Contents, int DeletedContents, int Counts);
 
@@ -50,6 +51,7 @@ internal static class LibraryRestorer
         {
             var existing = LibraryDatabase.ReadSnapshot(connection, read, options.ExpectedAccountId, schema);
             current = existing.Digest();
+            RequireExpectedDigest(options.ExpectedCurrentDigest, current);
             currentContents = existing.RowCount("contents");
         }
         if (current == digest)
@@ -68,6 +70,10 @@ internal static class LibraryRestorer
             : DatabaseBackup.Create(connection, options.BackupDirectory, options.ExpectedAccountId, now);
         using (var write = connection.BeginTransaction(deferred: false))
         {
+            // The backup runs outside the write transaction. Recheck under the write lock so a concurrent
+            // writer cannot slip in between the check and replacement.
+            if (options.ExpectedCurrentDigest is not null)
+                RequireExpectedDigest(options.ExpectedCurrentDigest, LibraryDatabase.ReadSnapshot(connection, write, options.ExpectedAccountId, schema).Digest());
             string devices = LibraryDatabase.DeviceSettingsDigest(connection, write);
             Replace(connection, write, snapshot);
             Verify(connection, write, snapshot, schema, digest, devices);
@@ -77,6 +83,12 @@ internal static class LibraryRestorer
         DatabaseBackup.Prune(options.BackupDirectory, options.ExpectedAccountId, options.BackupsToKeep);
         return new RestoreResult(true, backup, digest, snapshot.RowCount("contents"),
             snapshot.RowCount("deleted_contents"), snapshot.RowCount("content_counts"));
+    }
+
+    private static void RequireExpectedDigest(string? expected, string actual)
+    {
+        if (expected is not null && actual != expected)
+            throw new UnsafeOperationException("The Medal library changed since planning. Its database was not changed; review the operation again with Medal quit.");
     }
 
     /// <summary>

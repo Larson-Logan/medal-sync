@@ -221,8 +221,8 @@ internal sealed class DesktopStatusPublisher : IDisposable
 /// status files. Opening the store again on every read is what costs: in cloud mode it starts rclone twice (for the
 /// sign-in token and the Drive folder) and makes two extra Drive requests. The cloud connection, with its token and
 /// folder, is kept even while opening fails, so an outage costs one failed request per read. Generations never change
-/// once published, so the committed manifest is checked once per generation. An outage keeps everything; any other
-/// failure drops the store and the connection, so the next read opens the library afresh. A refused history download
+/// once published, so the committed manifest is checked once per generation. An outage is reported as Waiting for
+/// storage and keeps the connection. Other failures drop it, so the next read opens the library afresh. A refused history download
 /// keeps its connection's short retry pause, so every status poll does not start the same failed transfer again.
 /// </summary>
 internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> supervisorRunning,
@@ -250,8 +250,7 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
             var config = Config(local.ConfigPath);
             var device = File.Exists(Path.Combine(local.Root, "device.json")) ? local.ExistingDevice() : null;
             var pending = LibrarySetupPending.Read(local, config);
-            if (pending is { NewLibrary: true } && config.StorageMode != StorageMode.Cloud
-                && !Directory.Exists(config.LibraryCoordinationDirectory) && !LibrarySetupPending.HasSession(local) && !supervisorRunning())
+            if (pending?.AwaitsInitialization(local, config, supervisorRunning) == true)
                 return DesktopStatus.SetupPending(pending, DateTimeOffset.UtcNow);
             // The wizard saves only the configuration. A PC that has not run its first command has no identity yet,
             // and so owns nothing; a damaged or copied identity still refuses.
@@ -267,7 +266,11 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
                     _checkedGeneration = journal.CommittedGeneration;
                 }
             }
-            catch (Exception ex) when (ex is not IOException && _cloud?.HasHistoryRefusal is not true)
+            catch (IOException)
+            {
+                return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
+            }
+            catch when (_cloud?.HasHistoryRefusal is not true)
             {
                 Forget();
                 throw;

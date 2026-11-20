@@ -256,16 +256,26 @@ begin
 end;
 
 // Releases are MAJOR.MINOR.PATCH.NN; installations before 1.3.0.00 registered
-// MAJOR.MINOR.PATCH, which packs as revision 0. A beta, MAJOR.MINOR.PATCH.NN-beta.N,
-// packs as the release it leads up to, so that release installs over it.
-function PackVersion(const Value: String; var Packed: Int64): Boolean;
+// MAJOR.MINOR.PATCH, which packs as revision 0. Keep the beta sequence separately
+// because the Windows executable version contains only the numeric components.
+function ParseBuildVersion(const Value: String; var Packed: Int64; var Beta: Integer): Boolean;
 var
   I, Dots, Suffix: Integer;
-  Numbers: String;
+  Numbers, Sequence: String;
 begin
+  Result := False;
+  Beta := 0;
   Numbers := Value;
-  Suffix := Pos('-', Numbers);
-  if Suffix > 0 then Numbers := Copy(Numbers, 1, Suffix - 1);
+  Suffix := Pos('-', Value);
+  if Suffix > 0 then begin
+    if Copy(Value, Suffix, 6) <> '-beta.' then exit;
+    Sequence := Copy(Value, Suffix + 6, Length(Value));
+    for I := 1 to Length(Sequence) do
+      if (Sequence[I] < '0') or (Sequence[I] > '9') then exit;
+    Beta := StrToIntDef(Sequence, 0);
+    if Beta <= 0 then exit;
+    Numbers := Copy(Value, 1, Suffix - 1);
+  end;
   Dots := 0;
   for I := 1 to Length(Numbers) do
     if Numbers[I] = '.' then Dots := Dots + 1;
@@ -273,6 +283,15 @@ begin
     Result := (Suffix = 0) and StrToVersion(Numbers + '.0', Packed)
   else
     Result := (Dots = 3) and StrToVersion(Numbers, Packed);
+end;
+
+function CompareBuildVersions(const Left, Right: Int64; LeftBeta, RightBeta: Integer): Integer;
+begin
+  Result := ComparePackedVersion(Left, Right);
+  if (Result <> 0) or (LeftBeta = RightBeta) then exit;
+  if LeftBeta = 0 then Result := 1
+  else if RightBeta = 0 then Result := -1
+  else Result := LeftBeta - RightBeta;
 end;
 
 function WinFspInstalled(): Boolean;
@@ -331,7 +350,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Installed, FileVersion, Target: Int64;
-  ResultCode: Integer;
+  InstalledBeta, TargetBeta, ResultCode: Integer;
   ProgramPath, RegisteredDir, RegisteredVersion: String;
   HasRegisteredVersion: Boolean;
 begin
@@ -347,7 +366,7 @@ begin
       Result := 'Medal Sync is already installed at ' + RegisteredDir + '. Select that folder to upgrade or repair it. Uninstall first if you want to move the programs.';
       exit;
     end;
-    if not PackVersion(RegisteredVersion, Installed) then begin
+    if not ParseBuildVersion(RegisteredVersion, Installed, InstalledBeta) then begin
       Result := 'Cannot identify the registered Medal Sync version. Recover the existing installation before continuing.';
       exit;
     end;
@@ -359,18 +378,21 @@ begin
       exit;
     end;
     if GetPackedVersion(ProgramPath, FileVersion) then begin
-      if (not HasRegisteredVersion) or (ComparePackedVersion(FileVersion, Installed) > 0) then Installed := FileVersion;
+      if (not HasRegisteredVersion) or (ComparePackedVersion(FileVersion, Installed) > 0) then begin
+        Installed := FileVersion;
+        InstalledBeta := 0; // Without matching registration, a file version cannot establish that this is a beta.
+      end;
     end else if not HasRegisteredVersion then begin
       Result := 'Cannot identify the installed version. Recover the existing installation before continuing.';
       exit;
     end;
   end;
   if HasRegisteredVersion or FileExists(ProgramPath) then begin
-    if not PackVersion('{#AppVersion}', Target) then begin
+    if not ParseBuildVersion('{#AppVersion}', Target, TargetBeta) then begin
       Result := 'Cannot identify the installed version. Repair the existing installation before continuing.';
       exit;
     end;
-    if ComparePackedVersion(Installed, Target) > 0 then begin
+    if CompareBuildVersions(Installed, Target, InstalledBeta, TargetBeta) > 0 then begin
       Result := 'A newer Medal Sync version is already installed. Use that version or a newer setup package.';
       exit;
     end;
@@ -396,14 +418,18 @@ function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoType
 var
   InstalledVersion, RegisteredDir, Operation: String;
   Installed, Target: Int64;
+  InstalledBeta, TargetBeta, Order: Integer;
 begin
   Operation := 'Install Medal Sync {#AppVersion}';
   if RegisteredInstallation(RegisteredDir, InstalledVersion) and
      (CompareText(RemoveBackslashUnlessRoot(RegisteredDir), RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) = 0) and
-     PackVersion(InstalledVersion, Installed) and
-     PackVersion('{#AppVersion}', Target) then begin
-    if (ComparePackedVersion(Installed, Target) = 0) and (InstalledVersion = '{#AppVersion}') then
+     ParseBuildVersion(InstalledVersion, Installed, InstalledBeta) and
+     ParseBuildVersion('{#AppVersion}', Target, TargetBeta) then begin
+    Order := CompareBuildVersions(Installed, Target, InstalledBeta, TargetBeta);
+    if Order = 0 then
       Operation := 'Repair Medal Sync {#AppVersion}'
+    else if Order > 0 then
+      Operation := 'A newer Medal Sync version is already installed: ' + InstalledVersion
     else
       Operation := 'Upgrade Medal Sync ' + InstalledVersion + ' to {#AppVersion}';
   end;

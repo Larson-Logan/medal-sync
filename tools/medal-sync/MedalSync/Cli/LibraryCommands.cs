@@ -156,7 +156,8 @@ internal static class LibraryCommands
         string backups = live
             ? Config.LocalState.ForCurrentUser().BackupDirectory
             : Path.Combine(Path.GetDirectoryName(path)!, "medal-sync-backups");
-        var result = LibraryRestorer.Restore(path, withCounts, new RestoreOptions(account, backups, KeepBackup: true), DateTimeOffset.UtcNow);
+        var result = LibraryRestorer.Restore(path, withCounts,
+            new RestoreOptions(account, backups, KeepBackup: true, ExpectedCurrentDigest: current.Digest()), DateTimeOffset.UtcNow);
         output.WriteLine($"Repaired {applied.Count} change(s); backup {result.BackupPath}. {Session.SessionCoordinator.KeptBackupNote}");
         return 0;
     }
@@ -215,9 +216,11 @@ internal static class LibraryCommands
         }
         if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Quit Medal from its tray icon before relocating its files.");
         foreach (var (local, server) in copies) CopyVerified(local, server);
+        if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Medal started during copying. Quit Medal and review relocation again before changing its database.");
         var relocated = ReferenceRelocation.Apply(snapshot, moves);
         var withCounts = CountRebuilder.Rebuild(relocated, install.DatabasePath);
-        var result = LibraryRestorer.Restore(install.DatabasePath, withCounts, new RestoreOptions(install.AccountId, state.BackupDirectory, KeepBackup: true), DateTimeOffset.UtcNow);
+        var result = LibraryRestorer.Restore(install.DatabasePath, withCounts,
+            new RestoreOptions(install.AccountId, state.BackupDirectory, KeepBackup: true, ExpectedCurrentDigest: snapshot.Digest()), DateTimeOffset.UtcNow);
         output.WriteLine($"Copied {copies.Count} file(s) and repointed {moves.Count} library path(s); backup {result.BackupPath}. "
             + $"{Session.SessionCoordinator.KeptBackupNote} The originals under {from.Display} are unchanged.");
         return 0;

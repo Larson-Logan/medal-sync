@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `init` previews leave the device identity untouched. Maintenance also recognizes a pending library that an earlier preview left with an identity (#243).
+- The configuration wizard refuses an orphaned setup record before saving a new configuration. Damaged historical manifests no longer block its device-name advice (#242, #235).
+- The tray and `status --json` report pending Google Drive setup without polling Drive. The tray shows Waiting for storage when a journal read fails because storage is unreachable (#232, #233).
+- `relocate` copies and repoints keyboard overlays with their clips. If the Medal library changes during copying, relocation preserves the latest database and asks for a new review (#236, #237).
+- Windows setup refuses an older beta over a newer beta or its stable release and still allows repairs and upgrades (#241).
+
 - `enroll recover --rollback` is accepted again; it was refused as an unknown
   option, so an interrupted enrollment could not be rolled back (#227).
 - Launch no longer leaves a copy of Medal's native backup database in

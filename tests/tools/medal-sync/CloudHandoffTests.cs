@@ -485,6 +485,27 @@ public sealed class CloudHandoffTests : IDisposable
     }
 
     [Fact]
+    [SupportedOSPlatform("windows")]
+    public void ANewPendingCloudLibraryReportsSetupWithoutConnectingToDrive()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var config = Config("setup-pending");
+        var state = HistoryState(config);
+        var device = state.Device(); // Include identities left behind by earlier previews.
+        LibrarySetupPending.Save(state, config, true);
+        var source = new DesktopStatusSource(() => state, () => false,
+            _ => throw new InvalidOperationException("status must not open Drive yet"));
+
+        Assert.Equal("Finish library setup", source.Read().Title);
+        Assert.Equal("Finish library setup", source.Read().Title);
+        var output = new StringWriter();
+        Assert.Equal(1, SessionCommands.WriteStatus(config, state, device, true, output, () => false));
+        using var status = JsonDocument.Parse(output.ToString());
+        Assert.Equal("not_checked", status.RootElement.GetProperty("storage").GetString());
+        Assert.Equal("Finish library setup", status.RootElement.GetProperty("title").GetString());
+    }
+
+    [Fact]
     public void StatusViewKeepsTheOpenLibraryBetweenReadsAndReopensItAfterAConfigChangeOrFailure()
     {
         using var drive = new Drive();
@@ -503,8 +524,8 @@ public sealed class CloudHandoffTests : IDisposable
 
         // Unreachable at first: each read is one failed request on the same connection and starts no rclone.
         drive.Offline = true;
-        Assert.Throws<StorageOfflineException>(() => source.Read());
-        Assert.Throws<StorageOfflineException>(() => source.Read());
+        Assert.Equal(SessionPhase.WaitingForStorage, source.Read().Phase);
+        Assert.Equal(SessionPhase.WaitingForStorage, source.Read().Phase);
         drive.Offline = false;
         Assert.Equal(1, connections);
         Assert.Empty(commands.Skip(commandsBefore));
@@ -522,7 +543,7 @@ public sealed class CloudHandoffTests : IDisposable
 
         // An outage after opening keeps the open library too.
         drive.Offline = true;
-        Assert.Throws<StorageOfflineException>(() => source.Read());
+        Assert.Equal(SessionPhase.WaitingForStorage, source.Read().Phase);
         drive.Offline = false;
         Assert.Equal(SessionPhase.Ready, source.Read().Phase);
         Assert.Equal(1, connections);

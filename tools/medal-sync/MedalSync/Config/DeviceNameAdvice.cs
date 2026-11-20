@@ -17,6 +17,17 @@ internal static class DeviceNameAdvice
         var me = File.Exists(Path.Combine(state.Root, "device.json")) ? state.ExistingDevice()
             : new DeviceIdentity("", $"{Environment.MachineName} ({Environment.UserName})");
         me = me with { DisplayName = $"{Environment.MachineName} ({Environment.UserName})" };
-        return For(config, me, store.Generations.Numbered().Select(n => store.Generations.ReadManifest(n).Device));
+        return For(config, me, PublishedDevices(store.Generations));
+    }
+
+    private static IEnumerable<DeviceIdentity> PublishedDevices(GenerationStore generations)
+    {
+        foreach (long number in generations.Numbered())
+        {
+            DeviceIdentity device;
+            try { device = generations.ReadManifest(number).Device; }
+            catch (InvalidDataException) { continue; } // A damaged historical manifest cannot provide name advice.
+            yield return device;
+        }
     }
 }

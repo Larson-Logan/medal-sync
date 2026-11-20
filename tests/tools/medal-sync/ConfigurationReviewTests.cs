@@ -82,6 +82,24 @@ public sealed class ConfigurationReviewTests : IDisposable
         Assert.Equal("changed during check", File.ReadAllText(State.ConfigPath));
     }
 
+    [Fact]
+    public void OrphanedSetupRecordRefusesReviewAndSaveBeforePublishingConfiguration()
+    {
+        var review = ConfigurationReview.Prepare(State, Candidate, true, ValidEnvironment);
+        Directory.CreateDirectory(State.Root);
+        var original = Candidate with { LibraryId = new string('b', 32) };
+        LibrarySetupPending.Save(State, original, true);
+        string record = LibrarySetupPending.PathFor(State);
+        byte[] pending = File.ReadAllBytes(record);
+
+        var prepare = Assert.Throws<UnsafeOperationException>(() => ConfigurationReview.Prepare(State, Candidate, true, ValidEnvironment));
+        var save = Assert.Throws<UnsafeOperationException>(() => review.Save(true, ValidEnvironment));
+        Assert.Contains("matching config.json", prepare.Message);
+        Assert.Equal(prepare.Message, save.Message);
+        Assert.False(File.Exists(State.ConfigPath));
+        Assert.Equal(pending, File.ReadAllBytes(record));
+    }
+
     [Theory]
     [InlineData("config")]
     [InlineData("device")]

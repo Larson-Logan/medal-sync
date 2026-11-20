@@ -32,12 +32,15 @@ $probeDirectory = Join-Path $scratch 'probe'
     -p:RestoreLockedMode=true -p:PublishSingleFile=true -p:EnableSingleFileAnalyzer=false -p:DebugType=None -o $probeDirectory --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Isolated readiness probe publish failed.' }
 $probe = Join-Path $probeDirectory 'MedalSync.Integration.exe'
-$compile = @('/Qp',('/DAppVersion={0}' -f $version),('/DPayloadDir={0}' -f $payload),('/DStorageDependencies={0}' -f $dependencies),
-    ('/DOutputPath={0}' -f $scratch),('/DIsolatedTestId={0}' -f $id),('/DIsolatedTestRoot={0}' -f $state),('/DReadyChecker={0}' -f $probe),
-    (Join-Path $root 'installer/windows/medal-sync.iss'))
-& $compiler @compile
-if ($LASTEXITCODE -ne 0) { throw 'Isolated native setup compilation failed.' }
-$setup = Join-Path $scratch ('medal-sync-isolated-' + $id + '.exe')
+function Build-IsolatedSetup([string]$BuildVersion, [string]$OutputDirectory) {
+    $compile = @('/Qp',('/DAppVersion={0}' -f $BuildVersion),('/DPayloadDir={0}' -f $payload),('/DStorageDependencies={0}' -f $dependencies),
+        ('/DOutputPath={0}' -f $OutputDirectory),('/DIsolatedTestId={0}' -f $id),('/DIsolatedTestRoot={0}' -f $state),('/DReadyChecker={0}' -f $probe),
+        (Join-Path $root 'installer/windows/medal-sync.iss'))
+    & $compiler @compile | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Isolated native setup compilation failed.' }
+    return (Join-Path $OutputDirectory ('medal-sync-isolated-' + $id + '.exe'))
+}
+$setup = Build-IsolatedSetup $version $scratch
 $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',('/DIR="{0}"' -f $app),('/GROUP="{0}"' -f $group),('/LOG="{0}"' -f (Join-Path $scratch 'setup.log')))
 $checks = 0
 function Assert-Check([bool]$Condition, [string]$Message) {
@@ -45,8 +48,8 @@ function Assert-Check([bool]$Condition, [string]$Message) {
     $script:checks++
     Write-Output "PASS: $Message"
 }
-function Run-Setup {
-    return (Start-Process -FilePath $setup -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru).ExitCode
+function Run-Setup([string]$Executable = $setup) {
+    return (Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru).ExitCode
 }
 # Windows can hold an executable for a moment after it exits (for example while antivirus scans it),
 # so a write right after running it may fail with a sharing violation. Retry for up to 10 seconds.
@@ -97,6 +100,21 @@ try {
     try { Assert-Check ((Run-Setup) -ne 0) 'native setup refuses a registered downgrade even when the CLI is missing' }
     finally { Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value $version }
     Assert-Check ((Run-Setup) -eq 0) 'native repair restores a missing CLI without losing registration'
+    $stableVersion = $version -replace '-beta\.\d+$', ''
+    $betaVersion = "$stableVersion-beta.2"
+    $betaSetup = if ($version -eq $betaVersion) { $setup } else { Build-IsolatedSetup $betaVersion (Join-Path $scratch 'beta') }
+    $stableSetup = if ($version -eq $stableVersion) { $setup } else { Build-IsolatedSetup $stableVersion (Join-Path $scratch 'stable') }
+    try {
+        Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value $stableVersion
+        Assert-Check ((Run-Setup $betaSetup) -ne 0) 'native setup refuses a beta over its stable release'
+        Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value "$stableVersion-beta.10"
+        Assert-Check ((Run-Setup $betaSetup) -ne 0) 'native setup refuses an older beta over a newer beta'
+        Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value "$stableVersion-beta.1"
+        Assert-Check ((Run-Setup $betaSetup) -eq 0) 'native setup installs a newer beta over an earlier beta'
+        Assert-Check ((Run-Setup $betaSetup) -eq 0) 'native setup repairs the same beta'
+        Assert-Check ((Run-Setup $stableSetup) -eq 0) 'native setup installs a stable release over its beta'
+        Assert-Check ((Get-ItemProperty -LiteralPath $key).DisplayVersion -eq $stableVersion) 'native setup registers the stable version'
+    } finally { Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value $version }
     $binConfig = Join-Path $app 'bin/config.json'
     Set-Content -LiteralPath $binConfig -Value 'synthetic user configuration'
     Assert-Check ((Run-Setup) -ne 0) 'native setup refuses user configuration in the program bin directory'

@@ -1,5 +1,6 @@
 using MedalSync.Config;
 using MedalSync.Coordination;
+using MedalSync.Library;
 using MedalSync.Session;
 using MedalSync.Tests.Fixtures;
 using MedalSync.Util;
@@ -50,6 +51,27 @@ public sealed class DeviceLabelTests : IDisposable
         Assert.Null(DeviceNameAdvice.For(Config, me, [me]));
         Assert.NotNull(DeviceNameAdvice.For(Config, me, [new(new string('b', 32), me.DisplayName)]));
         Assert.Null(DeviceNameAdvice.For(Config with { DeviceLabel = "Desk" }, me, [new(new string('b', 32), me.DisplayName)]));
+    }
+
+    [Fact]
+    public void UnreadableHistoricalManifestDoesNotPreventNameAdvice()
+    {
+        var state = new LocalState(_fixture.PathFor("name-advice"));
+        var device = state.Device();
+        var snapshot = LibraryDatabase.ReadSnapshot(_fixture.CreateLibrary("advice-db"), Config.AccountId);
+        var assets = new AssetManifest(1, [], []);
+        var versions = new MedalVersions(null, null);
+        var now = DateTimeOffset.UtcNow;
+        var store = CoordinationStore.Create(_fixture.PathFor("coordination"), Config.LibraryId, snapshot, assets,
+            device, new string('1', 32), versions, now);
+        string damaged = Path.Combine(store.Generations.Directory, GenerationStore.Name(1));
+        Directory.CreateDirectory(damaged);
+        File.WriteAllText(Path.Combine(damaged, "manifest.json"), "truncated manifest");
+        Assert.Null(DeviceNameAdvice.Read(Config, state, store));
+
+        var duplicate = device with { DeviceId = new string('b', 32) };
+        store.Generations.Publish(2, 0, new string('2', 32), duplicate, snapshot, assets, versions, now);
+        Assert.NotNull(DeviceNameAdvice.Read(Config, state, store));
     }
 
     [Theory]

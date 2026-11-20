@@ -5,7 +5,7 @@ namespace MedalSync.Config;
 /// <summary>Local setup intent only. Never evidence of ownership or a completed enrollment.</summary>
 internal sealed record LibrarySetupPending(int Format, string LibraryId, string AccountId, bool NewLibrary)
 {
-    private static string PathFor(LocalState state) => Path.Combine(state.Root, "library-setup.json");
+    internal static string PathFor(LocalState state) => Path.Combine(state.Root, "library-setup.json");
 
     public static LibrarySetupPending? Read(LocalState state, MedalSyncConfig config)
     {
@@ -34,4 +34,9 @@ internal sealed record LibrarySetupPending(int Format, string LibraryId, string 
 
     public static bool HasSession(LocalState state) => Directory.Exists(Path.Combine(state.Root, "sessions"))
         && Directory.EnumerateFiles(Path.Combine(state.Root, "sessions"), "*.json").Any();
+
+    // Cloud initialization publishes generation 0 to this PC's history cache before creating the Drive journal.
+    // In both modes, let the regular status checks take over as soon as initialization leaves library evidence.
+    public bool AwaitsInitialization(LocalState state, MedalSyncConfig config, Func<bool> supervisorRunning) =>
+        NewLibrary && !Directory.Exists(config.LibraryCoordinationDirectory) && !HasSession(state) && !supervisorRunning();
 }
