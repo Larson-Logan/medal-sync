@@ -193,7 +193,7 @@ Read [recovery rules](getting-started.md#recovery-rules) before using these.
 | `refresh-media --out FILE` | Reviews differences between the persistent local copy and primary storage. See [review and refresh persistent local media](storage.md#review-and-refresh-persistent-local-media). |
 | `refresh-media --in FILE --apply [--accept-unknown-media]` | Applies that exact review, keeping a backup of every replaced file. |
 | `repair --checkpoint FILE [--db DB] [--apply]` | Puts back clips Medal dropped since a snapshot, when their files still exist. Takes a database backup first and keeps it until a reviewed retention removes it. |
-| `relocate --from DIR [--config FILE] [--apply]` | Copies library files left outside the capture folder to the server's clip folder, verifies them and repoints the library. The originals stay. Works with an SMB primary, or with Google Drive before `init --apply` creates the Drive journal, when files go to the persistent local copy; it refuses once that journal exists. |
+| `relocate --from DIR [--config FILE] [--apply]` | Copies library files left outside the capture folder to the server's clip folder, verifies them and repoints the library. Missing optional overlays are reported in the preview and their paths are cleared on apply. The originals and a database backup are kept. Works with an SMB primary, or with Google Drive before `init --apply` creates the Drive journal, when files go to the persistent local copy; it refuses once that journal exists. |
 | `abandon --session ID --reason TEXT [--apply]` | Gives up a session whose PC is lost and returns the library to the last published generation. Unpublished clips stay on that PC and must be reconciled by hand. |
 
 ## Test mounting before using live data

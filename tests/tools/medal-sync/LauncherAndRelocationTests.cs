@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using MedalSync.Cli;
 using MedalSync.Library;
 using MedalSync.Platform;
@@ -100,6 +101,44 @@ public sealed class LauncherAndRelocationTests : IDisposable
         var metadata = Assert.IsType<JsonbCell>(Assert.Single(contents.Rows)[contents.ColumnIndex("metadata")]);
         using var document = JsonDocument.Parse(metadata.Json);
         Assert.Equal(@"D:\Clips\Clips\historic.mp4", document.RootElement.GetProperty("remoteContent").GetProperty("videoPath").GetString());
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Relocation_CopiesRequiredMediaWhenAnOptionalOverlayIsMissing()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string db = _fixture.CreateLibrary("missing-overlay");
+        var from = WindowsPath.Parse(_fixture.PathFor("original-capture"));
+        var destination = WindowsPath.Parse(_fixture.PathFor("destination-capture"));
+        string video = from.Append("clip.mp4").Display;
+        string overlay = from.Append("overlay.json").Display;
+        MedalFixture.AddContent(db, "clip", video: video, metadata: JsonSerializer.Serialize(new { keyboardOverlayFilePath = overlay }));
+        var install = new MedalInstall(_fixture.PathFor("install"), db, MedalFixture.AccountId,
+            _fixture.PathFor("install", "Medal.exe"), new(null, null));
+        string backups = _fixture.PathFor("missing-overlay-backups");
+        var output = new StringWriter();
+        var original = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+
+        Assert.Throws<UnsafeOperationException>(() => LibraryCommands.RelocateLibrary(install, from, Capture, destination, backups, false, output));
+        Directory.CreateDirectory(from.Display);
+        File.WriteAllText(video, "required clip");
+        Directory.CreateDirectory(destination.Display);
+        string destinationOverlay = destination.Append("overlay.json").Display;
+        File.WriteAllText(destinationOverlay, "unverified overlay");
+
+        Assert.Equal(0, LibraryCommands.RelocateLibrary(install, from, Capture, destination, backups, false, output));
+        Assert.Contains("Applying clears their paths", output.ToString());
+        Assert.Equal(original.Digest(), LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId).Digest());
+        Assert.False(File.Exists(destination.Append("clip.mp4").Display));
+
+        Assert.Equal(0, LibraryCommands.RelocateLibrary(install, from, Capture, destination, backups, true, output));
+        var relocated = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+        Assert.Equal(("clip.mp4", true), Assert.Single(ReplicationPlan.Media(relocated, Capture)));
+        Assert.Equal("required clip", File.ReadAllText(destination.Append("clip.mp4").Display));
+        Assert.Equal("unverified overlay", File.ReadAllText(destinationOverlay));
+        string backup = Assert.Single(Directory.EnumerateFiles(backups, "*.db", SearchOption.AllDirectories));
+        Assert.Equal(original.Digest(), LibraryDatabase.ReadSnapshot(backup, MedalFixture.AccountId).Digest());
     }
 
     [Fact]

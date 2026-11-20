@@ -5,7 +5,7 @@ using MedalSync.Util;
 namespace MedalSync.Library;
 
 /// <summary>One library path that moves from an old folder to the capture folder.</summary>
-internal sealed record Relocation(string ContentId, string Field, string Original, WindowsPath From, WindowsPath To);
+internal sealed record Relocation(string ContentId, string Field, string Original, WindowsPath From, WindowsPath To, AssetRole Role);
 
 /// <summary>
 /// Rewrites library file paths from a folder outside the capture tree (files
@@ -29,12 +29,12 @@ internal static class ReferenceRelocation
         {
             if (reference.Role != AssetRole.Required && reference.Field != OverlayField) continue;
             if (!WindowsPath.TryParse(reference.Path, out WindowsPath? path, out _) || !path.IsWithin(fromRoot) || path.Equals(fromRoot)) continue;
-            moves.Add(new Relocation(reference.ContentId, reference.Field, reference.Path, path, path.Rebase(fromRoot, toRoot)));
+            moves.Add(new Relocation(reference.ContentId, reference.Field, reference.Path, path, path.Rebase(fromRoot, toRoot), reference.Role));
         }
         return moves;
     }
 
-    public static LibrarySnapshot Apply(LibrarySnapshot snapshot, IReadOnlyList<Relocation> moves)
+    public static LibrarySnapshot Apply(LibrarySnapshot snapshot, IReadOnlyList<Relocation> moves, IReadOnlySet<string>? missingOptional = null)
     {
         var contents = snapshot.Table("contents");
         int id = contents.ColumnIndex("local_content_id");
@@ -54,7 +54,9 @@ internal static class ReferenceRelocation
                         || JsonNode.Parse(json.Json, documentOptions: MetadataOptions) is not JsonObject node
                         || node[OverlayProperty] is not JsonValue overlay || !overlay.TryGetValue<string>(out string? value)
                         || value != move.Original) continue;
-                    node[OverlayProperty] = move.To.Display;
+                    // A missing source cannot verify any same-named file at the destination.
+                    if (missingOptional?.Contains(move.From.Key) == true) node.Remove(OverlayProperty);
+                    else node[OverlayProperty] = move.To.Display;
                     copy[metadata] = new JsonbCell(node.ToJsonString());
                     applied++;
                     continue;
