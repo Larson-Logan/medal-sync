@@ -39,7 +39,7 @@ RULES = [
     # Linux job only. docs/setup.html, LICENSE and THIRD_PARTY.md ship in the
     # installer, so they are deliberately not here.
     (['README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md',
-      'SECURITY.md', 'SUPPORT.md', 'docs/*.md', 'tests/README.md',
+      'SECURITY.md', 'SUPPORT.md', 'docs/*.md', 'docs/knowledge/', 'tests/README.md',
       '.github/ISSUE_TEMPLATE/', '.github/PULL_REQUEST_TEMPLATE.md',
       '.github/labels.json', '.github/project.json', '.github/release.yml',
       '.github/dependabot.yml', '.github/rulesets/',
