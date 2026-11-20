@@ -48,6 +48,16 @@ public sealed class CliInputAndStatusTests : IDisposable
         Assert.Empty(result.Output);
     }
 
+    // Launch and finish refusals for an interrupted enrollment tell people to add --rollback.
+    [Fact]
+    public void Parser_AcceptsTheEnrollmentRollbackFlag()
+    {
+        var result = Run("enroll", "recover", "--out", _fixture.PathFor("enroll"), "--rollback", "--rollback");
+        Assert.Equal(2, result.Code);
+        Assert.Contains("--rollback was given more than once", result.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain("Unknown option", result.Error, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("--bitrate", "0", "--hours", "1", "--free-gb", "100")]
     [InlineData("--bitrate", "-8", "--hours", "1", "--free-gb", "100")]

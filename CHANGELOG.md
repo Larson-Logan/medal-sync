@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `enroll recover --rollback` is accepted again; it was refused as an unknown
+  option, so an interrupted enrollment could not be rolled back (#227).
+- Launch no longer leaves a copy of Medal's native backup database in
+  `Backups\native-identity` after every inspection. Copies kept by a failed
+  inspection, and those left by earlier versions, are pruned to the newest
+  three (#240).
 - Upload settled clips to primary storage and replicas while the owning PC is
   idle, and prepare an uncommitted library checkpoint for finish to reuse.
   The tray shows All clips uploaded; quit and shutdown reuse verified media

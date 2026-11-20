@@ -10,7 +10,7 @@ namespace MedalSync.Cli;
 /// </summary>
 internal static class CommandRunner
 {
-    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--no-switch-request", "--help", "--new-library", "--spike" };
+    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--no-switch-request", "--help", "--new-library", "--spike", "--rollback" };
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
