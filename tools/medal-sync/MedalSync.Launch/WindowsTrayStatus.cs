@@ -38,6 +38,10 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private string? _finishFailure;
     private string? _exitFailure;
     private string? _actionFailure;
+    private readonly DesktopNotifier _notifier = new();
+    private readonly Action<DesktopNotification> _showNotification;
+    private readonly Action<bool> _saveNotifications;
+    private bool _notifications;
 
     public static int Run(bool show)
     {
@@ -92,7 +96,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 
     internal WindowsTrayStatus(bool show, Func<DesktopStatus>? readStatus = null, string eventName = OpenEventName,
         Func<Task<FinishCommandResult>>? runFinish = null, Func<bool>? operationRunning = null,
-        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null, Action<ProcessStartInfo>? startProcess = null)
+        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null, Action<ProcessStartInfo>? startProcess = null,
+        Action<DesktopNotification>? showNotification = null, Func<bool>? readNotifications = null, Action<bool>? saveNotifications = null)
     {
         _readStatus = readStatus ?? SessionCommands.ReadDesktopStatus;
         _runFinish = runFinish ?? RunFinish;
@@ -101,6 +106,9 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         _open = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _exit = new EventWaitHandle(false, EventResetMode.AutoReset, eventName + ".Exit");
         _operationRunning = operationRunning ?? SessionCommands.AnotherInstanceRunning;
+        _showNotification = showNotification ?? ShowBalloon;
+        _saveNotifications = saveNotifications ?? SaveNotifications;
+        _notifications = (readNotifications ?? ReadNotifications)();
         _icons = new AppIcons();
         _panel = new StatusForm(() => _ending = true)
         {
@@ -159,9 +167,14 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         signIn.Click += (_, _) => ToggleSignIn();
         menu.Opening += (_, _) => signIn.Checked = SignInEnabled();
         menu.Items.Add(signIn);
+        var notifications = new ToolStripMenuItem("Show &notifications") { CheckOnClick = false };
+        notifications.Click += (_, _) => ToggleNotifications();
+        menu.Opening += (_, _) => notifications.Checked = _notifications;
+        menu.Items.Add(notifications);
         menu.Items.Add("E&xit Medal Sync", null, (_, _) => TryExit());
         _icon = new NotifyIcon { Icon = _icons.For(SessionPhase.Unknown), Text = "Medal Sync: Unknown", Visible = true, ContextMenuStrip = menu };
         _icon.DoubleClick += (_, _) => ShowPanel();
+        _icon.BalloonTipClicked += (_, _) => ShowPanel();
         _timer = new System.Windows.Forms.Timer { Interval = 1000 };
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
@@ -178,6 +191,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         {
             _last = _read.IsCompletedSuccessfully ? _read.Result : DesktopStatus.Unknown(_last.ConfirmedAt);
             _read = null;
+            // Once per completed read, never per tick: the notifier only reacts to a changed state.
+            Notify(_last.At(DateTimeOffset.UtcNow));
         }
         // At most one read: a hung SMB connection cannot accumulate workers or block the UI. Each read loads the
         // configuration and reaches the share, so it runs every second only while the panel is open. The supervisor's
@@ -198,6 +213,51 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         if (!ReferenceEquals(_icon.Icon, icon)) _icon.Icon = icon;
         RenderStatus(status);
     }
+
+    /// <summary>Advisory: a notification that cannot be shown (Focus Assist, notifications off in Windows) changes nothing.</summary>
+    private void Notify(DesktopStatus status)
+    {
+        var notification = _notifier.Observe(status);
+        if (notification is null || !_notifications || _ending) return;
+        try { _showNotification(notification); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ArgumentException) { /* Advisory only. */ }
+    }
+
+    private void ShowBalloon(DesktopNotification notification)
+    {
+        // Windows shows a balloon as a toast; clicking it opens this panel, which offers only the existing actions.
+        const int Limit = 255;
+        string message = notification.Message.Length <= Limit ? notification.Message : notification.Message[..(Limit - 1)] + "…";
+        _icon.ShowBalloonTip(10_000, notification.Title, message,
+            notification.Kind == DesktopNotificationKind.Ready ? ToolTipIcon.Info : ToolTipIcon.Warning);
+    }
+
+    private void ToggleNotifications()
+    {
+        if (_ending) return;
+        bool next = !_notifications;
+        try
+        {
+            _saveNotifications(next);
+            _notifications = next;
+            _actionFailure = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _actionFailure = "The notification setting could not be saved. Try again from the tray menu.";
+            ShowPanel();
+        }
+        RenderStatus(_last.At(DateTimeOffset.UtcNow));
+    }
+
+    private static bool ReadNotifications()
+    {
+        try { return DesktopPreferences.Read(LocalState.ForCurrentUser()).Notifications; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or MedalSyncException) { return true; }
+    }
+
+    private static void SaveNotifications(bool on) =>
+        (DesktopPreferences.Read(LocalState.ForCurrentUser()) with { Notifications = on }).Save(LocalState.ForCurrentUser());
 
     private void RenderStatus(DesktopStatus status)
     {

@@ -133,8 +133,12 @@ public sealed class ReplicaCheckStatusTests : IDisposable
         var journal = Ownership.Initial(Library, "12345", _now);
         var status = DesktopStatus.Read(State, Library, journal, null, false, _now);
         Assert.Contains("failed its last complete check", status.Notice, StringComparison.Ordinal);
+        Assert.Equal(status.Notice, status.StorageAttention);
         File.WriteAllBytes(Path.Combine(State.Root, "desktop-notice.json"), Json.Serialize(new DesktopNotice("Higher-priority notice", _now)));
-        Assert.Equal("Higher-priority notice", DesktopStatus.Read(State, Library, journal, null, false, _now).Notice);
+        var replaced = DesktopStatus.Read(State, Library, journal, null, false, _now);
+        Assert.Equal("Higher-priority notice", replaced.Notice);
+        // A notification still follows the copy's state even while another notice is on the panel.
+        Assert.Contains("failed its last complete check", replaced.StorageAttention, StringComparison.Ordinal);
     }
 
     public void Dispose() => _fixture.Dispose();
