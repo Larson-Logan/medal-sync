@@ -29,96 +29,116 @@ internal sealed partial class SessionCoordinator
         {
             if (told.Add(message)) Send(message);
         }
-        while (!cancellation.IsCancellationRequested)
+        // Held from Medal's exit while uploads are still running between finish attempts, so Windows' idle timer
+        // cannot put the PC to sleep in the short pause between them. Released on Ready, a refusal, a retry backoff
+        // (waiting for storage, action needed, a failure), when Medal reopens and when supervision ends.
+        IDisposable? finishing = null;
+        void Rest()
         {
-            if (shutdown?.Ending == true) return FinishShutdown(session);
-            if (!medal.IsRunning())
+            finishing?.Dispose();
+            finishing = null;
+        }
+        try
+        {
+            while (!cancellation.IsCancellationRequested)
             {
-                var outcome = Finish(session);
-                if (outcome.Status != FinishStatus.Pending) return outcome;
-                if (outcome.Cause != PendingCause.None)
+                if (shutdown?.Ending == true) return FinishShutdown(session);
+                if (!medal.IsRunning())
                 {
-                    // Bounded retries that never repeat the same notice. An outage is cheap to probe: 30 s doubling to
-                    // 5 minutes. Any other failure repeats a full copy-and-verify pass, so it waits up to 10 minutes.
-                    // Each attempt still verifies from scratch; backoff only changes how often one starts.
-                    Once(outcome.StorageOffline ? "Waiting for storage. Clips are safe on this PC; the switch finishes automatically when storage is back." : outcome.Message);
-                    int limit = outcome.StorageOffline ? 300 : 600;
-                    var retryAt = clock.Now + TimeSpan.FromSeconds(Math.Min(limit, 30 << Math.Min(failedAttempts++, 5)));
-                    // Short steps keep cancellation, shutdown and a reopened Medal responsive during the wait.
-                    while (clock.Now < retryAt && !cancellation.IsCancellationRequested && shutdown?.Ending != true && !medal.IsRunning())
-                        Pause(options.PollInterval);
-                    continue;
-                }
-                failedAttempts = 0;
-                Once(outcome.Message);
-            }
-            else
-            {
-                if (compatibility is not null && clock.Now >= nextCompatibilityCheck)
-                {
-                    nextCompatibilityCheck = clock.Now + TimeSpan.FromMinutes(1);
-                    try
+                    finishing ??= StayAwake();
+                    var outcome = Finish(session);
+                    if (outcome.Status != FinishStatus.Pending) return outcome;
+                    if (outcome.Cause != PendingCause.None)
                     {
-                        if (compatibility.CheckForUpdate() is { } warning) Once(warning);
+                        Rest();
+                        // Bounded retries that never repeat the same notice. An outage is cheap to probe: 30 s doubling to
+                        // 5 minutes. Any other failure repeats a full copy-and-verify pass, so it waits up to 10 minutes.
+                        // Each attempt still verifies from scratch; backoff only changes how often one starts.
+                        Once(outcome.StorageOffline ? "Waiting for storage. Clips are safe on this PC; the switch finishes automatically when storage is back." : outcome.Message);
+                        int limit = outcome.StorageOffline ? 300 : 600;
+                        var retryAt = clock.Now + TimeSpan.FromSeconds(Math.Min(limit, 30 << Math.Min(failedAttempts++, 5)));
+                        // Short steps keep cancellation, shutdown and a reopened Medal responsive during the wait.
+                        while (clock.Now < retryAt && !cancellation.IsCancellationRequested && shutdown?.Ending != true && !medal.IsRunning())
+                            Pause(options.PollInterval);
+                        continue;
                     }
-                    catch (Exception ex) when (IsExpected(ex))
-                    {
-                        Once($"Medal compatibility could not be checked: {ex.Message} Keep this PC's session and cache; retry 'medal-sync compatibility --json'.");
-                    }
-                }
-                try
-                {
-                    // A request left by this PC itself (for example from before it took the library) never asks it to switch.
-                    var requests = store.PendingRequests(clock.Now).Where(r => r.Device.DeviceId != Me.DeviceId).ToList();
-                    foreach (var request in requests)
-                    {
-                        // Keyed by request, so a new request from the same PC notifies again.
-                        if (told.Add("request:" + request.RequestId)) Send($"{request.Device.DisplayName} wants to use Medal. {QuitFromTray} to switch.");
-                    }
-                    // A withdrawn request (the other PC cancelled, timed out or gave up) disappears from the status at once.
-                    waiting = requests.Select(r => r.Device.DisplayName).Distinct(StringComparer.Ordinal).ToList();
-                    if (clock.Now >= nextRequestCleanup)
-                    {
-                        nextRequestCleanup = clock.Now + TimeSpan.FromMinutes(10);
-                        foreach (var stale in store.StaleRequests(clock.Now)) store.RemoveStaleRequest(stale);
-                    }
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    Once("Clip storage is unreachable. Keep recording; uploads resume when it returns, and this PC keeps the library until then.");
-                }
-                if (space is not null)
-                {
-                    // Probes run in the background with a short wait, so a slow disk cannot hold up supervision.
-                    try { foreach (string notice in space.Check(clock.Now)) Send(notice); }
-                    catch (Exception) { /* Advisory only. */ }
-                }
-                var health = mount.Health();
-                if (health.Healthy)
-                {
-                    consecutiveStatusFailures = 0;
-                    // Also restores the recording limit if Medal reopened while uploads were finishing.
-                    if (mount.UseUploadLimit(recording: true) is { } limitProblem) Once(limitProblem);
-                    bool recording = IsRecording();
-                    SyncWhileIdle(session, recording, cancellation);
-                    if (shutdown?.Ending == true || !medal.IsRunning()) continue;
-                    Report(SessionPhase.Active, ActiveStatus(recording, waiting) + (idleSync is null ? "" : " " + _idleStatus), session,
-                        recording: recording, clipsSynced: _idleSynced);
+                    failedAttempts = 0;
+                    if (medal.IsRunning()) Rest(); // Reopened: the session carries on, nothing is finishing.
+                    Once(outcome.Message);
                 }
                 else
                 {
-                    Report(health.Retryable ? SessionPhase.Unknown : SessionPhase.RecoveryNeeded,
-                        "Clip drive status could not be confirmed. Keep this PC's session and cache; check storage before switching.", session);
-                    // One timed-out status request during a large file read is
-                    // not proof that the clip drive has failed. Confirm repeated
-                    // unknown responses before interrupting the user. Wrong
-                    // storage identity and other definite failures alert at once.
-                    if (!health.Retryable || ++consecutiveStatusFailures >= 3) Once($"Clip drive problem: {health.Detail}");
+                    Rest();
+                    if (compatibility is not null && clock.Now >= nextCompatibilityCheck)
+                    {
+                        nextCompatibilityCheck = clock.Now + TimeSpan.FromMinutes(1);
+                        try
+                        {
+                            if (compatibility.CheckForUpdate() is { } warning) Once(warning);
+                        }
+                        catch (Exception ex) when (IsExpected(ex))
+                        {
+                            Once($"Medal compatibility could not be checked: {ex.Message} Keep this PC's session and cache; retry 'medal-sync compatibility --json'.");
+                        }
+                    }
+                    try
+                    {
+                        // A request left by this PC itself (for example from before it took the library) never asks it to switch.
+                        var requests = store.PendingRequests(clock.Now).Where(r => r.Device.DeviceId != Me.DeviceId).ToList();
+                        foreach (var request in requests)
+                        {
+                            // Keyed by request, so a new request from the same PC notifies again.
+                            if (told.Add("request:" + request.RequestId)) Send($"{request.Device.DisplayName} wants to use Medal. {QuitFromTray} to switch.");
+                        }
+                        // A withdrawn request (the other PC cancelled, timed out or gave up) disappears from the status at once.
+                        waiting = requests.Select(r => r.Device.DisplayName).Distinct(StringComparer.Ordinal).ToList();
+                        if (clock.Now >= nextRequestCleanup)
+                        {
+                            nextRequestCleanup = clock.Now + TimeSpan.FromMinutes(10);
+                            foreach (var stale in store.StaleRequests(clock.Now)) store.RemoveStaleRequest(stale);
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        Once("Clip storage is unreachable. Keep recording; uploads resume when it returns, and this PC keeps the library until then.");
+                    }
+                    if (space is not null)
+                    {
+                        // Probes run in the background with a short wait, so a slow disk cannot hold up supervision.
+                        try { foreach (string notice in space.Check(clock.Now)) Send(notice); }
+                        catch (Exception) { /* Advisory only. */ }
+                    }
+                    var health = mount.Health();
+                    if (health.Healthy)
+                    {
+                        consecutiveStatusFailures = 0;
+                        // Also restores the recording limit if Medal reopened while uploads were finishing.
+                        if (mount.UseUploadLimit(recording: true) is { } limitProblem) Once(limitProblem);
+                        bool recording = IsRecording();
+                        SyncWhileIdle(session, recording, cancellation);
+                        if (shutdown?.Ending == true || !medal.IsRunning()) continue;
+                        Report(SessionPhase.Active, ActiveStatus(recording, waiting) + (idleSync is null ? "" : " " + _idleStatus), session,
+                            recording: recording, clipsSynced: _idleSynced);
+                    }
+                    else
+                    {
+                        Report(health.Retryable ? SessionPhase.Unknown : SessionPhase.RecoveryNeeded,
+                            "Clip drive status could not be confirmed. Keep this PC's session and cache; check storage before switching.", session);
+                        // One timed-out status request during a large file read is
+                        // not proof that the clip drive has failed. Confirm repeated
+                        // unknown responses before interrupting the user. Wrong
+                        // storage identity and other definite failures alert at once.
+                        if (!health.Retryable || ++consecutiveStatusFailures >= 3) Once($"Clip drive problem: {health.Detail}");
+                    }
                 }
+                Pause(options.PollInterval);
             }
-            Pause(options.PollInterval);
+            return new FinishOutcome(FinishStatus.Pending, "Stopped watching; the session stays on this PC.", -1);
         }
-        return new FinishOutcome(FinishStatus.Pending, "Stopped watching; the session stays on this PC.", -1);
+        finally
+        {
+            Rest();
+        }
     }
 
     /// <summary>

@@ -67,6 +67,8 @@ internal sealed partial class SessionCoordinator
                 _idleStatus = "Clips are uploading or still being saved. Keep this PC on.";
                 return;
             }
+            // The user is away by definition here; without this the idle timer could sleep the PC mid-transfer.
+            using var awake = StayAwake();
             Report(SessionPhase.Active, "Syncing finished clips in the background.", session);
             if (!idleSync!(snapshot, RequireIdle))
             {

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep the PC awake (system, not display) while a finish uploads and verifies, during idle sync and while `replicate retry --apply` transfers, so a PC left alone after quitting Medal does not sleep with unpublished clips. Released at Ready, on refusals, while waiting for storage and when Medal reopens. `keepAwakeWhileFinishing: false` turns it off (#246).
 - `init` previews leave the device identity untouched. Maintenance also recognizes a pending library that an earlier preview left with an identity (#243).
 - The configuration wizard refuses an orphaned setup record before saving a new configuration. Damaged historical manifests no longer block its device-name advice (#242, #235).
 - The tray and `status --json` report pending Google Drive setup without polling Drive. The tray shows Waiting for storage when a journal read fails because storage is unreachable (#232, #233).
