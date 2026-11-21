@@ -164,8 +164,8 @@ moves to the finishing value when Medal exits, and back if Medal reopens before
 the switch completes. If the drive does not accept a change, a notice says so
 and the session continues at the previous speed; the limit never blocks
 recording or finishing. `mount-plan` shows the recording limit as `--bwlimit`,
-for example `5Mi:off`: the limit applies to uploads only, so playing clips
-from the server is never slowed by it.
+for example `5Mi`. The limit covers write-back and reads from backing storage,
+including when playback fetches a clip that has not reached the SSD cache.
 
 A limit only changes speed. Uploads take longer, so more clips wait on the SSD
 cache, but launch already reserves room for a whole session as if nothing
@@ -557,11 +557,13 @@ all remaining presence/size checks pass. Progress and finish results show the
 planned files and bytes to read back, summed across destinations.
 
 Private receipts under `replication/destinations/` bind the snapshot digest,
-library, source, destination, configuration, credential-file fingerprint and
+library, source, destination, configuration, the rclone remote settings and
 per-file identities. Missing, damaged, foreign, expired or failed evidence forces
 a full pass. Each attempt invalidates its previous receipt before checking files;
 an interruption or conflict cannot leave a partially updated receipt reusable.
-Keep these receipts private: they name media. Their absence is safe.
+OAuth token refreshes preserve verification evidence. When moving to a different
+provider account, configure a new named rclone remote so its first pass verifies
+all bytes. Keep these receipts private: they name media. Their absence is safe.
 
 ### Retry cloud copies while Ready
 

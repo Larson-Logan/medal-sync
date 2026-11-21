@@ -3,6 +3,10 @@
 ## Unreleased
 
 - Sign in to Google Drive, OneDrive or Dropbox from the configuration wizard (**Cloud sign-in**) and sign in again from the status panel when the storage check reports an expired sign-in, without a terminal. `medal-sync storage sign-in` runs the bundled rclone on a private copy of the credential file and saves it only after the storage check passes; the wizard never saves a configuration whose remote failed (#253).
+- Cloud verification keeps its receipts when rclone refreshes an OAuth token (#221).
+- The clip-drive limit now throttles local and SMB write-back. It also caps reads of clips that are not cached (#222).
+- Windows uninstall asks you to restore Medal's startup entries before removing a launcher they still use (#239).
+
 - Launch keeps retrying an interrupted session's handoff. If Medal reopens during the drain, launch verifies the clip drive and resumes supervision (#214, #215).
 - Google Drive initialization can resume after a partial local write. A finish resuming publication skips generation numbers already used by interrupted cloud uploads (#217, #219).
 - A persistent-media refresh can retry an interrupted backup when the reviewed local file is still intact. Legacy startup recovery keeps the session login when its cache is inaccessible (#224, #225).

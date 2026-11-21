@@ -18,7 +18,7 @@ internal sealed record MountSettings(
     string VolumeName,
     string LogFile)
 {
-    /// <summary>Upload limit in MiB/s, passed as <c>--bwlimit</c>. Null is unlimited.</summary>
+    /// <summary>Transfer limit in MiB/s, passed as <c>--bwlimit</c>. Null is unlimited.</summary>
     public int? BandwidthLimitMiB { get; init; }
 }
 
@@ -83,11 +83,11 @@ internal static class MountPlan
     }
 
     /// <summary>
-    /// An upload limit as rclone reads it: whole MiB/s for uploads with downloads unlimited, or <c>off</c> for
-    /// unlimited. A bare rate would also cap downloads, which throttles clip playback.
+    /// A single rate enables rclone's accounting limiter for local and UNC paths, including write-back
+    /// and uncached reads. An upload-only rate limits rclone's network dialer, which these paths bypass.
     /// </summary>
     internal static string Rate(int? bandwidthMiB) =>
-        bandwidthMiB is { } limit ? limit.ToString(CultureInfo.InvariantCulture) + "Mi:off" : "off";
+        bandwidthMiB is { } limit ? limit.ToString(CultureInfo.InvariantCulture) + "Mi" : "off";
 
     public static void Validate(MountSettings settings)
     {

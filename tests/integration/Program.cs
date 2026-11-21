@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
@@ -12,6 +13,7 @@ using MedalSync.Session;
 using MedalSync.Storage;
 using MedalSync.Tests.Fixtures;
 using MedalSync.Util;
+using Microsoft.Win32;
 
 namespace MedalSync.Integration;
 
@@ -46,6 +48,7 @@ internal static class Program
                 return 0;
             }
             TestReplication(rclone);
+            TestLocalMountBandwidth(rclone);
             TestIncrementalAndReadyRetry(rclone);
             TestReplicaAuditAndPrune(rclone);
             TestCloudPrimary(rclone);
@@ -119,6 +122,13 @@ internal static class Program
         try
         {
             SetupMaintenance.RequireReady(root, File.Exists(Path.Combine(root, "application-running")), File.Exists(Path.Combine(root, "supervisor-running")));
+            if (args.Contains("--uninstall"))
+            {
+                string key = @"Software\MedalSyncTests\" + Path.GetFileName(Path.GetDirectoryName(root));
+                using var startup = new StartupIntegration(root, Path.Combine(AppContext.BaseDirectory, StartupEntries.LauncherFile),
+                    Registry.CurrentUser.CreateSubKey(key), [], Path.Combine(root, "Medal.exe"), () => DateTimeOffset.UtcNow);
+                startup.RequireDetachedForUninstall();
+            }
             // Model a state change while the uninstall confirmation is open.
             if (File.Exists(Path.Combine(root, "refuse-second-check")))
             {
@@ -215,6 +225,23 @@ internal static class Program
         string history = Path.Combine(Path.GetDirectoryName(ReplicaFile(fixture, "onedrive", "#clip [test].mp4"))!, ".medal-sync-history");
         Check(Directory.EnumerateFiles(history, "*.mp4", SearchOption.AllDirectories).Any(f => File.ReadAllText(f) == "prior destination version"), "versioned replication preserves the previous destination before updating");
         Check(File.ReadAllText(ReplicaFile(fixture, "onedrive", "#clip [test].mp4")) == "synthetic media bytes", "versioned replication verifies the updated destination");
+    }
+
+    private static void TestLocalMountBandwidth(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone);
+        var mount = MountPlan.Arguments(config.MountSettings("synthetic-session", fixture.PathFor("mount.log")));
+        string rate = mount[mount.ToList().IndexOf("--bwlimit") + 1];
+        string source = fixture.PathFor("recording.mp4");
+        string destination = fixture.PathFor("backing", "recording.mp4");
+        const int bytes = 12 * 1024 * 1024;
+        using (var clip = File.Create(source)) clip.SetLength(bytes);
+        var clock = Stopwatch.StartNew();
+        new RcloneRunner(rclone).Run(["copyto", source, destination, "--config", fixture.PathFor("empty.conf"),
+            "--bwlimit", rate], TimeSpan.FromSeconds(30));
+        Check(new FileInfo(destination).Length == bytes && clock.Elapsed >= TimeSpan.FromSeconds(3),
+            $"the clip-drive rate throttles a real local-backend copy ({clock.Elapsed.TotalSeconds:F1} s for 12 MiB at {rate})");
     }
 
     private static void TestIncrementalAndReadyRetry(string rclone)

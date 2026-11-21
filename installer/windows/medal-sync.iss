@@ -326,6 +326,7 @@ begin
   Params := Params + ' --state-root "{#IsolatedTestRoot}"';
 #endif
   if ForUninstall then begin
+    Params := Params + ' --uninstall';
     Executable := ExpandConstant('{app}\bin\medal-sync.exe');
 #ifdef IsolatedTestId
     Executable := ExpandConstant('{app}\bin\medal-sync-test-check.exe');
@@ -461,7 +462,10 @@ begin
 #endif
   Error := CheckReady(True);
   Result := Error = '';
-  if not Result then SuppressibleMsgBox(Error, mbError, MB_OK, IDOK);
+  if not Result then begin
+    Log('Uninstall refused before confirmation: ' + Error);
+    SuppressibleMsgBox(Error, mbError, MB_OK, IDOK);
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
