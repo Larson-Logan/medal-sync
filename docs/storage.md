@@ -722,7 +722,47 @@ receipt before moving files, even if the move is interrupted. Applying a
 nonempty trash purge drops it too. This PC's next handoff reads every referenced
 file back at that destination before releasing ownership. Other PCs' private
 receipts are unchanged; cleanup protects the referenced files they verify.
-Cleaning an rclone primary is not supported by these commands.
+Primary storage has its own commands, described next.
+
+### Clean up deleted clips on primary storage
+
+When you delete a clip in Medal, the next generation stops referencing it, but
+its file stays on primary storage. Remove those files with the same two-step,
+reviewed cleanup, while every PC is Ready:
+
+```powershell
+medal-sync primary prune --out C:\Private\primary-cleanup.json [--grace-days 14]
+medal-sync primary prune --in C:\Private\primary-cleanup.json --apply
+medal-sync primary purge-trash [--older-than 7] [--apply]
+```
+
+It works for SMB, local-folder and rclone primaries. The rules are stricter
+than for a cloud copy, because every PC restores its clips from primary storage:
+
+- A file is planned only when it is clip media or a sidecar, older than the
+  grace period, and referenced by **no** generation still kept: the committed
+  one, any earlier one and any uncommitted attempt, however old. Generations
+  that `retention` removed no longer protect anything.
+- If any kept generation cannot be read, the whole review is refused instead
+  of planning around it.
+- Medal's `Temp` folder (its replay buffer), Medal Sync's own `.medal-sync*`
+  files and folders, `Databases` and anything that is not clip media are left
+  alone. Links and junctions in a share or local folder refuse the review.
+- Apply holds the journal writer lock, so no PC can start or finish meanwhile,
+  requires the library to be Ready, and refuses if the committed generation or
+  any file listed in the review changed. It moves files into
+  `.medal-sync-trash/<review ID>/` in the clip folder on primary storage and
+  deletes nothing. Applying the same review again finishes an interrupted
+  apply; files already in its trash folder count as moved.
+- `purge-trash` deletes only whole batches whose files were moved at least
+  `--older-than` days ago, as it does for cloud copies.
+- If primary storage cannot be reached, both steps exit 3 and change nothing.
+- Applying, and a nonempty purge, drop this PC's incremental verification
+  receipt for primary storage, so its next handoff reads every referenced file
+  back.
+- A persistent local copy (`replication.localCopyRoot`) is reported but not
+  cleaned. Google Drive cloud mode refuses these commands, because they need
+  the SMB writer lock.
 
 ### Check sign-in before recording
 

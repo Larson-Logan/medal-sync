@@ -5,6 +5,7 @@ using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using MedalSync.Cli;
 using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Library;
@@ -52,6 +53,7 @@ internal static class Program
             TestIncrementalAndReadyRetry(rclone);
             TestReplicaAuditAndPrune(rclone);
             TestCloudPrimary(rclone);
+            TestPrimaryPrune(rclone);
             CloudEnrollment.Run(rclone, Check);
             CloudHandoff.Run(rclone, Check, testMount: args.Contains("--mount"));
             TestInterruptedTransfer(rclone);
@@ -445,6 +447,51 @@ internal static class Program
         new StorageReplication(second, new(fixture.PathFor("second-state")), () => { }).Prepare(snapshot);
         Check(File.ReadAllText(second.MountedCapture.Append("clip.mp4").Display) == "synthetic primary media",
             "a second local collection hydrates missing bytes from the real named primary");
+    }
+
+    private static void TestPrimaryPrune(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone) with
+        {
+            StorageMode = StorageMode.Server, Remote = "onedrive:Primary",
+            Replication = new(fixture.PathFor("persistent"), Remotes(fixture), []),
+        };
+        var state = new LocalState(fixture.PathFor("state"));
+        new RcloneAssetChecker(config, state).Initialize(false);
+        string primary = fixture.PathFor("onedrive", "Primary", "Clips");
+        void Put(string relative, string text, int ageDays)
+        {
+            string path = Path.Combine(primary, relative.Replace('/', '\\'));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text);
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-ageDays));
+        }
+        Put("kept [clip].mp4", "referenced", 60);
+        Put("deleted #1.mp4", "deleted in Medal", 60);
+        Put("recent.mp4", "changed this week", 2);
+        Put("Temp/RecordingBuffer/segment.mp4", "replay buffer", 60);
+        string db = fixture.CreateLibrary("primary-prune");
+        MedalFixture.AddContent(db, "kept", video: config.Capture.Append("kept [clip].mp4").Display);
+        var snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        var store = CoordinationStore.Create(config.LibraryCoordinationDirectory, config.LibraryId, snapshot, new(1, [], []),
+            new(new string('d', 32), "Synthetic PC"), new string('e', 32), Versions, DateTimeOffset.UtcNow.AddDays(-100));
+        var before = store.ReadJournal();
+        var remote = new RcloneReplicaRemote(config, state, () => { });
+        var prune = PrimaryCommands.Prune(config, state, store, () => { }, remote);
+        var plan = prune.Plan(ReplicaPrune.PrimaryTarget);
+        Check(plan.Files.Select(f => f.Path).SequenceEqual(["deleted #1.mp4"]),
+            "real rclone primary listing plans only the old clip no generation references");
+        var result = ReplicaCommands.ApplyPrune(prune, store, plan);
+        string trashed = Path.Combine(primary, ".medal-sync-trash", plan.Id, "deleted #1.mp4");
+        Check(result.Moved == 1 && File.ReadAllText(trashed) == "deleted in Medal" && File.Exists(Path.Combine(primary, "kept [clip].mp4"))
+            && File.Exists(Path.Combine(primary, "recent.mp4")) && File.Exists(Path.Combine(primary, "Temp", "RecordingBuffer", "segment.mp4"))
+            && File.Exists(Path.Combine(primary, MedalSyncConfig.StorageMarker)), "real rclone moves exactly the reviewed primary file into its trash");
+        Check(PrimaryCommands.Prune(config, state, store, () => { }, remote, () => DateTimeOffset.UtcNow.AddDays(8))
+            .Purge(ReplicaPrune.PrimaryTarget, ReplicaPrune.DefaultPurgeDays, apply: true).Count == 1
+            && !Directory.Exists(Path.Combine(primary, ".medal-sync-trash", plan.Id)) && File.Exists(Path.Combine(primary, "kept [clip].mp4")),
+            "real rclone purge deletes only the old primary trash batch");
+        Check(store.ReadJournal() == before, "primary cleanup never acquires ownership or changes the journal");
     }
 
     private static void TestInterruptedTransfer(string rclone)
