@@ -305,6 +305,20 @@ public sealed class CloudHandoffTests : IDisposable
     }
 
     [Fact]
+    public void ARefusedCloudSignInIsStorageAttentionForTheStatusView()
+    {
+        var state = HistoryState(Config("second"));
+        var source = new DesktopStatusSource(() => state, () => false,
+            _ => throw new StorageActionRequiredException("Google Drive refused Medal Sync's sign-in. Sign in again."));
+
+        var status = source.Read();
+
+        Assert.Equal(SessionPhase.RecoveryNeeded, status.Phase);
+        Assert.Equal(status.NextAction, status.StorageAttention);
+        Assert.False(status.OwnedHere);
+    }
+
+    [Fact]
     public void MissingDriveChecksumsRefuseWithoutPublishingDownloadedGenerations()
     {
         using var drive = new Drive();

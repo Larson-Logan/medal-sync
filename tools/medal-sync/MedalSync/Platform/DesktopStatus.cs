@@ -57,6 +57,13 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
     /// </summary>
     public string? StorageAttention { get; init; }
 
+    /// <summary>
+    /// The status describes this PC's own session in the journal, not another PC's session or a refused storage access,
+    /// so a later Ready is this PC's own finish.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool OwnedHere { get; init; }
+
     public string Title => Heading ?? Phase switch
     {
         SessionPhase.Active => Recording ? "Recording" : ClipsSynced ? "All clips uploaded" : "Medal open",
@@ -101,7 +108,10 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         ProgressEnvelope? report = null;
         try { report = Json.ReadFile<ProgressEnvelope>(Path.Combine(state.Root, "desktop-status.json"), "Desktop progress"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Explicit unknown below. */ }
-        var status = Resolve(journal, device ?? NoDevice, report, supervisorRunning, now);
+        var status = Resolve(journal, device ?? NoDevice, report, supervisorRunning, now) with
+        {
+            OwnedHere = device is not null && journal.State != OwnershipState.Clean && journal.Owner?.DeviceId == device.DeviceId,
+        };
         var retry = ReplicaRetryStatus.Read(state, libraryId, now);
         var pending = StorageReplication.Pending(state, libraryId);
         status = status with { CanRetryCloudCopies = status.Phase == SessionPhase.Ready && pending.Count > 0 && retry?.Running != true };
@@ -277,7 +287,8 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
             }
             catch (StorageActionRequiredException ex)
             {
-                return new DesktopStatus(SessionPhase.RecoveryNeeded, ex.Message, DateTimeOffset.UtcNow);
+                // A refused sign-in or access to the cloud journal is storage attention for this PC, whoever owns the library.
+                return new DesktopStatus(SessionPhase.RecoveryNeeded, ex.Message, DateTimeOffset.UtcNow) { StorageAttention = ex.Message };
             }
             catch (IOException)
             {

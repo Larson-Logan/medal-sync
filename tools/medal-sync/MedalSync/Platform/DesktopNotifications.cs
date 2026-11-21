@@ -34,7 +34,8 @@ internal sealed class DesktopNotifier
         if (!_started)
         {
             (_started, _phase, _attention) = (true, status.Phase, attention);
-            _finishing = IsFinishing(status.Phase);
+            // Opened mid-finish: only this PC's own session counts, never another PC's recovery or a refused storage access.
+            _finishing = status.OwnedHere && IsFinishing(status.Phase);
             return null;
         }
         var previous = _phase;

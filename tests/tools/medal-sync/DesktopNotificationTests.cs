@@ -12,8 +12,14 @@ public sealed class DesktopNotificationTests : IDisposable
 
     public void Dispose() => _fixture.Dispose();
 
-    private static DesktopStatus S(SessionPhase phase, string next = "next action", string? attention = null, string? lastResult = null) =>
-        new(phase, next, Now, LastResult: lastResult) { StorageAttention = attention };
+    /// <summary>A status read. Active, Uploading and Verifying only ever describe this PC's own session.</summary>
+    private static DesktopStatus S(SessionPhase phase, string next = "next action", string? attention = null, string? lastResult = null,
+        bool? owned = null) =>
+        new(phase, next, Now, LastResult: lastResult)
+        {
+            StorageAttention = attention,
+            OwnedHere = owned ?? phase is SessionPhase.Active or SessionPhase.Uploading or SessionPhase.Verifying,
+        };
 
     private static List<DesktopNotification> Run(params DesktopStatus[] reads)
     {
@@ -50,6 +56,25 @@ public sealed class DesktopNotificationTests : IDisposable
     {
         var ready = Assert.Single(Run(S(SessionPhase.Uploading), S(SessionPhase.Verifying), S(SessionPhase.Ready)));
         Assert.Equal(DesktopNotificationKind.Ready, ready.Kind);
+    }
+
+    [Fact]
+    public void AViewStartedDuringAnotherPcsRecoveryOrARefusedAccessDoesNotClaimThisPcsFinish()
+    {
+        Assert.Empty(Run(S(SessionPhase.RecoveryNeeded, owned: false), S(SessionPhase.Ready)));
+        Assert.Empty(Run(S(SessionPhase.RecoveryNeeded, attention: "Sign in again.", owned: false), S(SessionPhase.Ready)));
+        var ready = Assert.Single(Run(S(SessionPhase.RecoveryNeeded, owned: true), S(SessionPhase.Ready)));
+        Assert.Equal(DesktopNotificationKind.Ready, ready.Kind);
+    }
+
+    [Fact]
+    public void ARefusedCloudSignInAfterReadyNotifiesAsStorageAttention()
+    {
+        const string refused = "Google Drive refused Medal Sync's sign-in. Sign in again.";
+        var shown = Run(S(SessionPhase.Ready), S(SessionPhase.RecoveryNeeded, refused, attention: refused, owned: false),
+            S(SessionPhase.RecoveryNeeded, refused, attention: refused, owned: false));
+        var attention = Assert.Single(shown);
+        Assert.Equal((DesktopNotificationKind.StorageAttention, refused), (attention.Kind, attention.Message));
     }
 
     [Fact]
