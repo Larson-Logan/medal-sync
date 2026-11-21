@@ -3,11 +3,12 @@ name: Publish to winget
 # `winget upgrade` offers it. Betas are never submitted. Runs on a standard
 # GitHub-hosted runner, free for this public repository.
 #
-# Off until the first manifest is merged into winget-pkgs by hand (see
-# docs/updates.md#install-with-winget) and the WINGET_PACKAGE_IDENTIFIER
-# variable is set. It also needs the WINGET_TOKEN secret: a classic token with
-# only the public_repo scope, from an account with a fork of winget-pkgs. Komac
-# cannot open winget-pkgs pull requests with a fine-grained token.
+# Off until the WINGET_PACKAGE_IDENTIFIER variable is set. It also needs the
+# WINGET_TOKEN secret: a classic token with only the public_repo scope, from an
+# account with a fork of winget-pkgs. Komac cannot open winget-pkgs pull
+# requests with a fine-grained token. Komac can only update a package that
+# winget-pkgs already has, so until the first manifest is merged by hand (see
+# docs/releases.md#winget) each release is skipped with a warning.
 #
 # The release workflow publishes with the medal-sync-release app token, so its
 # releases trigger this workflow. To resubmit a release, choose Run workflow.
@@ -59,7 +60,27 @@ jobs:
             echo "version=$version"
             echo "url=https://github.com/$REPO/releases/download/v$version/$SETUP"
           } >>"$GITHUB_OUTPUT"
+      - name: Check that winget-pkgs has the package
+        id: listed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          letter="${IDENTIFIER:0:1}"
+          path="manifests/${letter,,}/${IDENTIFIER//.//}"
+          if response="$(gh api "repos/microsoft/winget-pkgs/contents/$path" --silent 2>&1)"; then
+            echo 'listed=true' >>"$GITHUB_OUTPUT"
+          elif grep -q 'HTTP 404' <<<"$response"; then
+            echo "::warning::$IDENTIFIER is not in winget-pkgs yet, so $VERSION was not submitted. Once the first manifest is merged, choose Run workflow to submit it."
+            echo "Skipped $VERSION: $IDENTIFIER is not in winget-pkgs yet." >>"$GITHUB_STEP_SUMMARY"
+            echo 'listed=false' >>"$GITHUB_OUTPUT"
+          else
+            echo "::error::Could not check winget-pkgs for $IDENTIFIER: $response"
+            exit 1
+          fi
       - name: Install Komac
+        if: steps.listed.outputs.listed == 'true'
         env:
           KOMAC_VERSION: 2.17.2
           KOMAC_SHA256: b03b020eec98acfb0b53e284a6e21815b884be33de6785b97e7a120f0e748966
@@ -70,6 +91,7 @@ jobs:
           echo "$KOMAC_SHA256  $archive" | sha256sum --check --strict
           tar -xzf "$archive" -C "$RUNNER_TEMP" komac
       - name: Open the winget-pkgs pull request
+        if: steps.listed.outputs.listed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
           IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}

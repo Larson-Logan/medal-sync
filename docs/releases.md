@@ -307,11 +307,13 @@ and [security](../SECURITY.md) with it.
 
 ### winget
 
-Stable releases can be submitted to the Windows Package Manager by the
+Stable releases are submitted to the Windows Package Manager by the
 [winget workflow](../.github/workflows/winget.yml), which runs
 [Komac](https://github.com/russellbanks/Komac) to open a pull request in
 `microsoft/winget-pkgs` when a stable release is published. Betas are never
-submitted. It stays off until the first version is in winget-pkgs:
+submitted. Komac can only update a package that winget-pkgs already has, so
+the workflow skips each release with a warning until the first version is
+merged there by hand:
 
 1. After a stable release, write its manifests:
 
@@ -330,9 +332,10 @@ submitted. It stays off until the first version is in winget-pkgs:
    secret. Komac cannot open winget-pkgs pull requests with a fine-grained
    token.
 5. Set the repository variable `WINGET_PACKAGE_IDENTIFIER` to
-   `LarsonLogan.MedalSync`. From then on, every published stable release opens
-   its own winget-pkgs pull request. Choose **Run workflow** with a version to
-   resubmit one.
+   `LarsonLogan.MedalSync`. Steps 4 and 5 can be done before step 3 is merged.
+   From then on, every published stable release opens its own winget-pkgs pull
+   request once the package is in winget-pkgs. Choose **Run workflow** with a
+   version to submit a release that was skipped or to resubmit one.
 6. Add the `winget install` command to the website, and remove "once it is
    available" from the README, [getting started](getting-started.md) and
    [install with winget](updates.md#install-with-winget).
