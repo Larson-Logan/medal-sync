@@ -130,6 +130,32 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
 
     public string? UseUploadLimit(bool recording) => _uploadLimit.Apply(Control(), recording);
 
+    public string? ReleaseUploads(bool includeBuffer)
+    {
+        // Configured and serving primary storage directly. A drive started only to finish has the normal delay, but a
+        // restarted companion cannot tell how its drive was started, so it releases as if it might hold.
+        if (config.BufferHold(forRecording: true) is not { } hold) return null;
+        var control = Control();
+        if (control is null) return null;
+        var queue = VfsStatus.Evaluate(control.Call("vfs/stats"), control.Call("vfs/queue"), config.MountRemote);
+        if (queue.State == DrainState.Unknown) return HoldNotice;
+        bool released = true;
+        foreach (ulong id in UploadRelease.Due(queue.Uploads, UploadRelease.BufferPrefix(config.Capture), includeBuffer, hold,
+            TimeSpan.FromSeconds(config.Mount.WriteBackSeconds)))
+        {
+            // An item that started uploading or was deleted since the listing is not found; that is not a failure.
+            string body = JsonSerializer.Serialize(new Dictionary<string, object> { ["id"] = id, ["expiry"] = 0 });
+            released &= control.Call("vfs/queue-set-expiry", body, TimeSpan.FromSeconds(5)) is not null || !StillQueued(control, id);
+        }
+        return released ? null : HoldNotice;
+    }
+
+    private const string HoldNotice = "Saved clips could not be released for upload; they upload when the replay-buffer hold ends. Recording continues and nothing is lost.";
+
+    private bool StillQueued(RcloneControl control, ulong id) =>
+        VfsStatus.Evaluate(control.Call("vfs/stats"), control.Call("vfs/queue"), config.MountRemote) is not { State: not DrainState.Unknown } now
+        || now.Uploads.Any(u => u.Id == id && !u.Uploading);
+
     public bool Stop()
     {
         Control()?.Call("core/quit");

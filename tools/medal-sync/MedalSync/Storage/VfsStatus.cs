@@ -17,7 +17,9 @@ internal enum DrainState
     Unknown,
 }
 
-internal sealed record UploadQueueItem(ulong Id, long Tries, bool Uploading);
+/// <param name="Name">The file's path relative to the drive root, when rclone reports it.</param>
+/// <param name="Expiry">Seconds until the file may upload, when rclone reports it; zero or less is eligible now.</param>
+internal sealed record UploadQueueItem(ulong Id, long Tries, bool Uploading, string? Name = null, double? Expiry = null);
 
 internal sealed record DrainVerdict(DrainState State, IReadOnlyList<string> Reasons, int QueuedFiles, long QueuedBytes)
 {
@@ -92,7 +94,11 @@ internal static class VfsStatus
             }
             files++;
             bytes += size;
-            uploads.Add(new(uploadId, tries, uploading.GetBoolean()));
+            // Optional: only used to hold replay-buffer uploads. Anything unexpected is left out, which releases it.
+            string? name = item.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+            double? expiry = item.TryGetProperty("expiry", out var e) && e.ValueKind == JsonValueKind.Number && e.TryGetDouble(out double seconds)
+                && double.IsFinite(seconds) ? seconds : null;
+            uploads.Add(new(uploadId, tries, uploading.GetBoolean(), name, expiry));
         }
         var reasons = new List<string>();
         // These counters describe cleanup of clean cached files, not failed uploads.
