@@ -1,5 +1,9 @@
 # Knowledge base history
 
+## 2026-11-21
+
+* **Update** (2026-11-21T07:00:00Z): Documented how [launch supervision](architecture/session-lifecycle.md) resumes an interrupted finish and how [Google Drive coordination](architecture/library-ownership.md) retries local initialization and reserves partially uploaded generation numbers.
+
 ## 2026-11-20
 
 * **Update** (2026-11-20T03:47:39Z): Reviewed every draft against the code on `dev` and corrected it. [Session lifecycle](architecture/session-lifecycle.md) no longer claims that a failed finish sets `RecoveryRequired` (it keeps the current owned state; a stopped enrollment sets `RecoveryRequired`), and now covers the aborted-start path and the `BeginDrain`, `ResumeActive` and `CompleteUnchanged` transitions. [Library ownership and generations](architecture/library-ownership.md) gains the transition table from `Ownership.cs`, the status text for each state, the `abandon` rules, and exact descriptions of `FreshCoordinationRead` and generation staging. [Storage and replication](systems/storage-and-replication.md) corrects `StoragePromotion` (it renames a verified spike folder; it does not switch primaries), places `rclone check --download` in `ReplicaRemote`, and describes `ReplicationVerification`, `ReplicaAudit` and `ReplicaPrune` exactly. These three have a new `generated.at`. [Public source hygiene](policies/public-source-hygiene.md) had a wording fix only, and [Release and versioning](runbooks/release-and-versioning.md) needed no change. This was a self-review by `claude-code/claude-opus-5-5`, so no `verified` event was recorded; all concepts stay `status: draft` and unverified until a person reviews them.

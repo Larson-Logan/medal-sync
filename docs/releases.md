@@ -181,9 +181,11 @@ to exactly the tree of the `dev` commit it promotes, so its pull request reuses
 the validation from that commit's beta run, waiting up to 25 minutes while it
 is still going. If the trees differ, the commit has no beta run, or its
 validation did not pass, the promotion runs every suite itself. NuGet
-packages and the pinned build tools are cached in ordinary validation, and
-cached downloads are re-checked against their SHA-256 pins. Release validation
-uses no caches. The native integration
+packages and the pinned toolchain downloads are cached in ordinary
+validation. The runner checks the cached Inno Setup installer against its
+SHA-256 pin and verifies its Authenticode signature before installing the
+compiler. The storage toolchain checks its cached downloads against their
+SHA-256 pins. Release validation uses no caches. The native integration
 test uses a temporary per-user program folder and refuses to run on an ordinary
 desktop or over an existing installation.
 
@@ -242,9 +244,11 @@ Installer failure logs are retained for the same period.
 
 Only after every suite passes does a separate job download those exact files,
 verify their names and SHA-256 sidecars, attest them, upload them with generated
-notes to a draft and publish it. The run summary links the release. Only the
-planning job, which must see drafts, and the app token have contents-write
-permission. Existing releases cause failure rather than replacement. A retry
+notes to a draft and publish it. The run summary links the release. The
+planning job uses a contents-write workflow token to see drafts. The
+`cleanup-betas` job uses a contents-write workflow token to delete
+[superseded beta release records](#beta-releases) and leaves their Git tags
+in place. Existing releases cause failure rather than replacement. A retry
 of failed jobs reuses a successful build's artifact; if it has expired, rerun
 all jobs to rebuild and validate it.
 
@@ -254,10 +258,10 @@ release tag ruleset lets only administrators and the private
 cannot exempt `github-actions[bot]`. So the publish step alone uses a
 short-lived token for that app, minted by
 [create-github-app-token](https://github.com/actions/create-github-app-token)
-with contents-write only; every other step uses the workflow's own read-only
-token. The app is installed on this repository only. Its client ID is the
-repository variable `RELEASE_APP_CLIENT_ID` and its private key the repository
-secret `RELEASE_APP_PRIVATE_KEY`; see
+with contents-write only. The remaining jobs use a read-only workflow token
+for repository contents. The app is installed on this repository only. Its
+client ID is the repository variable `RELEASE_APP_CLIENT_ID` and its private
+key is the repository secret `RELEASE_APP_PRIVATE_KEY`. See
 [security maintenance](security-maintenance.md#release-app) to rotate it. Do
 not create a release or push a tag by hand. If publishing fails after the
 upload, the draft stays: review it and publish it by hand, or delete it and

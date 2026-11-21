@@ -180,8 +180,7 @@ internal sealed partial class CoordinationStore
                 bool known = name switch
                 {
                     "writer.lock" or "journal.json" => File.Exists(entry),
-                    "generations" => Directory.Exists(entry) && Directory.EnumerateFileSystemEntries(entry)
-                        .All(g => Directory.Exists(g) && UnfinishedGenerationName().IsMatch(Path.GetFileName(g))),
+                    "generations" => IsInitGenerationDirectory(entry),
                     _ => File.Exists(entry) && TemporaryMarkerName().IsMatch(name),
                 };
                 if (!known) return false;
@@ -190,6 +189,13 @@ internal sealed partial class CoordinationStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
+
+    internal static bool IsInitGenerationDirectory(string path) =>
+        IsOrdinaryDirectory(path) && Directory.EnumerateFileSystemEntries(path)
+            .All(entry => IsOrdinaryDirectory(entry) && UnfinishedGenerationName().IsMatch(Path.GetFileName(entry)));
+
+    private static bool IsOrdinaryDirectory(string path) => Directory.Exists(path)
+        && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0;
 
     /// <summary>
     /// The creation time of this device's unfinished bootstrap of exactly <paramref name="initial"/> and <paramref name="assets"/>,

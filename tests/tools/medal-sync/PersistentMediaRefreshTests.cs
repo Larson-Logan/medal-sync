@@ -190,6 +190,25 @@ public sealed class PersistentMediaRefreshTests : IDisposable
     }
 
     [Theory]
+    [InlineData("previous")]
+    [InlineData("backup-staging")]
+    public void InterruptedBackupIsPreservedAndRetriedWhileTheOriginalIsIntact(string folder)
+    {
+        var plan = Refresh().Preview();
+        Assert.Throws<IOException>(() => Refresh(_ => throw new IOException("interrupted")).Apply(plan, false));
+        string interrupted = Path.Combine(_state.BackupDirectory, "media-refresh-" + plan.Id, folder);
+        Directory.CreateDirectory(interrupted);
+        File.WriteAllText(Path.Combine(interrupted, "two.mp4"), "partial backup");
+
+        string recovery = Refresh().Apply(plan, false);
+
+        Assert.Equal("partial backup", File.ReadAllText(Assert.Single(Directory.GetFiles(recovery, "partial-*"))));
+        Assert.Equal("old-two", File.ReadAllText(Path.Combine(recovery, "previous", "two.mp4")));
+        Assert.Equal("new-two.mp4", File.ReadAllText(_config.MountedCapture.Append("two.mp4").Display));
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Theory]
     [InlineData("id")]
     [InlineData("files")]
     [InlineData("file")]

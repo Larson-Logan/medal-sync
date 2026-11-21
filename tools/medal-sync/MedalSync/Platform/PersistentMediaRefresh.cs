@@ -95,24 +95,12 @@ internal sealed class PersistentMediaRefresh(MedalSyncConfig config, LocalState 
             if (Identity(config.ServerCapture, file.Path) != file.Server)
                 throw new UnsafeOperationException("Server media changed after review; ownership and recovery files are retained.");
             var local = Identity(config.MountedCapture, file.Path, optional: true);
-            string backup = WindowsPath.Parse(recovery).Append(["previous", ..Segments(file.Path)]).Display;
             if (file.Conflict)
             {
                 if (file.PriorServerVersion is { } prior
                     && Identity(config.ServerCapture.Append(".medal-sync-history"), prior)?.Sha256 != file.Local!.Sha256)
                     throw new UnsafeOperationException("The retained server history changed after review; refresh was refused.");
-                var preserved = Identity(WindowsPath.Parse(recovery).Append("previous"), file.Path, optional: true);
-                if (preserved is null)
-                {
-                    if (local != file.Local) throw new UnsafeOperationException("Local media changed after review; replacement was refused.");
-                    RequireOrdinary(WindowsPath.Parse(backup));
-                    Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-                    File.Copy(config.MountedCapture.Append(Segments(file.Path)).Display, backup, overwrite: false);
-                    if (Identity(WindowsPath.Parse(recovery).Append("previous"), file.Path)?.Sha256 != file.Local!.Sha256)
-                        throw new IOException("The previous media backup did not verify; ownership is retained.");
-                }
-                else if (preserved.Sha256 != file.Local!.Sha256)
-                    throw new IOException("The retained media backup changed; ownership is retained.");
+                PreservePrevious(file.Path, file.Local!, local, WindowsPath.Parse(recovery));
             }
             bool alreadyReplaced = local?.Sha256 == file.Server.Sha256;
             if (!alreadyReplaced && local != file.Local)
@@ -127,8 +115,7 @@ internal sealed class PersistentMediaRefresh(MedalSyncConfig config, LocalState 
                 if (File.Exists(staging) && Identity(config.MountedCapture, file.Path + ".medal-sync-refresh-" + plan.Id)!.Sha256 != file.Server.Sha256)
                 {
                     // Preserve a partial write instead of deleting possible recovery evidence.
-                    string partial = Path.Combine(recovery, "partial-" + Guid.NewGuid().ToString("N"));
-                    File.Move(staging, partial, overwrite: false);
+                    PreservePartial(staging, recovery);
                 }
                 if (!File.Exists(staging)) File.Copy(config.ServerCapture.Append(Segments(file.Path)).Display, staging, overwrite: false);
                 if (Identity(config.MountedCapture, file.Path + ".medal-sync-refresh-" + plan.Id)!.Sha256 != file.Server.Sha256)
@@ -157,6 +144,43 @@ internal sealed class PersistentMediaRefresh(MedalSyncConfig config, LocalState 
         }, TimeSpan.FromSeconds(10));
         return recovery;
     }
+
+    private void PreservePrevious(string path, MediaIdentity reviewed, MediaIdentity? local, WindowsPath recovery)
+    {
+        var previousRoot = recovery.Append("previous");
+        var preserved = Identity(previousRoot, path, optional: true);
+        if (preserved?.Sha256 == reviewed.Sha256) return;
+        if (local != reviewed)
+        {
+            if (preserved is not null) throw new IOException("The retained media backup changed; ownership is retained.");
+            throw new UnsafeOperationException("Local media changed after review; replacement was refused.");
+        }
+
+        string[] segments = Segments(path);
+        string backup = previousRoot.Append(segments).Display;
+        if (preserved is not null) PreservePartial(backup, recovery.Display);
+
+        var stageRoot = recovery.Append("backup-staging");
+        string staging = stageRoot.Append(segments).Display;
+        var staged = Identity(stageRoot, path, optional: true);
+        if (staged is not null && staged.Sha256 != reviewed.Sha256)
+        {
+            PreservePartial(staging, recovery.Display);
+            staged = null;
+        }
+        if (staged is null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(staging)!);
+            File.Copy(config.MountedCapture.Append(segments).Display, staging, overwrite: false);
+            if (Identity(stageRoot, path)?.Sha256 != reviewed.Sha256)
+                throw new IOException("The previous media backup did not verify; ownership is retained.");
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+        File.Move(staging, backup, overwrite: false);
+    }
+
+    private static void PreservePartial(string path, string recovery) =>
+        File.Move(path, Path.Combine(recovery, "partial-" + Guid.NewGuid().ToString("N")), overwrite: false);
 
     private void RequireOwned(MediaRefreshPlan plan, string reason)
     {

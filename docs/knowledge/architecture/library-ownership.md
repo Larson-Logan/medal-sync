@@ -14,7 +14,7 @@ sources:
   - id: storage-guide
     resource: https://github.com/Larson-Logan/medal-sync/blob/dev/docs/storage.md
     title: Storage choices, Google Drive cloud mode
-generated: { by: "claude-code/claude-opus-5-5", at: "2026-11-20T03:47:39Z" }
+generated: { by: "codex/gpt-6", at: "2026-11-21T07:00:00Z" }
 status: draft
 ---
 
@@ -108,6 +108,13 @@ conditional on the Drive file ETag, and the hash binds the committed head to
 its verified manifest.[^versioning] Maintenance commands that need the SMB
 writer lock refuse in cloud mode.
 
+If initialization stops before generation 0 is published locally, a retry can
+proceed when the cache contains only the empty generations directory or
+recognized generation 0 staging directories. A published local generation 0
+must still match the initializing PC and reviewed snapshot. A finish that
+resumes in `Publishing` refreshes Drive history before choosing a generation
+number. Even a partial remote upload reserves its number.[^coordination-code]
+
 # Enrollment
 
 `EnrollmentOwnership` records a pending enrollment and its review folder, so an
@@ -130,3 +137,4 @@ a new format, a major release, and every PC updated before the next switch. See
   `CloudEnrollmentTests.cs` under `tests/tools/medal-sync/`
 
 [^versioning]: Versions and schemas, file formats
+[^coordination-code]: Coordination store, ownership journal and generation store

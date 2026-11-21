@@ -23,8 +23,7 @@ internal sealed class AbortedStartRecovery(MedalSyncConfig config, LocalState st
             if (journal.State != OwnershipState.Clean || journal.Owner is not null || journal.SessionId is not null)
                 throw new UnsafeOperationException("The library is not Ready. Recover its owned session with finish before recovering an orphaned startup login.");
             if (!File.Exists(login)) throw new UnsafeOperationException("No unfinished login matches that session. Check the exact retained session ID.");
-            if (File.Exists(cache) || Directory.Exists(cache) && (File.GetAttributes(cache).HasFlag(FileAttributes.ReparsePoint)
-                || Directory.EnumerateFileSystemEntries(cache).Any()))
+            if (!CacheIsEmptyOrAbsent(cache))
                 throw new UnsafeOperationException("This older session has nonempty or uncertain cache state. Its login and cache are retained; do not bypass upload recovery or setup readiness.");
         }
         RequireSafe();
@@ -33,6 +32,32 @@ internal sealed class AbortedStartRecovery(MedalSyncConfig config, LocalState st
         RequireSafe();
         string recovery = state.RetainAbortedStart(session, config.LibraryId, cache, DateTimeOffset.UtcNow, legacyEmptyCache: true);
         return $"Orphaned startup login retained at {recovery}. No cache, library or journal was deleted or published. Retry setup readiness.";
+    }
+
+    internal static bool CacheIsEmptyOrAbsent(string cache)
+    {
+        try
+        {
+            cache = Path.TrimEndingDirectorySeparator(Path.GetFullPath(cache));
+            try
+            {
+                var attributes = File.GetAttributes(cache);
+                return attributes.HasFlag(FileAttributes.Directory) && !attributes.HasFlag(FileAttributes.ReparsePoint)
+                    && !Directory.EnumerateFileSystemEntries(cache).Any();
+            }
+            catch (IOException ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // A missing cache is safe only when its immediate parent is readable and does not list it.
+                string? parent = Path.GetDirectoryName(cache);
+                return parent is not null && !Directory.EnumerateFileSystemEntries(parent).Any(entry => string.Equals(entry, cache,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+            or NotSupportedException or System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Its receipt records that its uploads were verified and its generation committed, so its leftovers are safe to remove.</summary>
