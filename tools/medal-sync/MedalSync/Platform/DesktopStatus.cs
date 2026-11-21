@@ -266,6 +266,10 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
                     _checkedGeneration = journal.CommittedGeneration;
                 }
             }
+            catch (StorageActionRequiredException ex)
+            {
+                return new DesktopStatus(SessionPhase.RecoveryNeeded, ex.Message, DateTimeOffset.UtcNow);
+            }
             catch (IOException)
             {
                 return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);

@@ -39,9 +39,11 @@ internal static class Program
             }
         }
         bool operationRunning = true;
+        bool failStart = true;
         using var view = new WindowsTrayStatus(true, Read, @"Local\MedalSync.DesktopTest." + Guid.NewGuid().ToString("N"),
             () => { finishes++; return Task.FromResult(finishResult); }, () => operationRunning,
-            () => { cloudRetries++; return cloudRetryTask; });
+            () => { cloudRetries++; return cloudRetryTask; },
+            _ => { if (failStart) throw new System.ComponentModel.Win32Exception(); });
         var panel = Field<Form>(view, "_panel");
         var status = Field<TextBox>(view, "_status");
         var retry = Field<Button>(view, "_retry");
@@ -91,6 +93,22 @@ internal static class Program
         Check(!panel.Visible && !panel.IsDisposed, "Closing hides the panel without ending the view");
         Until(view, () => reads > before);
         Check(icon.Visible, "Status and reconnect continue while the panel is closed");
+        var guide = icon.ContextMenuStrip!.Items.Cast<ToolStripItem>().Single(item => item.Text == "Setup &guide");
+        var configure = icon.ContextMenuStrip.Items.Cast<ToolStripItem>().Single(item => item.Text == "&Configure");
+        var updates = icon.ContextMenuStrip.Items.Cast<ToolStripItem>().Single(item => item.Text == "Check for &updates");
+        guide.PerformClick();
+        Check(panel.Visible && status.Text.Contains("The setup guide could not open", StringComparison.Ordinal), "A guide failure opens the hidden panel");
+        lock (gate) current = new(SessionPhase.Active, "Synthetic active operation", DateTimeOffset.UtcNow);
+        Until(view, () => status.Text.Contains("Synthetic active operation", StringComparison.Ordinal));
+        Check(status.Text.Contains("The setup guide could not open", StringComparison.Ordinal), "A status refresh keeps a guide failure visible");
+        configure.PerformClick();
+        Check(status.Text.Contains("Configuration could not start", StringComparison.Ordinal), "Configure reports its own failure");
+        updates.PerformClick();
+        Check(status.Text.Contains("The update check could not start", StringComparison.Ordinal), "An update failure names the update check");
+        failStart = false;
+        updates.PerformClick();
+        Check(!status.Text.Contains("could not start", StringComparison.Ordinal), "A successful action clears its failure");
+        panel.Close();
         var exit = icon.ContextMenuStrip!.Items.Cast<ToolStripItem>().Single(item => item.Text == "E&xit Medal Sync");
         Check(panel.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<FlowLayoutPanel>().Single()
             .Controls.OfType<Button>().Any(button => button.Text == "E&xit Medal Sync"), "Exit is available directly in the status panel");
@@ -99,6 +117,7 @@ internal static class Program
         Check(!Field<bool>(view, "_ending") && panel.Visible && icon.Visible, "Exit explains active supervision and keeps it running");
         lock (gate) current = new(SessionPhase.Ready, "No pending copies", DateTimeOffset.UtcNow);
         Until(view, () => status.Text.Contains("No pending copies", StringComparison.Ordinal));
+        Check(!status.Text.Contains("Uploads will continue safely.", StringComparison.Ordinal), "Ready clears the previous exit refusal");
         Check(!retryCloud.Enabled, "No pending copy disables cloud retry");
         var cloudCompletion = new TaskCompletionSource<CloudRetryCommandResult>();
         cloudRetryTask = cloudCompletion.Task;

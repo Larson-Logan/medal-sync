@@ -90,7 +90,10 @@ internal sealed class RcloneRunner(string rclonePath)
         if (Any(lowercase, "didn't find section in config file", "failed to load config", "couldn't decrypt", "config password",
             "configuration password", "unknown backend", "remote not found"))
             hints |= RcloneHints.Config;
-        if (Any(lowercase, "quota", "insufficient_space", "insufficient storage", "insufficient space", "storage is full", "not enough space"))
+        if (Any(lowercase, "ratelimitexceeded", "rate limit exceeded", "quota exceeded for quota metric", "too many requests",
+            "error 429:", "http 429", "status code: 429"))
+            hints |= RcloneHints.Network;
+        else if (Any(lowercase, "quota", "insufficient_space", "insufficient storage", "insufficient space", "storage is full", "not enough space"))
             hints |= RcloneHints.Quota;
         if (Any(lowercase, "immutable"))
             hints |= RcloneHints.Conflict;

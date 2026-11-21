@@ -78,6 +78,54 @@ public static class MedalTestMutex
 }
 '@
 try {
+    Test-Case 'Cached Inno Setup installer must match its pin and have a valid signature' {
+        $fakeRepo = Join-Path $scratch 'compiler-cache'
+        $scriptFolder = Join-Path $fakeRepo 'scripts'
+        $pinFolder = Join-Path $fakeRepo 'installer/windows'
+        $buildTools = Join-Path $fakeRepo '.validation/build-tools'
+        $null = New-Item -ItemType Directory -Path $scriptFolder, $pinFolder, $buildTools
+        $toolchain = Join-Path $scriptFolder 'setup-installer-toolchain.ps1'
+        Copy-Item -LiteralPath (Join-Path $repo 'scripts/setup-installer-toolchain.ps1') -Destination $toolchain
+        $download = Join-Path $buildTools 'innosetup-1.0.0.exe'
+        $compiler = Join-Path $buildTools 'inno-1.0.0/ISCC.exe'
+        Set-Content -LiteralPath $download -Value 'synthetic installer' -NoNewline
+        @{ version = '1.0.0'; sha256 = (Get-FileHash -LiteralPath $download).Hash; url = 'https://example.invalid/inno' } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $pinFolder 'toolchain.json')
+
+        function Invoke-WebRequest { throw 'Unexpected download on a cache hit.' }
+        function Get-AuthenticodeSignature([string]$LiteralPath) {
+            Assert-True ($LiteralPath -eq $download) 'Signature check used the wrong file.'
+            return @{ Status = $signatureStatus }
+        }
+        function Start-Process {
+            param([string]$FilePath, [string[]]$ArgumentList, [string]$WindowStyle, [switch]$Wait, [switch]$PassThru)
+            Assert-True ($FilePath -eq $download) 'Unexpected installer execution.'
+            $null = New-Item -ItemType File -Path $compiler -Force
+            return @{ ExitCode = 0 }
+        }
+
+        Set-Content -LiteralPath $download -Value 'corrupt installer' -NoNewline
+        $signatureStatus = 'Valid'
+        Refuses { & $toolchain } '*SHA-256 mismatch*'
+        Assert-True (-not (Test-Path -LiteralPath $compiler)) 'The corrupt installer was executed.'
+        Set-Content -LiteralPath $download -Value 'synthetic installer' -NoNewline
+        $signatureStatus = 'NotSigned'
+        Refuses { & $toolchain } '*no valid Authenticode signature*'
+        Assert-True (-not (Test-Path -LiteralPath $compiler)) 'The unsigned installer was executed.'
+        $signatureStatus = 'Valid'
+        Assert-True ((& $toolchain) -eq $compiler) 'The verified installer did not provide the expected compiler.'
+
+        Remove-Item -LiteralPath $download, $compiler
+        function Invoke-WebRequest {
+            param([string]$Uri, [string]$OutFile, [int]$TimeoutSec)
+            Set-Content -LiteralPath $OutFile -Value 'interrupted installer' -NoNewline
+            throw 'Synthetic interruption'
+        }
+        Refuses { & $toolchain } '*Synthetic interruption*'
+        Assert-True (-not (Test-Path -LiteralPath $download)) 'An interrupted download was published into the cache.'
+        Assert-True (-not (Get-ChildItem -LiteralPath $buildTools -Force -Filter '*.exe')) 'A partial download was left behind.'
+    }
+
     # These module-local probes prevent any live process or library access. Isolated lock names keep
     # the tests away from a real Medal Sync on this PC; the fake CLI follows the real CLI's lock rules.
     & $module {

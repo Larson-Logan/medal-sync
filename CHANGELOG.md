@@ -3,6 +3,16 @@
 ## Unreleased
 
 - Keep the PC awake (system, not display) while a finish uploads and verifies, during idle sync and while `replicate retry --apply` transfers, so a PC left alone after quitting Medal does not sleep with unpublished clips. Released at Ready, on refusals, while waiting for storage and when Medal reopens. `keepAwakeWhileFinishing: false` turns it off (#246).
+- Launch keeps retrying an interrupted session's handoff. If Medal reopens during the drain, launch verifies the clip drive and resumes supervision (#214, #215).
+- Google Drive initialization can resume after a partial local write. A finish resuming publication skips generation numbers already used by interrupted cloud uploads (#217, #219).
+- A persistent-media refresh can retry an interrupted backup when the reviewed local file is still intact. Legacy startup recovery keeps the session login when its cache is inaccessible (#224, #225).
+
+- Launch waits when a switch request cannot be sent and ignores Google Drive switch requests dated more than five minutes ahead (#216, #220).
+- Launch and finish tell users when Google Drive sign-in needs attention. `finish` returns exit 3 when it cannot reach the journal. Google Drive rate limits are treated as temporary (#218, #223, #228).
+- The free-space monitor warns again if a disk becomes unreadable after briefly reconnecting (#226).
+- Enrollment and its recovery command no longer mistake a tray status check for another running operation (#229).
+- Tray guide, configuration and update failures open the status panel and stay visible through refreshes. Exit refusals clear when the library returns to Ready (#234).
+
 - `init` previews leave the device identity untouched. Maintenance also recognizes a pending library that an earlier preview left with an identity (#243).
 - The configuration wizard refuses an orphaned setup record before saving a new configuration. Damaged historical manifests no longer block its device-name advice (#242, #235).
 - The tray and `status --json` report pending Google Drive setup without polling Drive. The tray shows Waiting for storage when a journal read fails because storage is unreachable (#232, #233).

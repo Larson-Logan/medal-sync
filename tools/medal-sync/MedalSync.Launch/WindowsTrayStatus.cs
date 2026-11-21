@@ -33,9 +33,11 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private readonly Func<DesktopStatus> _readStatus;
     private readonly Func<Task<FinishCommandResult>> _runFinish;
     private readonly Func<Task<CloudRetryCommandResult>> _runCloudRetry;
+    private readonly Action<ProcessStartInfo> _startProcess;
     private string? _cloudRetryResult;
     private string? _finishFailure;
     private string? _exitFailure;
+    private string? _actionFailure;
 
     public static int Run(bool show)
     {
@@ -90,11 +92,12 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 
     internal WindowsTrayStatus(bool show, Func<DesktopStatus>? readStatus = null, string eventName = OpenEventName,
         Func<Task<FinishCommandResult>>? runFinish = null, Func<bool>? operationRunning = null,
-        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null)
+        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null, Action<ProcessStartInfo>? startProcess = null)
     {
         _readStatus = readStatus ?? SessionCommands.ReadDesktopStatus;
         _runFinish = runFinish ?? RunFinish;
         _runCloudRetry = runCloudRetry ?? RunCloudRetry;
+        _startProcess = startProcess ?? (start => Process.Start(start)?.Dispose());
         _open = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _exit = new EventWaitHandle(false, EventResetMode.AutoReset, eventName + ".Exit");
         _operationRunning = operationRunning ?? SessionCommands.AnotherInstanceRunning;
@@ -187,12 +190,18 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         }
         var status = _last.At(DateTimeOffset.UtcNow);
         if (status.Phase is SessionPhase.Ready or SessionPhase.Active or SessionPhase.Waiting) _finishFailure = null;
-        string? lastResult = _finishFailure ?? status.LastResult;
+        if (status.Phase == SessionPhase.Ready && !_finishing && !_retryingCloud) _exitFailure = null;
         _retry.Enabled = !_finishing && !_retryingCloud && status.CanRetry;
         _retryCloud.Enabled = !_finishing && !_retryingCloud && status.Phase == SessionPhase.Ready && status.CanRetryCloudCopies;
         _icon.Text = "Medal Sync: " + status.Title;
         var icon = _icons.For(status.Phase, status.Recording);
         if (!ReferenceEquals(_icon.Icon, icon)) _icon.Icon = icon;
+        RenderStatus(status);
+    }
+
+    private void RenderStatus(DesktopStatus status)
+    {
+        string? lastResult = _finishFailure ?? status.LastResult;
         string text = $"{status.Title}\r\n\r\nNext action: {status.NextAction}\r\n\r\n"
             + $"Queued files: {status.QueuedFiles?.ToString() ?? "unavailable"}\r\n"
             + $"Queued bytes: {status.QueuedBytes?.ToString() ?? "unavailable"}\r\n"
@@ -202,6 +211,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
             + (_retryingCloud ? "\r\n\r\nCloud retry: Running. Unfinished copies remain pending."
                 : _cloudRetryResult is null ? "" : $"\r\n\r\nLast cloud retry result: {_cloudRetryResult}")
             + (_exitFailure is null ? "" : $"\r\n\r\nExit: {_exitFailure}")
+            + (_actionFailure is null ? "" : $"\r\n\r\n{_actionFailure}")
             + (status.Notice is null ? "" : $"\r\n\r\nLatest notice: {status.Notice}");
         if (_status.Text != text) _status.Text = text;
     }
@@ -211,9 +221,9 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         if (_ending) return;
         if (_finishing || _retryingCloud || _operationRunning())
         {
-            ShowPanel();
             _exitFailure = "Medal Sync is still supervising Medal or finishing a library operation. Quit Medal normally from its tray icon and wait for Ready, then choose Exit Medal Sync again. Uploads will continue safely.";
-            _status.Text = _exitFailure;
+            ShowPanel();
+            RenderStatus(_last.At(DateTimeOffset.UtcNow));
             return;
         }
         ExitThread();
@@ -293,8 +303,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         if (_ending) return;
         string guide = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "setup.html"));
         string target = File.Exists(guide) ? guide : "https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md";
-        try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose(); }
-        catch (System.ComponentModel.Win32Exception) { _status.Text = "Open Medal Sync Setup Guide from the Start menu."; }
+        StartAction(new ProcessStartInfo(target) { UseShellExecute = true },
+            "The setup guide could not open. Open Medal Sync Setup Guide from the Start menu.");
     }
 
     private void StartLauncher(string argument)
@@ -302,8 +312,23 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         if (_ending) return;
         var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false, CreateNoWindow = true };
         start.ArgumentList.Add(argument);
-        try { Process.Start(start)?.Dispose(); }
-        catch (System.ComponentModel.Win32Exception) { _status.Text = "The update check could not start. Check the installation and try again."; }
+        string action = argument == "--configure" ? "Configuration" : "The update check";
+        StartAction(start, $"{action} could not start. Check the installation and try again.");
+    }
+
+    private void StartAction(ProcessStartInfo start, string failure)
+    {
+        try
+        {
+            _startProcess(start);
+            _actionFailure = null;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
+        {
+            _actionFailure = failure;
+            ShowPanel();
+        }
+        RenderStatus(_last.At(DateTimeOffset.UtcNow));
     }
 
     private static StartupIntegration OpenStartup() =>

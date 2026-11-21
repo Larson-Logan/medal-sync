@@ -151,18 +151,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
                 || !document.RootElement.TryGetProperty("cache", out var value)
                 || value.ValueKind != System.Text.Json.JsonValueKind.String
                 || value.GetString() is not { } cache || !Path.IsPathFullyQualified(cache)) return true;
-            cache = Path.TrimEndingDirectorySeparator(Path.GetFullPath(cache));
-            try { return Directory.EnumerateFileSystemEntries(cache).Any(); }
-            catch (DirectoryNotFoundException)
-            {
-                // Directory.Exists also returns false for an unplugged disk or denied access. A missing
-                // cache is safe only when its immediate parent is readable and does not contain it.
-                // Never walk up to another ancestor: that may be on the host disk of a missing mount.
-                string? parent = Path.GetDirectoryName(cache);
-                if (parent is null) return true;
-                return Directory.EnumerateFileSystemEntries(parent).Any(entry => string.Equals(entry, cache,
-                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
-            }
+            return !AbortedStartRecovery.CacheIsEmptyOrAbsent(cache);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException
             or ArgumentException or NotSupportedException or System.Security.SecurityException)

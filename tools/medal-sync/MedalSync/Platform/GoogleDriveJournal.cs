@@ -225,6 +225,10 @@ internal sealed class DriveAccessToken(string rclone, string remote, string conf
             credentialWriteTime = File.Exists(credentials) ? File.GetLastWriteTimeUtc(credentials) : DateTime.MinValue;
             return accessToken = token.GetString()!;
         }
+        catch (RcloneFailedException ex) when (!RcloneFailure.IsTransient(ex))
+        {
+            throw new StorageActionRequiredException(RcloneFailure.Describe(ex, "Google Drive coordination storage", remote, credentials), ex);
+        }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
         { throw new InvalidDataException("The Google Drive rclone credential configuration could not be read."); }
     }
