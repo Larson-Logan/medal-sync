@@ -180,11 +180,15 @@ EXE is already bundled in every setup package: installation creates
 `unins000.exe` and `unins000.dat` in the chosen program folder. Keep both together;
 the EXE uses its installation log to remove only managed files. It can also be
 run directly from that folder.
-The native uninstaller
-requires the programs to be stopped and checks readiness for its Windows user.
-It checks again after confirmation, immediately before removing programs.
-If you supplied credentials for a different administrator account, quit all
-sessions and verify the original user's Ready status before uninstalling.
+The native uninstaller requires the programs to be stopped and checks readiness
+and Medal's startup entries for the Windows account running it. It checks again
+after confirmation, immediately before removing programs. If Medal's sign-in
+entry, `medal://` handler or shortcuts still point to this installation, turn
+off **Start Medal at sign-in** in the status app or run
+`medal-sync startup --restore` from this installation, then exit Medal Sync
+and retry. For an all-users installation, do this from each account using
+that launcher. If you supply credentials for a different administrator
+account, also quit all sessions and verify the original user's Ready status.
 
 Uninstall removes managed program files, its own shortcuts, its PATH entry and
 Installed apps registration. User settings, identity, recordings, cache, backups and unowned

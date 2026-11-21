@@ -327,6 +327,43 @@ public sealed class ReplicationTests : IDisposable
     }
 
     [Fact]
+    public void OAuthTokenRefreshDuringCopyKeepsIncrementalReplicaEvidence()
+    {
+        var (config, state, snapshot) = WithReplica(required: false);
+        var replicationConfig = config.Replication! with { FullVerifyEveryHandoffs = 3 };
+        config = config with { Replication = replicationConfig };
+        string credentials = replicationConfig.RcloneConfigPath!;
+        File.WriteAllText(credentials, "[onedrive]\ntype=onedrive\ndrive_id=drive-a\ntoken={\"access_token\":\"old\"}\n");
+        var commands = new List<IReadOnlyList<string>>();
+        string drive = "drive-a";
+        var replication = new StorageReplication(config, state, () => { }, args =>
+        {
+            if (!args[2].StartsWith("onedrive:", StringComparison.Ordinal)) return;
+            commands.Add(args);
+            if (args[0] == "copy")
+            {
+                AtomicFile.Replace(credentials, System.Text.Encoding.UTF8.GetBytes(
+                    $"[onedrive]\r\ntype = onedrive\r\ndrive_id = {drive}\r\ntoken = {{\"access_token\":\"new\",\"refresh_token\":\"rotated\"}}\r\n"));
+            }
+        });
+        Assert.Empty(replication.Publish(snapshot).Deferred);
+        Assert.Collection(commands, copy => Assert.Equal("copy", copy[0]), check => Assert.Contains("--download", check));
+        commands.Clear();
+        Assert.Empty(replication.Publish(snapshot).Deferred);
+        Assert.Contains("--size-only", Assert.Single(commands));
+
+        // An actual remote change forces a new full pass and is rejected if it happens during that pass.
+        File.WriteAllText(credentials, "[onedrive]\ntype=onedrive\ndrive_id=drive-b\ntoken={}\n");
+        commands.Clear();
+        drive = "drive-c";
+        Assert.Throws<IOException>(() => replication.Publish(snapshot));
+        Assert.Collection(commands, copy => Assert.Equal("copy", copy[0]), check => Assert.Contains("--download", check));
+        commands.Clear();
+        Assert.Empty(replication.Publish(snapshot).Deferred);
+        Assert.Collection(commands, copy => Assert.Equal("copy", copy[0]), check => Assert.Contains("--download", check));
+    }
+
+    [Fact]
     public void RequiredReplicaFailureStillBlocksWithoutAReceipt()
     {
         var (config, state, snapshot) = WithReplica(required: true);
