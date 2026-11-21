@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using MedalSync.Coordination;
 using MedalSync.Session;
 using MedalSync.Util;
@@ -7,7 +8,8 @@ namespace MedalSync.Platform;
 
 /// <summary>The journal as <c>status --json</c> shows it: no device IDs and no paths.</summary>
 internal sealed record StatusJournal(OwnershipState State, string? Owner, bool OwnedByThisPc, string? SessionId,
-    long CommittedGeneration, long Revision, DateTimeOffset UpdatedAt, string? Reason);
+    long CommittedGeneration, long Revision, DateTimeOffset UpdatedAt, string? Reason,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? MaintenanceExpiresAt = null);
 
 internal sealed record StatusHandoffRequest(string Device, DateTimeOffset RequestedAt, long AgeSeconds, bool Stale);
 
@@ -56,7 +58,7 @@ internal sealed record StatusReport(
         bool safe = journal.State == OwnershipState.Clean && desktop.Phase == SessionPhase.Ready;
         return new(CurrentFormat, libraryId, Reachable, null,
             new(journal.State, journal.Owner?.DisplayName, mine, journal.SessionId, journal.CommittedGeneration, journal.Revision,
-                journal.UpdatedAt, journal.Reason),
+                journal.UpdatedAt, journal.Reason, journal.MaintenanceExpiresAt),
             desktop.Phase, desktop.Title, desktop.NextAction, safe, requests, PendingCopies(cloudCopies), lastVerifiedAt, now);
     }
 

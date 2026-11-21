@@ -275,6 +275,12 @@ internal sealed partial class CoordinationStore
     {
         if (cloud is not null) return cloud.Update(transition, check);
         using var _ = AcquireWriterLock(lockTimeout);
+        return UpdateUnderWriterLock(transition, check);
+    }
+
+    internal OwnershipRecord UpdateUnderWriterLock(Func<OwnershipRecord, OwnershipRecord> transition, Action? check)
+    {
+        if (cloud is not null) return cloud.Update(transition, check);
         var current = ReadJournal();
         var next = transition(current);
         if (ReferenceEquals(next, current)) return current;
@@ -295,7 +301,7 @@ internal sealed partial class CoordinationStore
 
     public IDisposable AcquireWriterLock(TimeSpan timeout)
     {
-        if (cloud is not null) throw new UnsafeOperationException("This maintenance command requires an SMB writer lock and is unavailable in cloud mode. Cloud launch, finish, history and optional-copy retry use conditional journal updates.");
+        if (cloud is not null) throw new UnsafeOperationException("This operation requires a filesystem writer lock. Cloud coordination uses conditional journal updates.");
         var deadline = DateTime.UtcNow + timeout;
         while (true)
         {

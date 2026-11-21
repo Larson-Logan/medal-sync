@@ -10,7 +10,7 @@ namespace MedalSync.Cli;
 /// </summary>
 internal static class CommandRunner
 {
-    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--no-switch-request", "--help", "--new-library", "--spike", "--rollback", "--uninstall" };
+    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--no-switch-request", "--help", "--new-library", "--spike", "--rollback", "--uninstall", "--to-cloud" };
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
@@ -54,7 +54,7 @@ internal static class CommandRunner
                         [--capture-folder M:\Clips] [--rclone-path FILE] [--sync-folder ID] [--sync-pattern PATTERN]
                         [--device-label NAME]    Optional display name for this PC; ownership identity is unchanged
                         [--local-copy-root DIR] [--cloud-remote NAME:FOLDER --rclone-config FILE]
-                        [--storage-mode server|local|cloud]  Cloud mode hands off through Google Drive, without SMB
+                        [--storage-mode server|local|cloud]  Cloud mode hands off through Google Drive, OneDrive or Dropbox
                         [--cloud-journal-id ID]  Required in cloud mode; obtain once with storage cloud-id and reuse on every PC
                         [--coordination-root PATH]  Required UNC share in server mode; optional local folder in local/cloud modes
                         [--replica-conflicts stop|version]  Preserve earlier destination files when updating
@@ -65,7 +65,11 @@ internal static class CommandRunner
                                                  Sign in to a cloud provider in the browser, or sign in again;
                                                  saves only after the storage check passes
           storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]
-                                                 Allocate a Google Drive journal ID for a new cloud library; creates no file
+                                                 Reserve a cloud journal ID for a new cloud library
+          storage migrate --to-cloud --remote NAME:FOLDER --cloud-journal-id ID --out FILE
+                                                 Review the move of this library and its history to Google Drive
+          storage migrate --in FILE --apply       Migrate the exact review, or resume it after interruption
+          storage migrate --in FILE --rollback    Release the source before it has been retired
           replicate retry [--target NAME] [--apply]  Preview/retry pending optional cloud copies while Ready
           prefetch [--apply]                     Preview/download clips another PC published into this PC's
                                                  persistent local copy while idle; never takes ownership
@@ -124,6 +128,12 @@ internal static class CommandRunner
             error.WriteLine($"medal-sync: {ex.Message}");
             return 1;
         }
+        catch (IOException ex) when ((ex is StorageOfflineException || ex is RcloneFailedException rclone && Platform.RcloneFailure.IsTransient(rclone))
+            && args.FirstOrDefault() is "retention" or "replica" or "primary" or "refresh-media" or "storage")
+        {
+            error.WriteLine($"medal-sync: waiting for storage: {ex.Message} If applying reviewed work, retry the same command when storage is back.");
+            return 3;
+        }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or DbException)
         {
             error.WriteLine($"medal-sync: stopped safely: {ex.Message}");
@@ -169,6 +179,7 @@ internal static class CommandRunner
             "storage init-primary" => SessionCommands.InitPrimary(args, output),
             "storage check" => SessionCommands.CheckStorage(args, output),
             "storage cloud-id" => SessionCommands.CloudId(args, output),
+            "storage migrate" => StorageMigrationCommands.Run(args, output),
             "storage sign-in" => SignInCommands.Run(args, output),
             "replicate retry" => ReplicationCommands.Retry(args, output),
             "prefetch" => PrefetchCommands.Run(args, output),

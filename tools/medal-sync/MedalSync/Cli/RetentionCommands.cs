@@ -36,7 +36,7 @@ internal static class RetentionCommands
         {
             var plan = retention.Plan(policy);
             AtomicFile.CreateNew(destination!, Json.Serialize(plan));
-            output.WriteLine(Retention.Render(plan));
+            output.WriteLine(Retention.Render(plan, store.IsCloud));
             output.WriteLine($"Review saved to {destination}. Keep it on this PC. Apply it with 'medal-sync retention --in \"{destination}\" --apply' while every PC stays Ready.");
             return 0;
         }

@@ -12,6 +12,9 @@ internal static class StatusText
         {
             OwnershipState.Clean => "Ready",
             OwnershipState.RecoveryRequired => "Recovery needed",
+            OwnershipState.Maintenance => "Maintenance",
+            OwnershipState.Migrating => "Migrating",
+            OwnershipState.Migrated => "Configuration update needed",
             _ when !mine => "Waiting for the other PC",
             OwnershipState.Starting => "Starting",
             OwnershipState.Active => "Active (Medal open)",

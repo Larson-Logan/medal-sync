@@ -290,7 +290,7 @@ internal static class SessionCommands
         string credentials = args.Required("--rclone-config");
         string rclone = args.Value("--rclone-path") ?? ConfigCommands.DefaultRclonePath();
         args.RequireAllUsed();
-        output.WriteLine(GoogleDriveJournal.GenerateId(Environment.ExpandEnvironmentVariables(rclone), remote, credentials));
+        output.WriteLine(CloudJournalProvider.Reserve(Environment.ExpandEnvironmentVariables(rclone), remote, credentials));
         return 0;
     }
 
@@ -298,9 +298,9 @@ internal static class SessionCommands
     {
         var report = new ShareAssetChecker(config.Capture, config.MountedCapture, config.LibraryId, new FileSystemProbe()).OnServer(snapshot);
         if (report.Blocking.Any()) throw new UnsafeOperationException("Cloud initialization requires all referenced media in the persistent local copy. Preview 'relocate --from ORIGINAL_FOLDER' first.");
-        output.WriteLine($"Google Drive library {config.LibraryId}; journal {config.CloudJournalId}; {report.Items.Count} media references.");
-        if (!apply) { output.WriteLine("Preview only. --apply uploads and verifies local media and generation 0, then creates the Drive ownership journal. No SMB server is required."); return 0; }
-        if (GoogleDriveJournal.For(config).Exists()) throw new UnsafeOperationException("The Drive journal already exists. Join or recover that library; it was not reinitialized.");
+        output.WriteLine($"Cloud library {config.LibraryId}; journal {config.CloudJournalId}; {report.Items.Count} media references.");
+        if (!apply) { output.WriteLine("Preview only. --apply uploads and verifies local media and generation 0, then creates the cloud ownership journal."); return 0; }
+        if (CloudJournalProvider.For(config).Exists()) throw new UnsafeOperationException("The cloud journal already exists. Join or recover that library; it was not reinitialized.");
         var device = state.Device();
         var checker = new RcloneAssetChecker(config, state);
         checker.Initialize(allowExistingMedia: true);
@@ -310,7 +310,7 @@ internal static class SessionCommands
             if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Quit Medal before initializing cloud storage.");
         }, primary: checker).Publish(snapshot);
         CoordinationStore.Create(config, snapshot, AssetManifest.From(report), device, SessionCoordinator.NewId(), install.Versions, DateTimeOffset.UtcNow);
-        output.WriteLine("Google Drive library created. Reuse this library ID and cloud journal ID on the other PC; keep its own device identity.");
+        output.WriteLine("Cloud library created. Reuse this library ID and cloud journal ID on the other PC; keep its own device identity.");
         LibrarySetupPending.Read(state, config)?.Complete(state, config);
         return 0;
     }
@@ -544,6 +544,11 @@ internal static class SessionCommands
         {
             return ReportJournalFailure(context, output, status, "finish", ex);
         }
+        if (journal.State == OwnershipState.Migrated) throw new UnsafeOperationException(Ownership.MigratedMessage);
+        if (journal.State == OwnershipState.Maintenance)
+            throw new UnsafeOperationException($"The library is held for '{journal.Reason}' on {journal.Owner?.DisplayName}. Retry that command on its owner PC.");
+        if (journal.State == OwnershipState.Migrating)
+            throw new UnsafeOperationException("A migration holds the library. Apply the same migration review to continue.");
         if (journal.Owner?.DeviceId != context.Device.DeviceId)
         {
             output.WriteLine("This PC has no unfinished session.");
@@ -606,14 +611,17 @@ internal static class SessionCommands
         var journal = store.ReadJournal();
         output.WriteLine(StatusText.For(journal, device));
         _ = Ownership.Abandon(journal, device, session, reason, DateTimeOffset.UtcNow);
-        output.WriteLine($"Abandoning returns the library to generation {journal.CommittedGeneration}. Clips and edits made in session {journal.SessionId} "
-            + $"that were not published stay only on {journal.Owner?.DisplayName ?? "that PC"} and its cache, and must be reconciled by hand.");
+        output.WriteLine(journal.State == OwnershipState.Maintenance
+            ? $"This clears '{journal.Reason}' on {journal.Owner?.DisplayName} at generation {journal.CommittedGeneration}. Confirm that the owning PC has stopped the command and cannot resume it before applying."
+            : $"Abandoning returns the library to generation {journal.CommittedGeneration}. Clips and edits made in session {journal.SessionId} "
+                + $"that were not published stay only on {journal.Owner?.DisplayName ?? "that PC"} and its cache, and must be reconciled by hand.");
         if (!apply)
         {
             output.WriteLine("Preview only; add --apply to abandon.");
             return 0;
         }
-        var next = store.Update(r => Ownership.Abandon(r, device, session, reason, DateTimeOffset.UtcNow), TimeSpan.FromSeconds(10));
+        var next = store.Update(r => r == journal ? Ownership.Abandon(r, device, session, reason, DateTimeOffset.UtcNow)
+            : throw new OwnershipConflictException("Ownership changed during review. Run abandon again to review the current state."), TimeSpan.FromSeconds(10));
         log($"abandon: {next.Reason}");
         output.WriteLine($"Done: {next.Reason}");
         return 0;

@@ -44,10 +44,12 @@ public sealed class CloudHandoffTests : IDisposable
     private sealed class Drive : HttpMessageHandler
     {
         public CloudJournal? Value;
+        public string FolderId = "drive-folder-id";
         public bool Offline, IgnoreConditions, ApplyThenDisconnect, RejectWrites;
         public HttpStatusCode? Failure;
         /// <summary>When it returns true, a journal write is lost before it applies, as a dropped connection would.</summary>
         public Func<bool>? DropWrite;
+        public Action? BeforeNextWrite;
         public int Revision = 1, Writes, Reads;
         public readonly List<HttpMethod> Methods = [];
         private readonly object gate = new();
@@ -59,6 +61,8 @@ public sealed class CloudHandoffTests : IDisposable
             if (Offline) throw new HttpRequestException("Synthetic offline");
             if (Failure is { } failure) return Reply(failure);
             string body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
+            if (request.Method == HttpMethod.Patch && body != "{}")
+                Interlocked.Exchange(ref BeforeNextWrite, null)?.Invoke();
             lock (gate)
             {
                 Methods.Add(request.Method);
@@ -67,7 +71,7 @@ public sealed class CloudHandoffTests : IDisposable
                     if (Value is not null) return Reply(HttpStatusCode.Conflict);
                     using var create = JsonDocument.Parse(body);
                     Assert.Equal(FileId, create.RootElement.GetProperty("id").GetString());
-                    Assert.Equal("drive-folder-id", create.RootElement.GetProperty("parents")[0].GetProperty("id").GetString());
+                    Assert.Equal(FolderId, create.RootElement.GetProperty("parents")[0].GetProperty("id").GetString());
                     Value = Json.Deserialize<CloudJournal>(Encoding.UTF8.GetBytes(create.RootElement.GetProperty("description").GetString()!), "synthetic");
                     return Reply(HttpStatusCode.OK);
                 }
@@ -111,25 +115,60 @@ public sealed class CloudHandoffTests : IDisposable
     private string Run(IReadOnlyList<string> args)
     {
         commands.Add(args[0]);
-        if (args[0] == "lsjson" && args.Contains("--stat")) return """{"ID":"drive-folder-id","IsDir":true}""";
         string PathFor(string value) => value.StartsWith("gdrive:", StringComparison.Ordinal)
             ? fixture.PathFor("drive", value[(value.IndexOf(':') + 1)..].Replace('/', Path.DirectorySeparatorChar)) : value;
-        string source = PathFor(args[1]);
+        string source = PathFor(args[0] == "hashsum" ? args[2] : args[1]);
+        if (args[0] == "lsjson" && args.Contains("--stat"))
+        {
+            if (args[1] == "gdrive:MedalSync") return """{"ID":"drive-folder-id","IsDir":true}""";
+            if (args[1] == "gdrive:OldLibrary") return """{"ID":"old-drive-folder-id","IsDir":true}""";
+            if (!File.Exists(source)) return "null";
+            return JsonSerializer.Serialize(new { IsDir = false, Size = new FileInfo(source).Length, ModTime = File.GetLastWriteTimeUtc(source) });
+        }
         if (args[0] == "lsjson")
         {
             if (!Directory.Exists(source)) throw new RcloneFailedException("Synthetic missing folder", 3);
             return JsonSerializer.Serialize(Directory.GetFileSystemEntries(source, "*", SearchOption.AllDirectories).Select(p => new
             {
                 Path = Path.GetRelativePath(source, p).Replace('\\', '/'), IsDir = Directory.Exists(p),
+                Size = Directory.Exists(p) ? 0 : new FileInfo(p).Length, ModTime = File.GetLastWriteTimeUtc(p),
                 Hashes = Directory.Exists(p) ? null : new Dictionary<string, string> { [checksumName] = Convert.ToHexString(MD5.HashData(File.ReadAllBytes(p))) },
             }));
+        }
+        if (args[0] == "cat")
+            return File.Exists(source) ? File.ReadAllText(source) : throw new RcloneFailedException("Synthetic missing file", 4);
+        if (args[0] == "touch")
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+            using var marker = File.Create(source);
+            return "";
+        }
+        if (args[0] == "purge")
+        {
+            if (!Directory.Exists(source)) throw new RcloneFailedException("Synthetic missing folder", 3);
+            Directory.Delete(source, recursive: true);
+            return "";
+        }
+        int listIndex = args.ToList().IndexOf("--files-from-raw");
+        var selected = listIndex < 0 ? null : File.ReadAllLines(args[listIndex + 1]).ToHashSet(StringComparer.Ordinal);
+        if (args[0] == "hashsum")
+        {
+            if (!Directory.Exists(source)) throw new RcloneFailedException("Synthetic missing folder", 3);
+            return string.Join('\n', selected!.Where(path => File.Exists(Path.Combine(source, path)))
+                .Select(path => Hashing.Sha256File(Path.Combine(source, path)) + "  " + path));
         }
         string destination = PathFor(args[2]);
         bool upload = args[2].StartsWith("gdrive:", StringComparison.Ordinal);
         if (upload && failUpload) throw new RcloneFailedException("Synthetic quota failure", 7, hints: RcloneHints.Quota);
+        if (args[0] == "copyto")
+        {
+            if (!File.Exists(source)) throw new RcloneFailedException("Synthetic missing file", 4);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            if (File.Exists(destination)) Assert.Equal(File.ReadAllBytes(source), File.ReadAllBytes(destination));
+            else File.Copy(source, destination);
+            return "";
+        }
         if (!Directory.Exists(source)) throw new RcloneFailedException("Synthetic missing folder", 3);
-        int listIndex = args.ToList().IndexOf("--files-from-raw");
-        var selected = listIndex < 0 ? null : File.ReadAllLines(args[listIndex + 1]).ToHashSet(StringComparer.Ordinal);
         foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
         {
             string relative = Path.GetRelativePath(source, file).Replace('\\', '/');
@@ -137,6 +176,7 @@ public sealed class CloudHandoffTests : IDisposable
             string target = Path.Combine(destination, Path.GetRelativePath(source, file));
             if (args[0] == "check" || File.Exists(target)) Assert.Equal(File.ReadAllBytes(file), File.ReadAllBytes(target));
             else { Directory.CreateDirectory(Path.GetDirectoryName(target)!); File.Copy(file, target); }
+            if (args[0] == "move") File.Delete(file);
             if (!upload && args[0] == "copy")
             {
                 downloadedFiles.Add(relative);
@@ -144,6 +184,388 @@ public sealed class CloudHandoffTests : IDisposable
             }
         }
         return "";
+    }
+
+    [Fact]
+    public void CloudRetentionKeepsTheLeaseOnInterruptionAndAnotherPcUsesThePrunedAncestry()
+    {
+        using var drive = new Drive();
+        var config = Config("first");
+        var store = Seed(drive, config, Snapshot("seed", "one"));
+        Publish(store, 1);
+        Publish(store, 2);
+        var otherConfig = Config("second");
+        var otherStore = CoordinationStore.OpenCloud(otherConfig, new(otherConfig, Api(drive), Run));
+        var state = new LocalState(fixture.PathFor("first", "state"));
+        var retention = new Retention(config, state, First, store, () => Now.AddDays(120));
+        var plan = retention.Plan(new(0, 30, 30));
+        Assert.Equal(2, plan.Items.Count);
+        bool interrupted = false;
+        Assert.Throws<StorageOfflineException>(() => retention.Apply(plan, () =>
+        {
+            var lease = otherStore.ReadJournal();
+            Assert.Equal(OwnershipState.Maintenance, lease.State);
+            Assert.Equal("retention", lease.Reason);
+            Assert.Equal(First, lease.Owner);
+            var clock = new Clock();
+            var medal = new LaunchMedal();
+            var waiting = new SessionCoordinator(otherStore,
+                new SqliteLocalLibrary(fixture.CreateLibrary("maintenance-waiter"), MedalFixture.AccountId, state.BackupDirectory, clock),
+                new LaunchMount(), medal, new NoAssets(), clock, new(Second, config.Capture, Versions, TimeSpan.Zero, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(1))).Launch();
+            Assert.Equal(LaunchStatus.Waiting, waiting.Status);
+            Assert.Contains("First PC is running 'retention'", waiting.Message, StringComparison.Ordinal);
+            Assert.Equal(0, medal.Launches);
+            Assert.Throws<OwnershipConflictException>(() => otherStore.Update(j => Ownership.Acquire(j, Second, new string('2', 32), Now), TimeSpan.Zero));
+            Assert.Throws<OwnershipConflictException>(() => otherStore.RunMaintenance(Second, "replica prune", new string('3', 32), new string('a', 64), () => 0));
+            if (!interrupted)
+            {
+                interrupted = true;
+                throw new StorageOfflineException("Synthetic interrupted maintenance");
+            }
+        }));
+        Assert.Equal(OwnershipState.Maintenance, store.ReadJournal().State);
+        Assert.True(File.Exists(retention.Apply(plan)));
+        Assert.Equal(OwnershipState.Clean, otherStore.ReadJournal().State);
+        Assert.Equal(new long[] { 2 }, otherStore.Generations.Numbered());
+        Assert.Equal(new long[] { 2, 1, 0 }, otherStore.Generations.Chain(2).Select(generation => generation.Generation));
+        Assert.NotNull(otherStore.Generations.Pruned(1));
+        Assert.False(Directory.Exists(fixture.PathFor("drive", "MedalSync", ".medal-sync", LibraryId, "generations", GenerationStore.Name(0))));
+        var newConfig = Config("fresh-cache");
+        var freshlyJoined = CoordinationStore.OpenCloud(newConfig, new(newConfig, Api(drive), Run));
+        Assert.Equal(new long[] { 2 }, freshlyJoined.Generations.Numbered());
+        Assert.Equal(3, freshlyJoined.Generations.Next(2));
+        var launchClock = new Clock();
+        var oldDb = fixture.PathFor("seed", $"medal-{MedalFixture.AccountId}.db");
+        var launch = new SessionCoordinator(freshlyJoined,
+            new SqliteLocalLibrary(oldDb, MedalFixture.AccountId, state.BackupDirectory, launchClock),
+            new LaunchMount(), new LaunchMedal(), new NoAssets(), launchClock,
+            new(Second, config.Capture, Versions, TimeSpan.Zero, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(1))).Launch();
+        Assert.True(launch.Status == LaunchStatus.Started, launch.Message);
+    }
+
+    [Fact]
+    public void CloudMaintenanceReadbackRecognizesALostReleaseAcknowledgement()
+    {
+        using var drive = new Drive();
+        var store = Seed(drive, Config("first"), Snapshot("seed"));
+        string operation = new('4', 32), digest = new('a', 64);
+        Assert.Equal(42, store.RunMaintenance(First, "retention", operation, digest, () =>
+        {
+            drive.ApplyThenDisconnect = true;
+            return 42;
+        }));
+        Assert.Equal(OwnershipState.Clean, store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void OnlyOneMaintenanceAttemptWinsWhenBothReadTheSameEtag()
+    {
+        using var drive = new Drive();
+        var first = Seed(drive, Config("first"), Snapshot("seed"));
+        var secondConfig = Config("second");
+        var second = CoordinationStore.OpenCloud(secondConfig, new(secondConfig, Api(drive), Run));
+        long revision = first.ReadJournal().Revision;
+        string operation = new('2', 32), digest = new('2', 64);
+        drive.BeforeNextWrite = () => Assert.Throws<StorageOfflineException>(() => second.RunMaintenance(Second, "retention",
+            operation, digest, () => { throw new StorageOfflineException("Synthetic interrupted work"); }, revision: revision, head: 0, completed: () => 0));
+        Assert.Throws<UnsafeOperationException>(() => first.RunMaintenance(First, "replica prune", new string('1', 32), new string('1', 64),
+            () => throw new InvalidOperationException("The losing attempt must not run."), revision: revision, head: 0, completed: () => 0));
+        Assert.Equal(Second, first.ReadJournal().Owner);
+        Assert.Equal(1, drive.Writes);
+        Assert.Equal(42, second.RunMaintenance(Second, "retention", operation, digest, () => 42, revision: revision, head: 0));
+        Assert.Equal(OwnershipState.Clean, first.ReadJournal().State);
+    }
+
+    [Theory]
+    [InlineData("onedrive")]
+    [InlineData("dropbox")]
+    public void FileJournalProvidersRefuseStaleVersionsAndRecoverUncertainWrites(string provider)
+    {
+        using var service = new JournalFilesService(provider);
+        using var client = new HttpClient(service, disposeHandler: false);
+        var config = Config("first");
+        FileCloudJournal Api()
+        {
+            ICloudJournalFiles files = provider == "onedrive"
+                ? new OneDriveJournalFiles(() => "synthetic-token", () => "https://graph.microsoft.com", client: client)
+                : new DropboxJournalFiles(() => "synthetic-token", client: client);
+            string id = provider == "onedrive" ? "drive#journal" : "id:journal";
+            return new(id, "drive-folder-id", files, service.ReserveProbe);
+        }
+        var api = Api();
+        var cloud = new CloudCoordination(config, api, Run);
+        cloud.Create(Snapshot("seed"), new(1, [], []), First, new string('1', 32), Versions, Now);
+        var other = Api();
+        var first = api.Read();
+        var stale = other.Read();
+        string session = new('2', 32);
+        var activeStart = first.Value with { Journal = Ownership.Acquire(first.Value.Journal, First, session, Now) };
+        Assert.True(api.CompareExchange(first, activeStart));
+        Assert.False(other.CompareExchange(stale, stale.Value with { Journal = Ownership.Acquire(stale.Value.Journal, Second, new string('3', 32), Now) }));
+        service.DisconnectAfterJournalWrite = true;
+        var starting = api.Read();
+        var active = starting.Value with { Journal = Ownership.MarkActive(starting.Value.Journal, First, session, Now) };
+        Assert.Throws<StorageOfflineException>(() => api.CompareExchange(starting, active));
+        Assert.Equal(active.Journal, other.Read().Value.Journal);
+
+        var secondConfig = Config("second");
+        var secondStore = CoordinationStore.OpenCloud(secondConfig, new(secondConfig, other, Run));
+        Assert.Equal(active.Journal, secondStore.ReadJournal());
+        Assert.Contains("check", commands);
+        service.IgnoreConditions = true;
+        var unproven = Api();
+        var stillActive = unproven.Read();
+        Assert.Throws<UnsafeOperationException>(() => unproven.CompareExchange(stillActive,
+            stillActive.Value with { Journal = Ownership.BeginDrain(stillActive.Value.Journal, First, session, Now) }));
+        Assert.Equal(active.Journal, api.Read().Value.Journal);
+    }
+
+    private sealed class JournalFilesService(string provider) : HttpMessageHandler
+    {
+        private readonly Dictionary<string, (int Version, byte[] Bytes)> files = new(StringComparer.Ordinal)
+            { [provider == "onedrive" ? "drive#journal" : "id:journal"] = (1, FileCloudJournal.ReservedBytes) };
+        public bool IgnoreConditions { get; set; }
+        public bool DisconnectAfterJournalWrite { get; set; }
+
+        public (string ItemId, string FolderId, Action Cleanup) ReserveProbe()
+        {
+            string id = (provider == "onedrive" ? "drive#probe-" : "id:probe-") + Guid.NewGuid().ToString("N");
+            files.Add(id, (1, FileCloudJournal.ReservedBytes));
+            return (id, "drive-folder-id", () => files.Remove(id));
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal("synthetic-token", request.Headers.Authorization?.Parameter);
+            if (provider == "dropbox")
+            {
+                Assert.Equal("content.dropboxapi.com", request.RequestUri!.Host);
+                using var args = JsonDocument.Parse(request.Headers.GetValues("Dropbox-API-Arg").Single());
+                string id = args.RootElement.GetProperty("path").GetString()!;
+                var file = files[id];
+                string Revision(int version) => version.ToString("D12", System.Globalization.CultureInfo.InvariantCulture);
+                string Metadata(int version) => JsonSerializer.Serialize(new { id, rev = Revision(version) });
+                if (request.RequestUri.AbsolutePath.EndsWith("/download", StringComparison.Ordinal))
+                {
+                    var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(file.Bytes) };
+                    response.Headers.Add("Dropbox-API-Result", Metadata(file.Version));
+                    return response;
+                }
+                Assert.EndsWith("/upload", request.RequestUri.AbsolutePath);
+                Assert.False(args.RootElement.GetProperty("autorename").GetBoolean());
+                var mode = args.RootElement.GetProperty("mode");
+                Assert.Equal("update", mode.GetProperty(".tag").GetString());
+                if (!IgnoreConditions && mode.GetProperty("update").GetString() != Revision(file.Version))
+                    return Reply(HttpStatusCode.Conflict, """{"error":{".tag":"path","path":{".tag":"conflict"}}}""");
+                await Store(id, file.Version);
+                return Reply(HttpStatusCode.OK, Metadata(file.Version + 1));
+            }
+
+            Assert.Equal("graph.microsoft.com", request.RequestUri!.Host);
+            string[] parts = request.RequestUri.AbsolutePath.Split('/');
+            string key = parts[3] + "#" + parts[5];
+            var item = files[key];
+            if (request.Method == HttpMethod.Get)
+                return parts.Length == 7 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(item.Bytes) }
+                    : Reply(HttpStatusCode.OK, JsonSerializer.Serialize(new { eTag = $"\"revision-{item.Version}\"", file = new { } }));
+            Assert.Equal(HttpMethod.Put, request.Method);
+            Assert.Equal("content", parts[6]);
+            if (!IgnoreConditions && request.Headers.IfMatch.Single().Tag != $"\"revision-{item.Version}\"")
+                return Reply(HttpStatusCode.PreconditionFailed);
+            await Store(key, item.Version);
+            return Reply(HttpStatusCode.OK, JsonSerializer.Serialize(new { id = parts[5] }));
+
+            async Task Store(string id, int version)
+            {
+                files[id] = (version + 1, await request.Content!.ReadAsByteArrayAsync(cancellationToken));
+                if (DisconnectAfterJournalWrite && id.EndsWith("journal", StringComparison.Ordinal))
+                {
+                    DisconnectAfterJournalWrite = false;
+                    throw new HttpRequestException("Synthetic lost acknowledgement");
+                }
+            }
+        }
+
+        private static HttpResponseMessage Reply(HttpStatusCode status, string body = "{}") => new(status) { Content = new StringContent(body) };
+    }
+
+    [Fact]
+    public void CloudReplicaAndPrimaryPruneHoldMaintenanceAndLeaveReferencedClips()
+    {
+        using var drive = new Drive();
+        var baseConfig = Config("first");
+        var state = new LocalState(fixture.PathFor("first", "state"));
+        var device = state.Device();
+        Directory.CreateDirectory(Path.GetDirectoryName(baseConfig.Replication!.RcloneConfigPath!)!);
+        File.WriteAllText(baseConfig.Replication.RcloneConfigPath!, "");
+        var config = baseConfig with { Replication = baseConfig.Replication with { Targets = [new("copy", "gdrive:Copies")] } };
+        var store = Seed(drive, config, Snapshot("seed", "one"));
+        foreach (bool primary in new[] { false, true })
+        {
+            string path = primary ? fixture.PathFor("drive", "MedalSync", "Clips") : fixture.PathFor("drive", "Copies", LibraryId);
+            Directory.CreateDirectory(path);
+            foreach (string file in new[] { "one.mp4", "unreferenced.mp4" })
+            {
+                File.WriteAllText(Path.Combine(path, file), "synthetic");
+                File.SetLastWriteTimeUtc(Path.Combine(path, file), Now.AddDays(-45).UtcDateTime);
+            }
+            string command = primary ? "primary" : "replica";
+            var remote = new RcloneReplicaRemote(config, state, () => { }, args =>
+            {
+                if (args[0] is "move" or "purge")
+                {
+                    Assert.Equal(OwnershipState.Maintenance, drive.Value!.Journal.State);
+                    Assert.Equal(device, drive.Value.Journal.Owner);
+                    Assert.StartsWith(command + " ", drive.Value.Journal.Reason);
+                }
+                return Run(args);
+            });
+            var prune = new ReplicaPrune(config, state, store, () => { }, remote, primary: primary);
+            string target = primary ? ReplicaPrune.PrimaryTarget : "copy";
+            var review = prune.Plan(target, 14);
+            Assert.Equal("unreferenced.mp4", Assert.Single(review.Files).Path);
+            Assert.Equal(1, prune.ApplyWithLock(review, TimeSpan.Zero).Moved);
+            Assert.True(File.Exists(Path.Combine(path, "one.mp4")));
+            Assert.False(File.Exists(Path.Combine(path, "unreferenced.mp4")));
+            Assert.Single(prune.PurgeWithLock(target, 0, apply: true, (all, due) => Assert.Single(due)));
+            Assert.Equal(OwnershipState.Clean, store.ReadJournal().State);
+        }
+    }
+
+    [Fact]
+    public void CloudMediaRefreshRetainsOldBytesAndResumesTheExactReview()
+    {
+        using var drive = new Drive();
+        var config = Config("first");
+        Directory.CreateDirectory(Path.GetDirectoryName(config.Replication!.RcloneConfigPath!)!);
+        File.WriteAllText(config.Replication.RcloneConfigPath!, "");
+        var store = Seed(drive, config, Snapshot("seed", "one"));
+        var state = new LocalState(fixture.PathFor("first", "state"));
+        string cloud = fixture.PathFor("drive", "MedalSync", "Clips");
+        StorageIdentity.Initialize(cloud, LibraryId);
+        StorageIdentity.Initialize(config.MountedCapture.Display, LibraryId);
+        File.WriteAllText(Path.Combine(cloud, "one.mp4"), "verified cloud bytes");
+        string local = Path.Combine(config.MountedCapture.Display, "one.mp4");
+        File.WriteAllText(local, "old local bytes");
+        var refresh = new PersistentMediaRefresh(config, state, First, store, () => { }, () => { },
+            afterReplacement: _ => throw new StorageOfflineException("Synthetic interruption"), run: Run);
+        var plan = refresh.Preview();
+        Assert.True(Assert.Single(plan.Files).Conflict);
+        Assert.Throws<StorageOfflineException>(() => refresh.Apply(plan, acceptUnknown: true));
+        Assert.Equal(OwnershipState.Maintenance, store.ReadJournal().State);
+        string recovery = new PersistentMediaRefresh(config, state, First, store, () => { }, () => { }, run: Run).Apply(plan, acceptUnknown: true);
+        Assert.Equal("verified cloud bytes", File.ReadAllText(local));
+        Assert.Equal("old local bytes", File.ReadAllText(Path.Combine(recovery, "previous", "one.mp4")));
+        Assert.Equal(OwnershipState.Clean, store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void ReviewedServerMigrationResumesWithHistoryAndTheSecondPcCanUseTheDestination()
+    {
+        var config = Config("first");
+        var source = config with
+        {
+            StorageMode = StorageMode.Server, CloudJournalId = null, Remote = fixture.PathFor("share", "media"),
+            CoordinationRoot = fixture.PathFor("share", "coordination"), Replication = null,
+        };
+        StorageIdentity.Initialize(source.PrimaryCapture, LibraryId);
+        foreach (string media in new[] { "one", "clip-1", "clip-2" })
+            File.WriteAllText(Path.Combine(source.PrimaryCapture, media + ".mp4"), "source-" + media);
+        var initial = Snapshot("seed", "one");
+        var sourceStore = CoordinationStore.Create(source.LibraryCoordinationDirectory, LibraryId, initial, new(1, [], []), First, new string('1', 32), Versions, Now);
+        Publish(sourceStore, 1);
+        Publish(sourceStore, 2);
+        using var drive = new Drive();
+        var migration = new StorageMigration(source, new LocalState(fixture.PathFor("first", "state")), First, sourceStore, config,
+            new(config, Api(drive), Run), () => { }, Run);
+        var plan = migration.Preview(new string('a', 64));
+        Assert.Equal(new long[] { 0, 1, 2 }, plan.Generations.Select(g => g.Number));
+        Assert.Equal(3, plan.Media.Count);
+        failUpload = true;
+        Assert.Throws<RcloneFailedException>(() => migration.Apply(plan, rollback: false));
+        Assert.Equal(OwnershipState.Migrating, sourceStore.ReadJournal().State);
+        Assert.Null(drive.Value);
+        failUpload = false;
+        drive.DropWrite = () => true;
+        Assert.Throws<StorageOfflineException>(() => migration.Apply(plan, rollback: false));
+        Assert.Equal(OwnershipState.Migrated, sourceStore.ReadJournal().State);
+        Assert.Equal(OwnershipState.Migrating, drive.Value!.Journal.State);
+        Assert.Throws<UnsafeOperationException>(() => migration.Apply(plan, rollback: true));
+        drive.DropWrite = null;
+        migration.Apply(plan, rollback: false);
+        Assert.Equal(OwnershipState.Migrated, sourceStore.ReadJournal().State);
+        Assert.Equal(OwnershipState.Clean, drive.Value!.Journal.State);
+        Assert.Equal(2, drive.Value.Journal.CommittedGeneration);
+        Assert.Equal("source-one", File.ReadAllText(Path.Combine(source.PrimaryCapture, "one.mp4")));
+        Assert.Equal("source-one", Run(["cat", "gdrive:MedalSync/Clips/one.mp4"]));
+
+        var secondConfig = Config("second");
+        var destinationStore = CoordinationStore.OpenCloud(secondConfig, new(secondConfig, Api(drive), Run));
+        Assert.Equal(sourceStore.Identity, destinationStore.Identity);
+        Assert.Equal(plan.Generations.Select(g => g.Number), destinationStore.Generations.Numbered());
+        var clock = new Clock();
+        string db = fixture.PathFor("generation-2", $"medal-{MedalFixture.AccountId}.db");
+        var secondMedal = new LaunchMedal();
+        SessionCoordinator On(CoordinationStore journal) => new(journal,
+            new SqliteLocalLibrary(db, MedalFixture.AccountId, fixture.PathFor("second", "backups"), clock, @"M:\Clips"),
+            new LaunchMount(), secondMedal, new NoAssets(), clock, new(Second, config.Capture, Versions, TimeSpan.Zero, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(1)));
+        Assert.Contains("moved to Google Drive", On(sourceStore).Launch().Message, StringComparison.Ordinal);
+        Assert.Equal(0, secondMedal.Launches);
+        var launch = On(destinationStore).Launch();
+        Assert.True(launch.Status == LaunchStatus.Started, launch.Message);
+        Assert.Equal(1, secondMedal.Launches);
+    }
+
+    [Fact]
+    public void RollingBackBeforeRetirementLeavesTheStagedDestinationFrozen()
+    {
+        var config = Config("first");
+        var source = config with
+        {
+            StorageMode = StorageMode.Server, CloudJournalId = null, Remote = fixture.PathFor("share", "media"),
+            CoordinationRoot = fixture.PathFor("share", "coordination"), Replication = null,
+        };
+        StorageIdentity.Initialize(source.PrimaryCapture, LibraryId);
+        var sourceStore = CoordinationStore.Create(source.LibraryCoordinationDirectory, LibraryId, Snapshot("seed"),
+            new(1, [], []), First, new string('1', 32), Versions, Now);
+        using var drive = new Drive();
+        var backend = new CloudCoordination(config, Api(drive), Run);
+        var operation = new StorageMigration(source, new LocalState(fixture.PathFor("first", "state")), First, sourceStore, config, backend, () => { }, Run);
+        var plan = operation.Preview(new string('a', 64));
+        failDownload = true;
+        Assert.Throws<RcloneFailedException>(() => operation.Apply(plan, rollback: false));
+        Assert.Equal(OwnershipState.Migrating, drive.Value!.Journal.State);
+        operation.Apply(plan, rollback: true);
+        Assert.Equal(OwnershipState.Clean, sourceStore.ReadJournal().State);
+        failDownload = false;
+        var frozen = CoordinationStore.OpenCloud(config, backend);
+        Assert.Throws<OwnershipConflictException>(() => frozen.Update(
+            record => Ownership.Acquire(record, Second, new string('2', 32), Now), TimeSpan.Zero));
+        Assert.Throws<UnsafeOperationException>(() => operation.Apply(plan, rollback: false));
+    }
+
+    [Fact]
+    public void CloudToCloudMigrationKeepsTheOriginalGenerationNumbersAndHighWater()
+    {
+        var source = Config("source") with { Remote = "gdrive:OldLibrary" };
+        var target = Config("target");
+        StorageIdentity.Initialize(fixture.PathFor("drive", "OldLibrary", "Clips"), LibraryId);
+        using var oldDrive = new Drive { FolderId = "old-drive-folder-id" };
+        using var newDrive = new Drive();
+        var old = Seed(oldDrive, source, Snapshot("seed"));
+        string unfinished = fixture.PathFor("drive", "OldLibrary", ".medal-sync", LibraryId, "generations", GenerationStore.Name(12));
+        Directory.CreateDirectory(unfinished);
+        File.WriteAllText(Path.Combine(unfinished, "library.json"), "{}");
+        var destination = new CloudCoordination(target, Api(newDrive), Run);
+        var operation = new StorageMigration(source, new LocalState(fixture.PathFor("state")), First, old, target, destination, () => { }, Run);
+        var plan = operation.Preview(new string('a', 64));
+        Assert.NotNull(plan.RetentionSha256);
+        operation.Apply(plan, rollback: false);
+        Assert.Equal(OwnershipState.Migrated, old.ReadJournal().State);
+        var joined = CoordinationStore.OpenCloud(target, destination);
+        Assert.Equal(0, joined.ReadJournal().CommittedGeneration);
+        Assert.Equal(13, joined.Generations.Next(0));
+        Assert.True(File.Exists(Path.Combine(unfinished, "library.json")));
     }
 
     private CoordinationStore Seed(Drive drive, MedalSyncConfig config, LibrarySnapshot snapshot)

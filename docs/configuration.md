@@ -30,19 +30,19 @@ such as `%USERPROFILE%`.
 Ready-made examples, with placeholder values:
 [server](../tools/medal-sync/config/medal-sync.example.json),
 [local](../tools/medal-sync/config/medal-sync.local.example.json) and
-[Google Drive without a server](../tools/medal-sync/config/medal-sync.cloud.example.json).
+[Cloud mode using Google Drive](../tools/medal-sync/config/medal-sync.cloud.example.json).
 
 ## Top-level fields
 
 | Field | Default from `config create` | Meaning |
 | --- | --- | --- |
 | `format` | `1` | File format. Must be `1`; see [versions and schemas](versioning.md#file-formats). |
-| `storageMode` | `"SERVER"` | `"SERVER"` shares the library through an SMB journal. `"LOCAL"` keeps media and journal on this PC. `"CLOUD"` uses Google Drive for media, generations and conditional ownership updates, without SMB. A file without this field uses server mode. |
-| `cloudJournalId` | Absent | Required only in cloud mode. A pre-generated Drive file ID from `storage cloud-id`; reuse it on every PC sharing the library. See [cloud setup](storage.md#google-drive-without-a-server). |
+| `storageMode` | `"SERVER"` | `"SERVER"` shares the library through an SMB journal. `"LOCAL"` keeps media and journal on this PC. `"CLOUD"` uses Google Drive, OneDrive or Dropbox for media, generations and conditional ownership updates. |
+| `cloudJournalId` | Absent | Required in cloud mode. Get it with `storage cloud-id` and reuse it on every PC sharing the library. See [cloud setup](storage.md#cloud-mode-without-a-server). |
 | `libraryId` | Generated for a new library | 32 lowercase hexadecimal characters. Every PC sharing a library uses the same ID. |
 | `accountId` | From `--account-id` | Numeric Medal account ID, as reported by `inspect`. Must match the account signed in to Medal. |
 | `coordinationRoot` | From `--coordination-root`; state directory's `coordination` folder in local/cloud modes | Server: UNC journal/generation share. Local: dedicated local journal folder. Cloud: dedicated local immutable-history cache; ownership is read from Drive. |
-| `remote` | From `--remote` | Primary storage. Server: UNC share or named rclone remote and folder. Local: dedicated local folder. Cloud: direct Google Drive OAuth remote and dedicated folder, with `replication.localCopyRoot` and `replication.rcloneConfigPath` required. |
+| `remote` | From `--remote` | Primary storage. Server mode accepts a UNC share or named rclone remote and folder. Local mode uses a dedicated local folder. Cloud mode uses a direct Google Drive, OneDrive or Dropbox OAuth remote and folder and requires `replication.localCopyRoot` and `replication.rcloneConfigPath`. |
 | `captureFolder` | `"M:\\Clips"` | Folder Medal records into, on the clip drive Medal Sync mounts. The drive letter must be D to Z; it cannot be a drive root. |
 | `cacheRoot` | From `--cache-root` | Local SSD folder for the clip drive's cache. Not a network drive or the clip drive. |
 | `rclonePath` | The bundled `rclone.exe` | rclone executable used for the clip drive and copies. |

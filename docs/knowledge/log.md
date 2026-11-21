@@ -2,6 +2,8 @@
 
 ## 2026-11-21
 
+* **Update** (2026-11-21T23:15:53Z): Documented cloud journal providers, maintenance and migration in [library ownership](architecture/library-ownership.md), [session lifecycle](architecture/session-lifecycle.md) and [storage and replication](systems/storage-and-replication.md).
+
 * **Update** (2026-11-21T07:00:00Z): Documented how [launch supervision](architecture/session-lifecycle.md) resumes an interrupted finish and how [Google Drive coordination](architecture/library-ownership.md) retries local initialization and reserves partially uploaded generation numbers.
 
 ## 2026-11-20

@@ -13,7 +13,7 @@ internal sealed class WindowsConfigurationWizard : Form
     private readonly LocalState _state;
     private readonly MedalSyncConfig? _existing;
     private readonly Action<MedalSyncConfig, bool> _validate;
-    private readonly Action<MedalSyncConfig> _validateExisting;
+    private readonly Action<MedalSyncConfig, MedalSyncConfig> _validateExisting;
     private readonly Func<IDisposable> _acquireGuard;
     private readonly Func<string>? _detectAccount;
     private readonly bool _readNameAdvice;
@@ -76,7 +76,7 @@ internal sealed class WindowsConfigurationWizard : Form
             : _ => throw new InvalidOperationException("Tests must provide an isolated library setup command."));
         _validate = validate ?? ValidateEnvironment;
         _readNameAdvice = validate is null;
-        _validateExisting = validate is null ? RequireReady : config => validate(config, false);
+        _validateExisting = validate is null ? ValidateExisting : (config, _) => validate(config, false);
         _acquireGuard = acquireGuard ?? AcquireGuard;
         // Tests that replace validation never read the real Medal profile unless they pass a detector.
         _detectAccount = detectAccount ?? (validate is null ? MedalEnvironment.SignedInAccountId : null);
@@ -102,7 +102,7 @@ internal sealed class WindowsConfigurationWizard : Form
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _mode.Items.AddRange(["Server (SMB)", "Local storage", "Google Drive (no server)"]);
+        _mode.Items.AddRange(["Server (SMB)", "Local storage", "Cloud (no server)"]);
         _mode.SelectedIndex = _existing?.StorageMode == StorageMode.Cloud ? 2 : _existing?.StorageMode == StorageMode.Local ? 1 : 0;
         _appliedMode = SelectedMode;
         AddRow(fields, "mode", _mode);
@@ -185,7 +185,7 @@ internal sealed class WindowsConfigurationWizard : Form
         _ => true,
     };
 
-    // A Google Drive remote is not a folder on this PC.
+    // Cloud folders are entered as named rclone remotes.
     private static bool CanBrowse(string key, StorageMode mode) => key != "remote" || mode != StorageMode.Cloud;
 
     private string DefaultCoordination(StorageMode mode) => mode == StorageMode.Server ? "" : Path.Combine(_state.Root, "coordination");
@@ -195,7 +195,7 @@ internal sealed class WindowsConfigurationWizard : Form
         "mode" => ("Storage &mode", mode switch
         {
             StorageMode.Local => "Clips and the ownership journal stay on this PC.",
-            StorageMode.Cloud => "Clips and library handoff go through Google Drive without an SMB server. Medal records into a persistent local copy.",
+            StorageMode.Cloud => "Clips and library handoff go through Google Drive, OneDrive or Dropbox. Medal records into a persistent local copy.",
             _ => "Clips upload to a private SMB share or rclone remote. PCs hand off the library through a journal on the share.",
         }),
         "identity" => ("&Library choice", ""),
@@ -205,24 +205,24 @@ internal sealed class WindowsConfigurationWizard : Form
         "remote" => mode switch
         {
             StorageMode.Local => ("&Storage folder", @"Dedicated folder on this PC that keeps every clip, such as D:\MedalLibrary."),
-            StorageMode.Cloud => ("Drive &storage folder", "Google Drive rclone remote and dedicated folder, such as gdrive:MedalSync."),
+            StorageMode.Cloud => ("Cloud &storage folder", "Direct Google Drive, OneDrive or Dropbox rclone remote and folder, such as onedrive:MedalSync."),
             _ => ("&Storage share or remote", @"Private UNC share such as \\server\Medal\Media, or an rclone remote and folder such as onedrive:MedalSync."),
         },
         "coordination" => mode switch
         {
             StorageMode.Server => ("&Coordination share", @"UNC folder on the private share for the ownership journal, such as \\server\Medal\Coordination."),
-            StorageMode.Cloud => ("&Coordination history cache", "Dedicated local folder for downloaded library history. Ownership is read from Google Drive."),
+            StorageMode.Cloud => ("&Coordination history cache", "Dedicated local folder for downloaded library history."),
             _ => ("&Coordination folder", "Dedicated local folder for the ownership journal, outside the storage, cache and capture folders."),
         },
-        "cloudJournal" => ("Drive &journal ID", "From 'medal-sync storage cloud-id'. Use the same ID on every PC that shares this library."),
+        "cloudJournal" => ("Cloud &journal ID", "From 'medal-sync storage cloud-id'. Use the same ID on every PC that shares this library."),
         "capture" => ("Capture folder / &drive", @"Folder on the clip drive Medal Sync mounts at launch, such as M:\Clips. Drive D to Z, and not a drive root."),
         "cache" => ("SSD cac&he folder", "Local SSD folder for the clip drive's cache. Not the share or the clip drive."),
         "rclone" => ("&Rclone executable", "The rclone.exe installed with Medal Sync is selected by default."),
         "copy" => mode == StorageMode.Cloud
-            ? ("Persistent local cop&y", "Required. Medal records into this complete local copy; Drive receives verified uploads.")
+            ? ("Persistent local cop&y", "Required. Medal records into this complete local copy and syncs it to the cloud folder.")
             : ("Persistent local cop&y (optional)", "Keeps the complete library on this PC and avoids uploading unreferenced replay-buffer segments. Needs space for every clip; recommended on slow links. Required for an rclone remote."),
         "cloudConfig" => mode == StorageMode.Cloud
-            ? ("Provider credential &file", "rclone.conf holding the Google Drive sign-in from 'rclone config'. Required in this mode.")
+            ? ("Provider credential &file", "rclone.conf with the sign-in for the cloud storage folder. Required in this mode.")
             : ("Provider credential &file (optional)", "rclone.conf from 'rclone config'. Required for cloud copies or an rclone storage remote."),
         "signIn" => ("Cloud sign-&in", "Choose the provider and a remote name (such as gdrive), then Sign in: the provider's page opens in your browser. "
             + "Medal Sync saves the sign-in to the provider credential file above, or to one in its private folder, only after a storage check passes. "
@@ -482,7 +482,7 @@ internal sealed class WindowsConfigurationWizard : Form
             var candidate = Candidate();
             RequireSignedIn(candidate);
             bool fresh = _identity.SelectedIndex == 0;
-            _proposal = await Task.Run(() => { using var guard = _acquireGuard(); return ConfigurationReview.Prepare(_state, candidate, fresh, _validate, _validateExisting); });
+            _proposal = await Task.Run(() => { using var guard = _acquireGuard(); return ConfigurationReview.Prepare(_state, candidate, fresh, _validate, old => _validateExisting(old, candidate)); });
             if (_ending) return;
             _review.Text = _proposal.Text;
             if (_readNameAdvice && !fresh)
@@ -509,11 +509,12 @@ internal sealed class WindowsConfigurationWizard : Form
         bool fresh = _identity.SelectedIndex == 0;
         await Work(async () =>
         {
-            RequireSignedIn(_proposal.Config);
+            var candidate = _proposal.Config;
+            RequireSignedIn(candidate);
             string? backup = await Task.Run(() =>
             {
                 using var guard = _acquireGuard();
-                string? saved = _proposal.Save(true, _validate, _validateExisting);
+                string? saved = _proposal.Save(true, _validate, old => _validateExisting(old, candidate));
                 if (!_proposal.ReplacesExisting)
                     _librarySetup = LibrarySetupPending.Save(_state, _proposal.Config, fresh);
                 return saved;
@@ -668,6 +669,7 @@ internal sealed class WindowsConfigurationWizard : Form
         if (fresh)
         {
             if (Directory.Exists(config.LibraryCoordinationDirectory)) throw new UnsafeOperationException("That library directory already exists. Join its library ID; never initialize it again.");
+            if (config.StorageMode == StorageMode.Cloud) CloudJournalProvider.RequireConfiguredProvider(config);
         }
         else RequireReady(config);
     }
@@ -686,6 +688,20 @@ internal sealed class WindowsConfigurationWizard : Form
         _ = store.Generations.ReadManifest(journal.CommittedGeneration);
         if (journal.State != OwnershipState.Clean || journal.Owner is not null || journal.SessionId is not null)
             throw new UnsafeOperationException("The existing library is not Ready. Finish its owned session before saving configuration.");
+    }
+
+    private static void ValidateExisting(MedalSyncConfig existing, MedalSyncConfig candidate)
+    {
+        var store = CoordinationStore.Open(existing);
+        var journal = store.ReadJournal();
+        if (journal.State == OwnershipState.Migrated)
+        {
+            if (candidate.StorageMode != StorageMode.Cloud
+                || CloudCoordination.For(candidate).Read().Value.MigrationDigest != journal.OperationDigest)
+                throw new UnsafeOperationException("Use the Google Drive folder and journal ID selected by this library's migration.");
+            return;
+        }
+        RequireReady(existing);
     }
 
     protected override void WndProc(ref Message message)

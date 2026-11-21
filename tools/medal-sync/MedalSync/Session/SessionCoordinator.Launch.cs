@@ -87,6 +87,7 @@ internal sealed partial class SessionCoordinator
         OwnershipState? state = null;
         DateTimeOffset? seenAt = null;
         DateTimeOffset? quietSince = null;
+        string? maintenanceCommand = null;
         HandoffWaitUpdate? last = null;
         _waitDeadline = deadline;
         while (!WaitStopped())
@@ -102,13 +103,14 @@ internal sealed partial class SessionCoordinator
                 // A change such as in use to uploading usually comes shortly before release, so look again soon.
                 if (seenAt is not null && (journal.State != state || journal.Owner?.DeviceId != owner?.DeviceId)) interval = wait.FirstPoll;
                 (owner, state, seenAt, quietSince) = (journal.Owner, journal.State, clock.Now, Ownership.QuietSince(journal, clock.Now));
+                maintenanceCommand = journal.State == OwnershipState.Maintenance ? journal.Reason : null;
             }
             else if (fresh)
             {
                 // Another waiting PC acquired first; the next check reads who owns it now.
                 (owner, state, seenAt, quietSince, interval) = (null, null, clock.Now, null, wait.FirstPoll);
             }
-            var update = new HandoffWaitUpdate(owner, state, seenAt, fresh, deadline - clock.Now, quietSince);
+            var update = new HandoffWaitUpdate(owner, state, seenAt, fresh, deadline - clock.Now, quietSince, maintenanceCommand);
             last = update;
             if (clock.Now >= deadline) return WaitTimedOut(wait, update);
             Report(fresh ? SessionPhase.Waiting : SessionPhase.WaitingForStorage, update.Describe());
@@ -198,6 +200,13 @@ internal sealed partial class SessionCoordinator
         {
             return StorageOfflineLaunch(ex);
         }
+        if (journal.State == OwnershipState.Migrated)
+            return new LaunchOutcome(LaunchStatus.Blocked, Ownership.MigratedMessage);
+        if (journal.State == OwnershipState.Migrating)
+            return new LaunchOutcome(LaunchStatus.Blocked, $"{journal.Owner?.DisplayName} is migrating the library to Google Drive. Retry after the migration completes.");
+        if (journal.State == OwnershipState.Maintenance)
+            return new LaunchOutcome(LaunchStatus.Waiting, $"{journal.Owner?.DisplayName} is running '{journal.Reason}'. Medal can open once maintenance releases the library.",
+                Wait: LaunchWait.OwnedElsewhere, Journal: journal);
         if (Platform.PersistentMediaRefresh.IsPending(journal))
             return new LaunchOutcome(LaunchStatus.Blocked, "A persistent media refresh retains ownership. Retry its exact refresh-media review before opening Medal.", journal.SessionId);
         if (EnrollmentOwnership.IsPending(journal) && journal.Owner?.DeviceId == Me.DeviceId)
@@ -484,9 +493,23 @@ internal sealed partial class SessionCoordinator
         if (digest == target.Manifest.SnapshotDigest) return;
         if (local.RowCount("contents") == 0 && local.RowCount("deleted_contents") == 0) return;
         bool pruned = false;
-        foreach (var (_, manifest) in store.Generations.Chain(target.Manifest.Generation).Skip(1))
+        GenerationRetention? retention = null;
+        foreach (var (number, manifest) in store.Generations.Chain(target.Manifest.Generation).Skip(1))
         {
-            if (manifest is null) { pruned = true; continue; }
+            if (manifest is null)
+            {
+                if (store.IsCloud)
+                {
+                    retention ??= store.Generations.ReadRetention();
+                    if (retention?.Find(number) is { Committed: true, SnapshotDigest: { } proof })
+                    {
+                        if (proof == digest) return;
+                        continue;
+                    }
+                }
+                pruned = true;
+                continue;
+            }
             if (manifest.SnapshotDigest == digest) return;
         }
         throw new UnsafeOperationException(

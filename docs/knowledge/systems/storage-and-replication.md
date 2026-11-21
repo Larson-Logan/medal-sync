@@ -17,7 +17,7 @@ sources:
   - id: configuration
     resource: https://github.com/Larson-Logan/medal-sync/blob/dev/docs/configuration.md
     title: Configuration reference
-generated: { by: "claude-code/claude-opus-5-5", at: "2026-11-20T03:47:39Z" }
+generated: { by: "codex/gpt-6", at: "2026-11-21T23:15:53Z" }
 status: draft
 ---
 
@@ -39,7 +39,7 @@ the code that runs rclone is in
 | Local copy and server | Clip drive backed by a persistent local folder | Local media and server media |
 | Local storage | Clip drive backed by a persistent local folder | Local media and optional cloud copies |
 | Cloud or personal-server primary | Clip drive backed by a persistent local folder | Local media and the rclone primary |
-| Google Drive cloud mode | Clip drive backed by a persistent local folder | Local media, Drive media and library history |
+| Cloud mode | Clip drive backed by a persistent local folder | Local media, cloud media and library history |
 
 Configuration lives in each PC's `config.json` (`mount` and `replication`
 sections); see the [configuration reference](../../configuration.md). Ownership
@@ -79,8 +79,13 @@ credentials.[^storage-guide]
 - `ReplicationPlan` selects only known media references. Then
   `Platform/StorageReplication.cs` runs `rclone copy` to immutable destinations
   followed by `rclone check`, which reads the files back with `--download`
-  (`Platform/ReplicaRemote.cs`). Google Drive cloud mode does the same for its
-  media and generations in `CloudCoordination`.
+  (`Platform/ReplicaRemote.cs`). Cloud mode verifies both media and
+  generations. Google Drive lists MD5 hashes for history cache checks,
+  while OneDrive and Dropbox use byte readback.[^platform-code]
+
+Cloud maintenance holds a lease while retention, primary or replica cleanup,
+or persistent-media refresh applies. A migration verifies media and generations
+on Google Drive before retiring its original ownership journal.[^storage-guide]
 - `ReplicationVerification` keeps private per-destination evidence of what
   verified. Incremental verification reuses it, and removing it forces a full
   pass.

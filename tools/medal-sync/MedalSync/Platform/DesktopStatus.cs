@@ -147,6 +147,13 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
     {
         if (!Enum.IsDefined(journal.State) || journal.State != OwnershipState.Clean
             && (journal.Owner is null || journal.SessionId is null)) return Unknown();
+        if (journal.State == OwnershipState.Maintenance)
+            return new(SessionPhase.Waiting, $"{journal.Owner!.DisplayName} holds the library for '{journal.Reason}'. "
+                + (journal.Owner.DeviceId == device.DeviceId ? "Retry the same command if it was interrupted." : "Wait for maintenance to finish."), now);
+        if (journal.State == OwnershipState.Migrating)
+            return new(SessionPhase.Waiting, $"{journal.Owner!.DisplayName} is migrating the library to Google Drive.", now);
+        if (journal.State == OwnershipState.Migrated)
+            return new(SessionPhase.RecoveryNeeded, Ownership.MigratedMessage, now);
         bool matches = report is { Format: 1, Progress: not null } && report.LibraryId == journal.LibraryId
             && report.AccountId == journal.AccountId && report.DeviceId == device.DeviceId;
         bool fresh = matches && report!.ConfirmedAt <= now + TimeSpan.FromSeconds(5) && now - report.ConfirmedAt <= TimeSpan.FromSeconds(20);

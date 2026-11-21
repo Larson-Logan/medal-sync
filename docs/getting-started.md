@@ -60,8 +60,8 @@ Answer from the top and stop at the first yes:
   (the quick start above).
 - **Same, but you also want every clip on each PC's own disk?** Use
   [a local copy and the server](storage.md#keep-a-local-copy-and-upload-to-the-server).
-- **Several PCs and Google Drive, but no server?** Use
-  [Google Drive without a server](storage.md#google-drive-without-a-server).
+- **Several PCs without a server?** Use
+  [cloud mode](storage.md#cloud-mode-without-a-server) with Google Drive, OneDrive or Dropbox.
 - **Clips on a cloud provider or SFTP server, with SMB still used for handoff?**
   Use [an rclone primary](storage.md#use-a-cloud-provider-or-personal-server-as-primary-storage).
 
@@ -124,8 +124,8 @@ Use server storage with an SSD cache, keep a persistent local copy that uploads
 back to the server, and optionally add verified OneDrive, Dropbox or Google Drive
 replicas. See [storage choices and configuration](storage.md) for commands and
 multiple-provider examples. Server mode uses SMB as the shared ownership authority.
-For cross-PC handoff using only Google Drive, follow
-[Google Drive without a server](storage.md#google-drive-without-a-server).
+For cross-PC handoff using Google Drive, OneDrive or Dropbox, follow
+[cloud mode without a server](storage.md#cloud-mode-without-a-server).
 Local mode keeps media and coordination on this PC, with optional cloud copies
 and no SMB dependency. It does not provide automatic handoff to another PC.
 
@@ -209,7 +209,7 @@ to check its work.
 
 Run `medal-sync-launch.exe --configure`, choose **Configure** from the status
 tray menu, or accept the wizard offered by an unconfigured desktop launch.
-Choose server (SMB), local or Google Drive storage; the wizard then shows only
+Choose server (SMB), local or cloud storage. The wizard then shows only
 the fields that mode uses, each with a short explanation and example, and
 ignores values in hidden fields. Explicitly choose a new library ID or enter the
 existing ID to join. A new setup fills in the Medal account ID from the account

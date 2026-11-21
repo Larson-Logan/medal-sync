@@ -122,7 +122,6 @@ internal static class ReplicaCommands
                 output.WriteLine("This copy is required. Only old trash is deleted; referenced files are not touched. Applying a nonempty purge makes this PC's next handoff read every referenced file back.");
             // Hold the writer lock, as prune --apply does, so a prune resumed on another PC
             // cannot add files to a batch between choosing it and deleting it.
-            using var writer = apply ? store.AcquireWriterLock(TimeSpan.FromSeconds(10)) : null;
             return PurgeTrash(prune, output, target, days, apply);
         }
         catch (OperationCanceledException ex)
@@ -135,7 +134,7 @@ internal static class ReplicaCommands
     internal static int PurgeTrash(ReplicaPrune prune, TextWriter output, string target, int days, bool apply)
     {
         bool empty = false;
-        var deleted = prune.Purge(target, days, apply, (all, due) =>
+        var deleted = prune.PurgeWithLock(target, days, apply, (all, due) =>
         {
             foreach (var batch in all)
                 output.WriteLine(string.Create(CultureInfo.InvariantCulture,
@@ -151,6 +150,7 @@ internal static class ReplicaCommands
     internal static ReplicaPruneResult ApplyPrune(ReplicaPrune prune, CoordinationStore store, ReplicaPrunePlan plan,
         TimeSpan? lockTimeout = null)
     {
+        if (store.IsCloud) return prune.ApplyWithLock(plan, lockTimeout);
         using var writer = store.AcquireWriterLock(lockTimeout ?? TimeSpan.FromSeconds(10));
         return prune.Apply(plan);
     }

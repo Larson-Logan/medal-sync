@@ -61,12 +61,12 @@ internal sealed record HandoffWait(TimeSpan Timeout, Func<bool>? Cancelled = nul
 /// so <paramref name="Owner"/> and <paramref name="State"/> are only what was seen at <paramref name="SeenAt"/>.
 /// </summary>
 internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? State, DateTimeOffset? SeenAt, bool Fresh, TimeSpan Remaining,
-    DateTimeOffset? QuietSince = null)
+    DateTimeOffset? QuietSince = null, string? MaintenanceCommand = null)
 {
     public string Describe()
     {
         string? seen = Owner is { } owner && State is { } state && SeenAt is { } at
-            ? $"{owner.DisplayName} has the library ({Ownership.Describe(state)}), checked at {Clock(at)}"
+            ? $"{owner.DisplayName} has the library ({Doing(state)}), checked at {Clock(at)}"
             : null;
         if (Fresh)
         {
@@ -86,6 +86,7 @@ internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? 
         string title = $"Waiting for {who} to hand off the library";
         string detail = (Fresh, State, SeenAt) switch
         {
+            (true, OwnershipState.Maintenance, { } at) => $"{Doing(OwnershipState.Maintenance)} at {Clock(at)}.",
             (true, _, _) when QuietSince is { } since =>
                 $"No change since {since.UtcDateTime:yyyy-MM-dd HH:mm} UTC. If that PC is off, turn it on and sign in.",
             (true, { } state, { } at) => $"{Ownership.Describe(state)} at {Clock(at)}. If that PC is off, turn it on and sign in.",
@@ -95,6 +96,9 @@ internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? 
         };
         return (title, detail);
     }
+
+    private string Doing(OwnershipState state) => state == OwnershipState.Maintenance && MaintenanceCommand is { } command
+        ? $"running '{command}'" : Ownership.Describe(state);
 
     private static string Clock(DateTimeOffset at) => at.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
 

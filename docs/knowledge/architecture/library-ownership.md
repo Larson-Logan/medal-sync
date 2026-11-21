@@ -13,8 +13,8 @@ sources:
     title: Versions and schemas, file formats
   - id: storage-guide
     resource: https://github.com/Larson-Logan/medal-sync/blob/dev/docs/storage.md
-    title: Storage choices, Google Drive cloud mode
-generated: { by: "codex/gpt-6", at: "2026-11-21T07:00:00Z" }
+    title: Storage choices, cloud mode and migration
+generated: { by: "codex/gpt-6", at: "2026-11-21T23:15:53Z" }
 status: draft
 ---
 
@@ -40,6 +40,9 @@ Its fields are `Format`, `LibraryId`, `AccountId`, `State`, `Owner`,
 | `Draining` | Uploading | Medal has exited; the owner is finishing uploads. |
 | `Publishing` | Switching PC | The owner is committing the next generation. |
 | `RecoveryRequired` | Recovery needed | Interrupted or uncertain. Only the owner, or an explicit abandon, may continue. In current code, a stopped `enroll` sets it. |
+| `Maintenance` | Maintenance | One PC holds a cloud lease for a reviewed maintenance operation. Other PCs wait. |
+| `Migrating` | Migrating | The reviewed migration holds the source and stages a frozen destination. |
+| `Migrated` | Configuration update needed | The former journal is retired. PCs using it must change configuration. |
 
 Every transition is a static function in `Ownership.cs` that checks the
 current state and owner before returning the next record:
@@ -56,7 +59,10 @@ current state and owner before returning the next record:
 | `CompletePublish` | `Publishing` | `Clean`, with the new `CommittedGeneration` |
 | `CompleteUnchanged` | `Publishing` | `Clean`, no new generation |
 | `RequireRecovery` | any owned state | `RecoveryRequired` |
-| `Abandon` | any state but `Clean` | `Clean`; needs the exact session ID and a reason (`medal-sync abandon`) |
+| `BeginMaintenance`, `EndMaintenance` | `Clean`, `Maintenance` | Acquire or release the cloud lease at the same generation. |
+| `BeginMigration`, `EndMigration` | `Clean`, `Migrating` | Freeze the source, then either return it to `Clean` on rollback or mark it `Migrated`. |
+| `ActivateMigration` | `Migrating` | Destination becomes `Clean` after the source retires. |
+| `Abandon` | an owned session or expired `Maintenance` | `Clean`, using the exact session or lease ID and a reason. |
 
 An abandon returns the library to the last published generation. Unpublished
 clips stay on the lost PC and must be reconciled by hand. The
@@ -99,21 +105,32 @@ A PC that wants the library writes a `HandoffRequest` asking the owner to
 finish. Launch can wait for the release with `HandoffWait`
 (`Session/HandoffWait.cs`).
 
-# Google Drive cloud mode
+# Cloud coordination
 
-`CloudCoordination` with `Platform/GoogleDriveJournal.cs` replaces the SMB
-folder. The format `1` journal is the `description` metadata of one Drive file
-(`cloudJournalId`) and contains `identity`, `journal`, `requests`,
-`storageFolderId`, `captureFolder` and `headManifestHash`. Updates are
-conditional on the Drive file ETag, and the hash binds the committed head to
-its verified manifest.[^versioning] Maintenance commands that need the SMB
-writer lock refuse in cloud mode.
+`CloudCoordination` reads and conditionally replaces one provider journal
+through `ICloudJournal`. Google Drive uses the `description` metadata of a
+file and its v2 ETag. OneDrive uses Microsoft Graph content and a strong item
+ETag. Dropbox downloads contents and the file revision together. Every
+provider checks that a stale version is rejected before changing the journal.
+The configured folder ID and capture path bind the journal to its storage.
+The head manifest hash binds the committed generation to its contents.[^versioning]
+
+Cloud maintenance claims `Maintenance` from `Clean` and binds it to the
+device, command and exact review. The owner can resume after an interruption.
+Expiry never releases ownership. Retention publishes a hashed record with
+ancestry and committed snapshot digests before removing reviewed folders.
+Launch can prove a local library still matches a pruned snapshot.[^coordination-code]
+
+Migration preserves identity and generations. It stages a frozen destination,
+then verifies it, retires the source and activates the destination. The
+review digest binds both journals across retries. Rollback can release the
+source while it still holds the migration.[^storage-guide]
 
 If initialization stops before generation 0 is published locally, a retry can
 proceed when the cache contains only the empty generations directory or
 recognized generation 0 staging directories. A published local generation 0
 must still match the initializing PC and reviewed snapshot. A finish that
-resumes in `Publishing` refreshes Drive history before choosing a generation
+resumes in `Publishing` refreshes cloud history before choosing a generation
 number. Even a partial remote upload reserves its number.[^coordination-code]
 
 # Enrollment
@@ -139,3 +156,4 @@ a new format, a major release, and every PC updated before the next switch. See
 
 [^versioning]: Versions and schemas, file formats
 [^coordination-code]: Coordination store, ownership journal and generation store
+[^storage-guide]: Storage choices, cloud mode and migration

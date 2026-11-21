@@ -14,7 +14,7 @@ sources:
   - id: recovery-rules
     resource: https://github.com/Larson-Logan/medal-sync/blob/dev/docs/getting-started.md
     title: Getting started, recovery rules
-generated: { by: "codex/gpt-6", at: "2026-11-21T07:00:00Z" }
+generated: { by: "codex/gpt-6", at: "2026-11-21T23:15:53Z" }
 status: draft
 ---
 
@@ -41,6 +41,10 @@ this PC, or an explicit `abandon` from another PC, can move it on. The
 finish; finish can resume from it.
 
 # Launch
+
+When the journal is `Maintenance`, launch waits and identifies the PC and
+command. A migration in progress blocks launch. A retired journal tells a PC
+to configure the migrated destination.[^session-code]
 
 If this PC still owns its previous session, launch attempts to finish it
 first. When the attempt needs a retry, launch returns

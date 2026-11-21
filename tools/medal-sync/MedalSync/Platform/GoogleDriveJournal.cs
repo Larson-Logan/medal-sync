@@ -8,16 +8,12 @@ using MedalSync.Util;
 
 namespace MedalSync.Platform;
 
-internal sealed record CloudJournal(int Format, LibraryIdentity Identity, OwnershipRecord Journal, IReadOnlyList<HandoffRequest> Requests,
-    string StorageFolderId, string CaptureFolder, string HeadManifestHash);
-internal sealed record CloudJournalVersion(CloudJournal Value, string Etag);
-
 /// <summary>
 /// The journal is one Drive file's metadata, addressed by ID, never by name. Metadata and its v2 ETag are
 /// read together; conditional PATCH serializes ownership. Media and immutable generations still use rclone.
 /// No expiring lease or cached ownership can grant a session. Unsupported conditional writes fail closed.
 /// </summary>
-internal sealed class GoogleDriveJournal
+internal sealed class GoogleDriveJournal : ICloudJournal
 {
     private static readonly HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
     private readonly string fileId;
@@ -25,10 +21,11 @@ internal sealed class GoogleDriveJournal
     private readonly HttpClient client;
     private readonly Action? requireTime;
     private bool conditionalChecked;
+    public bool HasMd5 => true;
 
     public GoogleDriveJournal(string fileId, Func<string> token, HttpClient? client = null, Action? requireTime = null)
     {
-        if (!MedalSyncConfig.ValidCloudJournalId(fileId)) throw new InvalidDataException("Invalid Google Drive journal ID.");
+        if (!MedalSyncConfig.ValidCloudJournalId(fileId) || fileId.Contains('.')) throw new InvalidDataException("Invalid Google Drive journal ID.");
         this.fileId = fileId; this.token = token; this.client = client ?? Client; this.requireTime = requireTime;
     }
 
@@ -76,24 +73,8 @@ internal sealed class GoogleDriveJournal
             throw new InvalidDataException("Google Drive did not return a strong journal ETag; ownership was refused.");
         string? description = root.GetProperty("description").GetString();
         var value = Json.Deserialize<CloudJournal>(Encoding.UTF8.GetBytes(description ?? ""), "Cloud journal");
-        Validate(value);
+        CloudJournalProvider.Validate(value);
         return new(value, etag!);
-    }
-
-    internal static void Validate(CloudJournal value)
-    {
-        if (value.Format != 1 || value.HeadManifestHash is not { Length: 64 } || !value.HeadManifestHash.All(char.IsAsciiHexDigit)
-            || string.IsNullOrWhiteSpace(value.StorageFolderId) || !WindowsPath.TryParse(value.CaptureFolder, out _, out _)
-            || value.Identity is not { Format: LibraryIdentity.CurrentFormat } identity
-            || !CoordinationStore.IsValidId(identity.LibraryId) || string.IsNullOrEmpty(identity.AccountId)
-            || value.Journal is not { Format: OwnershipRecord.CurrentFormat } journal || journal.LibraryId != identity.LibraryId
-            || journal.AccountId != identity.AccountId || !Enum.IsDefined(journal.State) || journal.Revision < 1 || journal.CommittedGeneration < 0
-            || (journal.State == OwnershipState.Clean ? journal.Owner is not null || journal.SessionId is not null
-                : journal.Owner is null || !CoordinationStore.IsValidId(journal.Owner.DeviceId) || !CoordinationStore.IsValidId(journal.SessionId))
-            || value.Requests is null || value.Requests.Count > 32 || value.Requests.Any(r => r is null || r.Format != 1
-                || r.Device is null || !CoordinationStore.IsValidId(r.Device.DeviceId) || !CoordinationStore.IsValidId(r.RequestId))
-            || value.Requests.Select(r => r.Device.DeviceId).Distinct(StringComparer.Ordinal).Count() != value.Requests.Count)
-            throw new InvalidDataException("The cloud ownership journal is incomplete or belongs to another format.");
     }
 
     /// <summary>First prove that this endpoint refuses a mismatching ETag. The empty patch cannot replace journal data.</summary>
@@ -111,11 +92,11 @@ internal sealed class GoogleDriveJournal
 
     public bool CompareExchange(CloudJournalVersion expected, CloudJournal next)
     {
-        Validate(next);
+        CloudJournalProvider.Validate(next);
         RequireConditionalWrites();
         string description = Encoding.UTF8.GetString(Json.Serialize(next));
         if (Encoding.UTF8.GetByteCount(description) > 30 * 1024) throw new InvalidDataException("Cloud journal exceeds its metadata size limit.");
-        using var response = Send(HttpMethod.Patch, FileUrl, JsonSerializer.Serialize(new { description }), expected.Etag);
+        using var response = Send(HttpMethod.Patch, FileUrl, JsonSerializer.Serialize(new { description }), expected.Version);
         if (response.StatusCode == HttpStatusCode.PreconditionFailed) return false;
         RequireSuccess(response);
         // A timeout or an unreadable response is never retried blindly. The next operation reads authoritative state.
@@ -124,7 +105,7 @@ internal sealed class GoogleDriveJournal
 
     public void Create(CloudJournal initial, string parentId)
     {
-        Validate(initial);
+        CloudJournalProvider.Validate(initial);
         using var response = Send(HttpMethod.Post, "https://www.googleapis.com/drive/v2/files", JsonSerializer.Serialize(new
         {
             id = fileId, title = "medal-sync-journal-" + initial.Identity.LibraryId + ".json", mimeType = "application/json",
@@ -183,7 +164,7 @@ internal sealed class GoogleDriveJournal
 
 /// <summary>Uses rclone's existing OAuth credentials and refresh logic. Config output remains in memory, never in logs.</summary>
 internal sealed class DriveAccessToken(string rclone, string remote, string configPath, Action? requireTime = null,
-    Func<IReadOnlyList<string>, string>? execute = null)
+    Func<IReadOnlyList<string>, string>? execute = null, string expectedType = "drive")
 {
     private readonly string credentials = Environment.ExpandEnvironmentVariables(configPath);
     private string? accessToken;
@@ -193,19 +174,40 @@ internal sealed class DriveAccessToken(string rclone, string remote, string conf
     private string Run(params string[] arguments) => (execute ?? (args => new RcloneRunner(rclone).Run(args,
         TimeSpan.FromSeconds(30), requireTime, captureOutput: true)))([.. arguments, "--config", credentials]);
 
+    public JsonElement Settings()
+    {
+        if (!ReplicationConfig.ValidRemote(remote)) throw new InvalidDataException("Cloud coordination requires a named rclone remote and folder.");
+        string name = remote[..remote.IndexOf(':')];
+        try
+        {
+            using var dump = JsonDocument.Parse(Run("config", "dump"));
+            if (!dump.RootElement.TryGetProperty(name, out var section)
+                || section.ValueKind != JsonValueKind.Object
+                || !section.TryGetProperty("type", out var type) || type.GetString() is not ("drive" or "onedrive" or "dropbox")
+                || !section.TryGetProperty("token", out var token) || token.ValueKind != JsonValueKind.String
+                || section.TryGetProperty("service_account_file", out var serviceFile) && !string.IsNullOrEmpty(serviceFile.GetString())
+                || section.TryGetProperty("service_account_credentials", out var serviceKey) && !string.IsNullOrEmpty(serviceKey.GetString()))
+                throw new UnsafeOperationException("Cloud coordination requires a direct Google Drive, OneDrive or Dropbox rclone remote with an OAuth token. Aliases, wrappers and service accounts are unsupported.");
+            return section.Clone();
+        }
+        catch (RcloneFailedException ex) when (!RcloneFailure.IsTransient(ex))
+        {
+            throw new StorageActionRequiredException(RcloneFailure.Describe(ex, "Cloud coordination storage", remote, credentials), ex);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
+        { throw new InvalidDataException("The rclone cloud credential configuration could not be read."); }
+    }
+
     public string Get()
     {
         DateTime written = File.Exists(credentials) ? File.GetLastWriteTimeUtc(credentials) : DateTime.MinValue;
         if (accessToken is not null && credentialWriteTime == written && expiry > DateTimeOffset.UtcNow.AddMinutes(2)) return accessToken;
-        if (!ReplicationConfig.ValidRemote(remote)) throw new InvalidDataException("Cloud coordination requires a named Google Drive remote and folder.");
-        string name = remote[..remote.IndexOf(':')];
         string ReadToken()
         {
-            using var dump = JsonDocument.Parse(Run("config", "dump"));
-            if (!dump.RootElement.TryGetProperty(name, out var section) || !section.TryGetProperty("type", out var type) || type.GetString() != "drive"
-                || !section.TryGetProperty("token", out var token) || token.ValueKind != JsonValueKind.String)
-                throw new UnsafeOperationException("Cloud coordination requires a direct Google Drive rclone remote authorized with an OAuth token. Aliases, other providers and service accounts are not supported.");
-            return token.GetString()!;
+            var section = Settings();
+            if (section.GetProperty("type").GetString() != expectedType)
+                throw new UnsafeOperationException("The configured cloud journal ID and direct rclone provider do not match.");
+            return section.GetProperty("token").GetString()!;
         }
         try
         {
@@ -221,15 +223,15 @@ internal sealed class DriveAccessToken(string rclone, string remote, string conf
             var root = refreshed.RootElement;
             if (!root.TryGetProperty("access_token", out var token) || string.IsNullOrWhiteSpace(token.GetString())
                 || !root.TryGetProperty("expiry", out var end) || !end.TryGetDateTimeOffset(out expiry) || expiry <= DateTimeOffset.UtcNow)
-                throw new InvalidDataException("Google Drive's OAuth token is missing or expired. Reconnect the rclone remote.");
+                throw new InvalidDataException("The cloud OAuth token is missing or expired. Reconnect the rclone remote.");
             credentialWriteTime = File.Exists(credentials) ? File.GetLastWriteTimeUtc(credentials) : DateTime.MinValue;
             return accessToken = token.GetString()!;
         }
         catch (RcloneFailedException ex) when (!RcloneFailure.IsTransient(ex))
         {
-            throw new StorageActionRequiredException(RcloneFailure.Describe(ex, "Google Drive coordination storage", remote, credentials), ex);
+            throw new StorageActionRequiredException(RcloneFailure.Describe(ex, "Cloud coordination storage", remote, credentials), ex);
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
-        { throw new InvalidDataException("The Google Drive rclone credential configuration could not be read."); }
+        { throw new InvalidDataException("The cloud rclone credential configuration could not be read."); }
     }
 }

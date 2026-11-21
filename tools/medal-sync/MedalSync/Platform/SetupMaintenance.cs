@@ -60,7 +60,7 @@ internal static class SetupMaintenance
         // Older init previews could leave an identity before creating a library. Check that storage can
         // confirm the library is absent and still refuse if this PC has session recovery evidence.
         if (LibrarySetupPending.Read(state, settings)?.AwaitsInitialization(state, settings, () => false) == true
-            && (settings.StorageMode == StorageMode.Cloud ? !GoogleDriveJournal.For(settings).Exists()
+            && (settings.StorageMode == StorageMode.Cloud ? !CloudJournalProvider.For(settings).Exists()
                 : CoordinationDirectoryMissing(settings)))
         {
             RequireNoRecoveryEvidence(root, settings);
@@ -69,6 +69,7 @@ internal static class SetupMaintenance
         var journal = readJournal is not null ? readJournal(settings)
             : CoordinationStore.Open(settings).ReadJournal();
         if (journal.State == OwnershipState.Clean && journal.Owner is null && journal.SessionId is null) return;
+        if (journal.State == OwnershipState.Migrated) return; // The former journal can no longer grant a session.
         // Setup changes only this PC's programs, never the journal, cache or library, so another PC's session
         // cannot be harmed by it. This PC's own retained login was refused above; its ownership is refused here.
         if (journal.State != OwnershipState.Clean && journal.SessionId is not null

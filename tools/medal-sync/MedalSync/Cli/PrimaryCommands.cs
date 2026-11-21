@@ -57,7 +57,7 @@ internal static class PrimaryCommands
         }
         catch (IOException ex) when (Offline(ex))
         {
-            output.WriteLine($"Waiting for storage: primary storage cannot be reached ({ex.Message}). Nothing was moved; run the same command again when it is back.");
+            output.WriteLine($"Waiting for storage: primary storage cannot be reached ({ex.Message}). Retry the same review. Any files already moved remain in its trash folder.");
             return 3;
         }
     }
@@ -77,7 +77,6 @@ internal static class PrimaryCommands
             output.WriteLine("Applying a nonempty purge makes this PC's next handoff read every referenced file on primary storage back.");
             // Hold the writer lock, as prune --apply does, so a prune resumed on another PC
             // cannot add files to a batch between choosing it and deleting it.
-            using var writer = apply ? store.AcquireWriterLock(TimeSpan.FromSeconds(10)) : null;
             return ReplicaCommands.PurgeTrash(prune, output, ReplicaPrune.PrimaryTarget, days, apply);
         }
         catch (OperationCanceledException ex)
@@ -87,7 +86,7 @@ internal static class PrimaryCommands
         }
         catch (IOException ex) when (Offline(ex))
         {
-            output.WriteLine($"Waiting for storage: primary storage cannot be reached ({ex.Message}). Nothing was deleted; run the same command again when it is back.");
+            output.WriteLine($"Waiting for storage: primary storage cannot be reached ({ex.Message}). Retry the same purge when storage is back. Remaining trash is preserved.");
             return 3;
         }
     }
@@ -108,8 +107,6 @@ internal static class PrimaryCommands
     {
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
-        if (config.StorageMode == StorageMode.Cloud)
-            throw new UnsafeOperationException("Cleaning up primary storage needs the SMB writer lock and is unavailable in Google Drive cloud mode.");
         return (state, config, CoordinationStore.Open(config));
     }
 }

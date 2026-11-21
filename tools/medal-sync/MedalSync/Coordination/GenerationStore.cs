@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using MedalSync.Library;
 using MedalSync.Util;
@@ -59,7 +60,8 @@ internal sealed record GenerationManifest(
 internal sealed record GenerationContent(GenerationManifest Manifest, LibrarySnapshot Snapshot, AssetManifest Assets);
 
 /// <param name="Committed">True when it was part of the committed history; false for an abandoned or unfinished attempt.</param>
-internal sealed record PrunedGeneration(long Generation, bool Committed, DateTimeOffset PrunedAt);
+internal sealed record PrunedGeneration(long Generation, bool Committed, DateTimeOffset PrunedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SnapshotDigest = null);
 
 /// <summary>
 /// What retention removed, kept beside the generations as <c>retention.json</c>. <see cref="HighWater"/> is the highest

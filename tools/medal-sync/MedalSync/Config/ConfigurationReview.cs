@@ -53,7 +53,7 @@ internal sealed class ConfigurationReview
         + $"Library: {Config.LibraryId}; account: {Config.AccountId}\r\n"
         + $"PC display name: {Config.DeviceLabel ?? "computer and user name"} (ownership ID unchanged)\r\n"
         + $"Storage mode: {Config.StorageMode}\r\nStorage: {Config.Remote}\r\nCoordination: {Config.CoordinationRoot}\r\n"
-        + (Config.StorageMode == StorageMode.Cloud ? $"Google Drive journal ID: {Config.CloudJournalId} (reuse on every PC; local history cache is not ownership)\r\n" : "")
+        + (Config.StorageMode == StorageMode.Cloud ? $"Cloud journal ID: {Config.CloudJournalId} (reuse on every PC)\r\n" : "")
         + $"Capture: {Config.CaptureFolder} (drive {Config.Capture.Root})\r\nCache: {Config.CacheRoot}\r\n"
         + $"Cache limit: {Config.Mount.CacheMaxGiB} GiB; minimum free space: {Config.Mount.MinFreeGiB} GiB; planned session: {Config.MaxSessionHours} hours\r\n"
         + $"Persistent local copy: {Config.Replication?.LocalCopyRoot ?? "none"}\r\n"
@@ -66,7 +66,7 @@ internal sealed class ConfigurationReview
         + "Next: quit Medal normally; preserve a verified database/media backup; verify assets and sync exclusions. "
         + (Config.StorageMode == StorageMode.Cloud
             ? _newLibrary ? "Preview relocate from the original capture folder, then init. Review each operation before applying."
-                : "Join using the same library ID, Drive journal ID, Drive folder and capture path. Preserve this PC's own clips; launch refuses unshared changes."
+                : "Use the same library ID, cloud journal ID, cloud folder and capture path. Preserve this PC's own clips; launch refuses unshared changes."
             : _newLibrary ? "Preview init only for this genuinely new library, then explicitly apply." : "Preview enroll for this existing library, then explicitly apply.")
         + " Authorize cloud providers separately with rclone config. No journal, mount, Medal database or startup entry is changed here.";
 

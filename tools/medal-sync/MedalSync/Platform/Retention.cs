@@ -59,6 +59,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
     {
         policy.Validate();
         var journal = RequireReady();
+        store.RefreshHistory();
         var now = Now;
         var keepAfter = now - TimeSpan.FromDays(policy.KeepDays);
         var graceAfter = now - TimeSpan.FromDays(policy.GraceDays);
@@ -86,7 +87,14 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
                     + "because older versions do not understand pruned history.");
 
         var numbered = store.Generations.Numbered();
-        long highest = numbered.DefaultIfEmpty(-1).Max();
+        var incomplete = store.IncompleteCloudAttempts();
+        long highest = numbered.Concat(incomplete.Select(attempt => attempt.Number)).DefaultIfEmpty(-1).Max();
+        foreach (var attempt in incomplete)
+        {
+            if (attempt.Number == highest || !attempt.ContainsOnlyGenerationFiles || attempt.LatestWrite is null || attempt.LatestWrite > graceAfter)
+                continue;
+            items.Add(new(Abandoned, GenerationStore.Name(attempt.Number), attempt.Number, attempt.LatestWrite, attempt.Bytes));
+        }
         foreach (long number in numbered.Where(n => !committed.Contains(n) && n != highest))
         {
             DateTimeOffset created;
@@ -110,7 +118,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
         var plan = new RetentionPlan(RetentionPlan.CurrentFormat, id ?? Guid.NewGuid().ToString("N"), config.LibraryId, device.DeviceId,
             journal.CommittedGeneration, journal.Revision, now, policy, chain.Select(c => c.Generation).ToArray(),
             items.OrderBy(i => i.Kind, StringComparer.Ordinal).ThenBy(i => i.Name, StringComparer.Ordinal).ToArray(), warnings);
-        if (store.ReadJournal() != journal) throw new UnsafeOperationException("The library changed during the review; preview again.");
+        if (store.ReadMaintenanceJournal() != journal) throw new UnsafeOperationException("The library changed during the review; preview again.");
         return plan with { Integrity = IntegrityOf(plan) };
     }
 
@@ -169,7 +177,13 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
         Validate(plan);
         if (plan.LibraryId != config.LibraryId || plan.DeviceId != device.DeviceId)
             throw new UnsafeOperationException("The retention plan was made for another library or PC; preview again on this PC.");
-        using (store.AcquireWriterLock(TimeSpan.FromSeconds(10)))
+        void Guard()
+        {
+            requireIdle?.Invoke();
+            store.RequireMaintenance();
+        }
+        string receipt = Path.Combine(state.Root, "retention", plan.Id + ".json");
+        _ = store.RunMaintenance(device, "retention", plan.Id, plan.Integrity, () =>
         {
             var journal = RequireReady();
             if (journal.CommittedGeneration != plan.Head || journal.Revision != plan.Revision)
@@ -178,8 +192,9 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
             var eligible = fresh.Items.Select(i => (i.Kind, i.Name)).ToHashSet();
             if (!fresh.Ancestry.SequenceEqual(plan.Ancestry))
                 throw new UnsafeOperationException("The committed history differs from the review; preview retention again. Nothing was removed.");
+            var incomplete = store.IncompleteCloudAttempts().Select(attempt => attempt.Number).ToHashSet();
             foreach (var item in plan.Items)
-                if (Exists(item) && !eligible.Contains((item.Kind, item.Name)))
+                if ((Exists(item) || item.Generation is { } number && incomplete.Contains(number)) && !eligible.Contains((item.Kind, item.Name)))
                     throw new UnsafeOperationException($"{item.Name} is no longer eligible for removal; preview retention again. Nothing was removed.");
 
             // Record first: a folder retention has claimed is never mistaken for damage, and its number is never reused.
@@ -187,23 +202,43 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
             var now = Now;
             var pruned = (old?.Pruned ?? []).ToDictionary(p => p.Generation);
             foreach (var item in plan.Items.Where(i => i.Generation is not null && i.Kind is Generation or Abandoned))
-                pruned.TryAdd(item.Generation!.Value, new(item.Generation.Value, item.Kind == Generation, now));
-            long high = new[] { old?.HighWater ?? -1, store.Generations.Numbered().DefaultIfEmpty(-1).Max() }
+            {
+                long number = item.Generation!.Value;
+                if (pruned.ContainsKey(number)) continue;
+                bool committed = item.Kind == Generation;
+                string? digest = store.IsCloud && committed ? store.Generations.Read(number).Manifest.SnapshotDigest : null;
+                pruned.Add(number, new(number, committed, now, digest));
+            }
+            long high = new[] { old?.HighWater ?? -1, store.Generations.Next(plan.Head) - 1 }
                 .Concat(plan.Items.Select(i => i.Generation ?? -1)).Max();
-            store.Generations.WriteRetention(new(GenerationRetention.CurrentFormat, high, plan.Ancestry, pruned.Values.OrderBy(p => p.Generation).ToArray()));
+            var record = new GenerationRetention(GenerationRetention.CurrentFormat, high, plan.Ancestry,
+                pruned.Values.OrderBy(p => p.Generation).ToArray());
 
+            if (store.IsCloud)
+            {
+                store.BeginMaintenanceWork();
+                var generations = plan.Items.Where(i => i.Kind is Generation or Abandoned).Select(i => i.Generation!.Value).ToArray();
+                if (generations.Length > 0) store.ApplyCloudRetention(record, generations, Guard);
+            }
+            else store.Generations.WriteRetention(record);
             string serverTrash = Path.Combine(GenerationsDirectory, ".trash-" + plan.Id);
-            Remove(plan.Items.Where(i => i.OnServer), item => Path.Combine(GenerationsDirectory, item.Name), serverTrash, requireIdle);
-        }
-        string localTrash = Path.Combine(state.Root, LocalTrashFolder, plan.Id);
-        Remove(plan.Items.Where(i => !i.OnServer), item => Path.Combine(state.Root, item.Name.Replace('/', '\\')), localTrash, requireIdle, local: true);
-        string receipt = Path.Combine(state.Root, "retention", plan.Id + ".json");
-        Directory.CreateDirectory(Path.GetDirectoryName(receipt)!);
-        AtomicFile.Replace(receipt, Json.Serialize(new
-        {
-            format = 1, plan.Id, plan.Head, removed = plan.Items.Count, bytes = plan.Items.Sum(i => i.Bytes), completedAt = Now,
-        }));
+            Remove(plan.Items.Where(i => i.OnServer), item => Path.Combine(GenerationsDirectory, item.Name), serverTrash, Guard);
+            if (store.IsCloud) FinishLocal();
+            return receipt;
+        }, head: plan.Head, revision: plan.Revision, completed: () => receipt);
+        if (!store.IsCloud) FinishLocal();
         return receipt;
+
+        void FinishLocal()
+        {
+            string localTrash = Path.Combine(state.Root, LocalTrashFolder, plan.Id);
+            Remove(plan.Items.Where(i => !i.OnServer), item => Path.Combine(state.Root, item.Name.Replace('/', '\\')), localTrash, Guard, local: true);
+            Directory.CreateDirectory(Path.GetDirectoryName(receipt)!);
+            AtomicFile.Replace(receipt, Json.Serialize(new
+            {
+                format = 1, plan.Id, plan.Head, removed = plan.Items.Count, bytes = plan.Items.Sum(i => i.Bytes), completedAt = Now,
+            }));
+        }
     }
 
     /// <summary>Renames each folder into the trash (one step on the same volume), then deletes the trash.</summary>
@@ -246,7 +281,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
 
     private OwnershipRecord RequireReady()
     {
-        var journal = store.ReadJournal();
+        var journal = store.ReadMaintenanceJournal();
         if (journal.State != OwnershipState.Clean)
             throw new UnsafeOperationException("Retention runs only while the library is Ready. Finish or recover the current session first.");
         return journal;
@@ -280,7 +315,7 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
         }
     }
 
-    public static string Render(RetentionPlan plan)
+    public static string Render(RetentionPlan plan, bool cloud = false)
     {
         var text = new StringBuilder();
         text.AppendLine(CultureInfo.InvariantCulture,
@@ -294,8 +329,9 @@ internal sealed class Retention(MedalSyncConfig config, LocalState state, Device
             text.AppendLine(CultureInfo.InvariantCulture, $"  {Label(group.Key)}: {group.Count()} folder(s), {Storage.StorageVolume.Gb(group.Sum(i => i.Bytes))}{which}");
         }
         if (plan.Items.Any(i => i.Kind == Generation))
-            text.AppendLine("A PC whose library matches only a removed generation will need 'medal-sync launch --replace-local-library' (a backup is kept). "
-                + "Removed generations no longer appear in history list or history diff.");
+            text.AppendLine(cloud ? "The review preserves proof of each removed committed snapshot. Its contents will no longer be available for history diffs."
+                : "A PC whose library matches only a removed generation will need 'medal-sync launch --replace-local-library' (a backup is kept). "
+                    + "Removed generations no longer appear in history list or history diff.");
         if (plan.Items.Any(i => i.Kind == KeptLibrary))
             text.AppendLine("A kept library backup can hold library entries that were never shared. Open or copy any you still need before applying.");
         foreach (string warning in plan.Warnings) text.AppendLine("Warning: " + warning);

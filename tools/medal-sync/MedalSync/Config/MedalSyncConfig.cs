@@ -72,10 +72,10 @@ internal sealed record MedalSyncConfig(
 {
     public const int CurrentFormat = 1;
 
-    /// <summary>Ownership lives on this PC in local mode, on SMB in server mode, or in Drive metadata in cloud mode.</summary>
+    /// <summary>Ownership lives on this PC in local mode, on SMB in server mode, or in the provider journal in cloud mode.</summary>
     public StorageMode StorageMode { get; init; } = StorageMode.Server;
 
-    /// <summary>A pre-generated Google Drive file ID shared by every PC. Its metadata holds the authoritative journal.</summary>
+    /// <summary>The reserved cloud journal ID shared by every PC.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? CloudJournalId { get; init; }
 
@@ -178,8 +178,8 @@ internal sealed record MedalSyncConfig(
             if (StorageMode == StorageMode.Cloud)
             {
                 if (!IsLocalFolder(CoordinationRoot)) problems.Add("cloud mode requires a dedicated local coordinationRoot for downloaded history");
-                if (!PrimaryIsRclone) problems.Add("cloud mode requires a named Google Drive rclone remote as primary storage");
-                if (WindowsPath.TryParse(CaptureFolder, out var cloudCapture, out _) && cloudCapture.Segments.FirstOrDefault() == ".medal-sync")
+                if (!PrimaryIsRclone) problems.Add("cloud mode requires a named rclone remote as primary storage");
+                if (WindowsPath.TryParse(CaptureFolder, out var cloudCapture, out _) && string.Equals(cloudCapture.Segments.FirstOrDefault(), ".medal-sync", StringComparison.OrdinalIgnoreCase))
                     problems.Add("cloud capture must stay outside the reserved .medal-sync history folder");
                 if (!ValidCloudJournalId(CloudJournalId)) problems.Add("cloud mode requires a cloudJournalId from 'storage cloud-id'; reuse it on every PC");
                 if (WindowsPath.TryParse(CoordinationRoot, out var cloudCoordination, out _))
@@ -277,6 +277,14 @@ internal sealed record MedalSyncConfig(
     private static bool IsLocalFolder(string value) =>
         WindowsPath.TryParse(value, out var path, out _) && !path.Root.StartsWith(@"\\", StringComparison.Ordinal) && path.Segments.Count > 0;
 
-    internal static bool ValidCloudJournalId(string? value) => value is { Length: >= 10 and <= 200 }
-        && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
+    internal static bool ValidCloudJournalId(string? value)
+    {
+        if (value is null) return false;
+        int separator = value.IndexOf('.');
+        if (separator < 0) return value.Length is >= 10 and <= 200 && value.All(IsJournalIdCharacter);
+        return value.Length <= 1200 && value[..separator] is "onedrive" or "dropbox"
+            && value.Length > separator + 10 && value[(separator + 1)..].All(IsJournalIdCharacter);
+    }
+
+    private static bool IsJournalIdCharacter(char c) => char.IsAsciiLetterOrDigit(c) || c is '_' or '-';
 }

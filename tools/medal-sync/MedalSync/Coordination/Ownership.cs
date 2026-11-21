@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MedalSync.Coordination;
 
 internal enum OwnershipState
@@ -19,6 +21,12 @@ internal enum OwnershipState
 
     /// <summary>Interrupted or uncertain. Only the owner, or an explicit abandon, may continue.</summary>
     RecoveryRequired,
+
+    Maintenance,
+
+    Migrating,
+
+    Migrated,
 }
 
 internal sealed record DeviceIdentity(string DeviceId, string DisplayName);
@@ -34,7 +42,9 @@ internal sealed record OwnershipRecord(
     long CommittedGeneration,
     long Revision,
     DateTimeOffset UpdatedAt,
-    string? Reason)
+    string? Reason,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? MaintenanceExpiresAt = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OperationDigest = null)
 {
     public const int CurrentFormat = 1;
 
@@ -57,6 +67,47 @@ internal static class Ownership
     {
         if (current.State != OwnershipState.Clean) throw Busy(current, device);
         return Next(current, OwnershipState.Starting, device, session, now, null);
+    }
+
+    public static OwnershipRecord BeginMaintenance(OwnershipRecord current, DeviceIdentity device, string operation,
+        string command, string digest, DateTimeOffset now)
+    {
+        if (current.State != OwnershipState.Clean) throw Busy(current, device);
+        return Next(current, OwnershipState.Maintenance, device, operation, now, command) with
+        {
+            MaintenanceExpiresAt = now.AddHours(24),
+            OperationDigest = digest,
+        };
+    }
+
+    public static OwnershipRecord EndMaintenance(OwnershipRecord current, DeviceIdentity device, string operation, DateTimeOffset now, bool completed = true)
+    {
+        Require(current, device, operation, OwnershipState.Maintenance);
+        return Next(current, OwnershipState.Clean, null, null, now,
+            completed ? MaintenanceCompletion(current.OperationDigest!) : "maintenance review refused");
+    }
+
+    internal static string MaintenanceCompletion(string digest) => "maintenance completed: " + digest;
+
+    public static OwnershipRecord BeginMigration(OwnershipRecord current, DeviceIdentity device, string operation, string digest, DateTimeOffset now)
+    {
+        if (current.State != OwnershipState.Clean) throw Busy(current, device);
+        return Next(current, OwnershipState.Migrating, device, operation, now, "moving to Google Drive cloud mode") with { OperationDigest = digest };
+    }
+
+    public const string MigratedMessage = "This library moved to Google Drive cloud mode. Update this PC's configuration.";
+
+    public static OwnershipRecord EndMigration(OwnershipRecord current, DeviceIdentity device, string operation, bool rollback, DateTimeOffset now)
+    {
+        Require(current, device, operation, OwnershipState.Migrating);
+        return rollback ? Next(current, OwnershipState.Clean, null, null, now, "migration rolled back")
+            : Next(current, OwnershipState.Migrated, device, operation, now, MigratedMessage) with { OperationDigest = current.OperationDigest };
+    }
+
+    public static OwnershipRecord ActivateMigration(OwnershipRecord current, DeviceIdentity device, string operation, DateTimeOffset now)
+    {
+        Require(current, device, operation, OwnershipState.Migrating);
+        return Next(current, OwnershipState.Clean, null, null, now, "cloud migration complete");
     }
 
     public static OwnershipRecord MarkActive(OwnershipRecord current, DeviceIdentity device, string session, DateTimeOffset now)
@@ -144,7 +195,10 @@ internal static class Ownership
     /// </summary>
     public static OwnershipRecord Abandon(OwnershipRecord current, DeviceIdentity operatorDevice, string confirmedSession, string reason, DateTimeOffset now)
     {
-        if (current.State == OwnershipState.Clean) throw new OwnershipConflictException("There is no unfinished session to abandon.");
+        if (current.State is OwnershipState.Clean or OwnershipState.Migrating or OwnershipState.Migrated)
+            throw new OwnershipConflictException("There is no unfinished session to abandon.");
+        if (current.State == OwnershipState.Maintenance && !(current.MaintenanceExpiresAt <= now))
+            throw new OwnershipConflictException("Wait until the maintenance review time has passed before clearing it. Retry the original command on its owner PC if possible.");
         if (string.IsNullOrWhiteSpace(reason)) throw new OwnershipConflictException("Abandoning a session needs a recorded reason.");
         if (confirmedSession != current.SessionId)
         {
@@ -164,6 +218,8 @@ internal static class Ownership
             Revision = current.Revision + 1,
             UpdatedAt = now,
             Reason = reason,
+            MaintenanceExpiresAt = null,
+            OperationDigest = null,
         };
 
     private static void Require(OwnershipRecord current, DeviceIdentity device, string session, params OwnershipState[] states)
@@ -194,6 +250,7 @@ internal static class Ownership
 
     public static string HandoffAdvice(OwnershipState? state)
     {
+        if (state == OwnershipState.Maintenance) return "Wait for maintenance to finish on that PC.";
         string next = state switch
         {
             OwnershipState.Draining or OwnershipState.Publishing => "Keep that PC on while it finishes the handoff.",
@@ -229,6 +286,9 @@ internal static class Ownership
         OwnershipState.Draining => "uploading",
         OwnershipState.Publishing => "switching",
         OwnershipState.RecoveryRequired => "waiting for recovery",
+        OwnershipState.Maintenance => "under maintenance",
+        OwnershipState.Migrating => "migrating to cloud storage",
+        OwnershipState.Migrated => "moved to Google Drive cloud mode",
         _ => state.ToString(),
     };
 }

@@ -66,6 +66,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         requireIdle();
         var target = Target(targetName);
         var journal = RequireReady();
+        store.RefreshHistory();
         var generation = store.Generations.Read(journal.CommittedGeneration);
         string destination = target.Path;
         var now = Now;
@@ -115,6 +116,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         string destination = target.Path;
         if (plan.LibraryId != config.LibraryId || plan.Destination != destination || plan.Required != target.Required)
             throw new UnsafeOperationException("The cleanup plan belongs to another library or destination, or the copy's requirement changed; preview again.");
+        store.RefreshHistory();
         var generation = store.Generations.Read(journal.CommittedGeneration);
         if (journal.CommittedGeneration != plan.Generation || generation.Snapshot.Digest() != plan.SnapshotDigest)
             throw new UnsafeOperationException("The committed generation changed since the review; preview the cleanup again. Nothing was moved.");
@@ -125,14 +127,17 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
 
         var (remaining, alreadyMoved) = Remaining(plan, remote.List(destination));
         requireIdle();
+        store.BeginMaintenanceWork();
         DistrustRequired(target);
         if (remaining.Count > 0)
         {
             // Trash age counts from the move, not the review: a late or resumed apply still gets the full wait before purge.
             // One marker before moving covers an interrupted move; one after covers a long one.
             remote.Mark(destination, plan.TrashFolder, Marker(Now));
+            store.RequireMaintenance();
             remote.Move(destination, remaining.Select(f => f.Path).ToArray(), plan.TrashFolder);
             requireIdle();
+            store.RequireMaintenance();
             remote.Mark(destination, plan.TrashFolder, Marker(Now));
         }
         requireIdle();
@@ -170,9 +175,9 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         Action<IReadOnlyList<ReplicaTrashBatch>, IReadOnlyList<ReplicaTrashBatch>>? report = null)
     {
         if (olderThanDays is < 0 or > 3650) throw new ArgumentOutOfRangeException(nameof(olderThanDays));
-        RequireReady();
+        var journal = RequireReady();
         var target = Target(targetName);
-        var now = Now;
+        var now = store.IsCloud && apply ? journal.UpdatedAt : Now;
         var all = Trash(targetName);
         var due = all.Where(b => b.CreatedAt is { } at && now - at >= TimeSpan.FromDays(olderThanDays)).ToArray();
         // Report and deletion use this one snapshot. A batch that becomes old enough later stays kept.
@@ -181,11 +186,13 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         if (due.Length > 0)
         {
             requireIdle();
+            store.BeginMaintenanceWork();
             DistrustRequired(target);
         }
         foreach (var batch in due)
         {
             requireIdle();
+            store.RequireMaintenance();
             remote.Purge(target.Path, TrashRoot + "/" + batch.Name);
         }
         return due;
@@ -217,12 +224,36 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
 
     private OwnershipRecord RequireReady()
     {
-        var journal = store.ReadJournal();
+        var journal = store.ReadMaintenanceJournal();
         if (journal.State != OwnershipState.Clean)
             throw new UnsafeOperationException(primary
                 ? "Cleaning up primary storage requires every PC to be Ready. Finish or recover the current session first."
                 : "Cleaning up a cloud copy requires a Ready library. Finish or recover the current session first.");
         return journal;
+    }
+
+    internal ReplicaPruneResult ApplyWithLock(ReplicaPrunePlan plan, TimeSpan? timeout)
+    {
+        Validate(plan);
+        var target = Target(plan.Target);
+        if (plan.LibraryId != config.LibraryId || plan.Destination != target.Path || plan.Required != target.Required)
+            throw new UnsafeOperationException("The cleanup plan belongs to another library or destination, or the copy's requirement changed; preview again.");
+        var device = store.IsCloud ? state.ExistingDevice() : new DeviceIdentity("", "");
+        string digest = Hashing.Sha256Hex(Json.Serialize(plan));
+        return store.RunMaintenance(device, primary ? "primary prune" : "replica prune", digest[..32], digest,
+            () => Apply(plan), head: plan.Generation, timeout: timeout,
+            completed: () => new ReplicaPruneResult(0, plan.Files.Sum(file => file.Size), plan.Files.Count, plan.TrashFolder));
+    }
+
+    internal IReadOnlyList<ReplicaTrashBatch> PurgeWithLock(string targetName, int days, bool apply,
+        Action<IReadOnlyList<ReplicaTrashBatch>, IReadOnlyList<ReplicaTrashBatch>> report)
+    {
+        if (!apply) return Purge(targetName, days, false, report);
+        var target = Target(targetName);
+        var device = store.IsCloud ? state.ExistingDevice() : new DeviceIdentity("", "");
+        string digest = Hashing.Sha256Hex(Json.Serialize(new { target, days, config.LibraryId }));
+        return store.RunMaintenance(device, primary ? "primary purge-trash" : "replica purge-trash", digest[..32], digest,
+            () => Purge(targetName, days, true, report), head: store.IsCloud ? store.ReadJournal().CommittedGeneration : null);
     }
 
     /// <summary>
@@ -232,6 +263,8 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
     private HashSet<string> Protected(Library.LibrarySnapshot committed, long head, DateTimeOffset since)
     {
         var paths = References(committed).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (store.IncompleteCloudAttempts().Any(attempt => primary || attempt.LatestWrite is null || attempt.LatestWrite >= since))
+            throw new UnsafeOperationException("Cloud history has an incomplete attempt whose media cannot be ruled out. Review retention before retrying cleanup.");
         HashSet<long> ancestry;
         try { ancestry = store.Generations.Chain(head).Select(c => c.Generation).ToHashSet(); }
         catch (Exception ex) when (ex is InvalidDataException or IOException)

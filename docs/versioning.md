@@ -97,17 +97,20 @@ PC to update before the next switch.
 | Generation `assets.json` | Media present on primary storage, and media the library references but that is missing. |
 | Handoff requests | A PC asking the owner to finish its session. |
 
-Google Drive cloud mode uses the same generation formats under
-`.medal-sync/LIBRARY_ID/generations/`. Its format `1` journal is the
-`description` metadata of one Drive file addressed by the configured
-`cloudJournalId`. It contains `identity`, `journal`, `requests`, `storageFolderId`,
-`captureFolder` and `headManifestHash` (SHA-256), read together with the Drive
-v2 file ETag. The hash binds the committed head to its verified manifest, so a
-private unpublished generation with the same number cannot be mistaken for
-another PC's committed snapshot. Conditional
-updates preserve requests while advancing ownership. Local history caches are
-not journals. Older clients reject `storageMode: "CLOUD"`; update every PC
-before enabling it. Existing SMB/local formats and configurations are unchanged.
+Cloud mode uses the same generation files under `.medal-sync/LIBRARY_ID/generations/`.
+Its format `1` journal is addressed by `cloudJournalId`. Google Drive stores
+it in the file's `description` metadata. OneDrive and Dropbox store it in
+the file's contents. The provider's ETag or revision controls conditional
+writes. The journal contains `identity`, `journal`, `requests`, `storageFolderId`,
+`captureFolder` and `headManifestHash`. SHA-256 binds the committed head to its
+verified manifest. An optional `retentionHash` binds the pruned ancestry
+record, and `migrationDigest` identifies the review that moved the library.
+
+Update every PC before using the new providers, cloud maintenance or
+migration. Older versions refuse the new ownership states and cloud journal
+fields. `MAINTENANCE` retains the committed generation and carries the
+operator, command and expiry. `MIGRATING` holds a library during transfer,
+and `MIGRATED` permanently retires the source journal.
 
 ### This PC only
 

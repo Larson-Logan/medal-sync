@@ -180,7 +180,7 @@ internal static class LibraryCommands
         var state = Config.LocalState.ForCurrentUser();
         var config = Config.MedalSyncConfig.Load(configPath ?? state.ConfigPath);
         if (config.PrimaryIsRclone && config.StorageMode != Config.StorageMode.Cloud) throw new UnsafeOperationException("Relocation requires an SMB primary or an uninitialized cloud library with a persistent copy.");
-        if (config.StorageMode == Config.StorageMode.Cloud && GoogleDriveJournal.For(config).Exists())
+        if (config.StorageMode == Config.StorageMode.Cloud && CloudJournalProvider.For(config).Exists())
             throw new UnsafeOperationException("Cloud relocation is only for the first PC before initialization. The Drive journal already exists; preserve local work and join the existing library.");
         var destination = config.StorageMode == Config.StorageMode.Cloud ? config.MountedCapture : config.ServerCapture;
         using var instance = apply ? SessionCommands.SingleInstance() : null;

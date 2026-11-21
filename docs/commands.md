@@ -104,7 +104,10 @@ library, for example a copy.
 | Command | What it does |
 | --- | --- |
 | `config create ... --out FILE [--apply]` | Previews, then creates, a new configuration file. Options are listed below. |
-| `storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]` | Allocates one pre-generated Google Drive journal ID for a new cloud library. Prints only the ID; creates no Drive file. Reuse it with `config create --storage-mode cloud --cloud-journal-id ID` on every PC. |
+| `storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]` | Reserves a journal ID on the direct Google Drive, OneDrive or Dropbox remote and prints it. Reuse it on every PC. OneDrive and Dropbox create an uninitialized file in the selected folder. |
+| `storage migrate --to-cloud --remote NAME:FOLDER --cloud-journal-id ID --out FILE` | Reviews moving a server or cloud library to Google Drive. The private review lists retained generations, media and known PCs. See [migration](storage.md#migrate-an-existing-library-to-google-drive). |
+| `storage migrate --in FILE --apply` | Applies or resumes the review while holding the source library. Verifies history and media, retires the old journal and updates this PC's configuration. |
+| `storage migrate --in FILE --rollback` | Releases the original library before retirement. Keeps any staged destination files. |
 | `init [--apply]` | Creates a new shared library from this PC as generation 0. Every clip must already be on primary storage; cloud mode instead uploads and verifies the persistent local copy first. Only for a new library; never run it against an existing journal. |
 | `enroll --out DIR [--apply]` | Adds this PC to an existing library. The preview writes a review of the merged library to `DIR`; apply uses that exact review. With an rclone primary, files go to the persistent local copy and apply ends by running `finish`, which uploads, verifies and publishes; exit 3 means the primary is unreachable (see [enroll into an rclone primary](storage.md#enroll-a-pc-with-existing-clips-into-an-rclone-primary)). |
 | `enroll recover --out DIR [--rollback] [--apply]` | Handles two cases. See [enrollment recovery](#enrollment-recovery). |
@@ -120,7 +123,7 @@ library, for example a copy.
 | `primary purge-trash [--older-than D] [--apply]` | Permanently deletes primary-storage trash batches whose files were moved at least `D` days ago (default 7). |
 | `replica purge-trash --target NAME [--older-than D] [--apply]` | Lists only the trash subtree once at an optional or required copy. With `--apply`, permanently deletes exactly the batches marked `deleting`, whose files were moved at least `D` days ago (default 7). A nonempty required-copy purge drops this PC's incremental receipt too. |
 | `retention --out FILE [--keep N] [--keep-days D] [--grace-days G]` | Reviews old generations and this PC's old recovery folders to remove. Read-only. |
-| `retention --in FILE --apply` | Removes exactly the reviewed folders while every PC stays Ready. See [retention](storage.md#retention). |
+| `retention --in FILE --apply` | Removes the reviewed folders under the writer lock or a cloud maintenance lease. See [retention](storage.md#retention). |
 
 ### `config create` options
 
@@ -131,7 +134,7 @@ library, for example a copy.
 | `--cache-root DIR` | Local SSD folder for the clip drive's cache. Required. |
 | `--remote PATH` | Primary storage: a UNC share, a named rclone remote and folder, or in local mode a local folder. Required. |
 | `--coordination-root PATH` | UNC journal share in server mode (required). Local/cloud modes default to `coordination` in the state root; in cloud mode this is only a history cache. |
-| `--storage-mode server\|local\|cloud` | Default `server`. Cloud mode provides [Google Drive handoff without SMB](storage.md#google-drive-without-a-server). |
+| `--storage-mode server\|local\|cloud` | Default `server`. Cloud mode provides [handoff without SMB](storage.md#cloud-mode-without-a-server) on Google Drive, OneDrive and Dropbox. |
 | `--cloud-journal-id ID` | Required in cloud mode. Allocate once with `storage cloud-id`; use the same ID on every PC. |
 | `--capture-folder PATH` | Folder Medal records into on the clip drive. Default `M:\Clips`. |
 | `--rclone-path FILE` | rclone executable. Defaults to the bundled copy beside `medal-sync.exe`. |
@@ -198,7 +201,7 @@ Read [recovery rules](getting-started.md#recovery-rules) before using these.
 | `refresh-media --out FILE` | Reviews differences between the persistent local copy and primary storage. See [review and refresh persistent local media](storage.md#review-and-refresh-persistent-local-media). |
 | `refresh-media --in FILE --apply [--accept-unknown-media]` | Applies that exact review, keeping a backup of every replaced file. |
 | `repair --checkpoint FILE [--db DB] [--apply]` | Puts back clips Medal dropped since a snapshot, when their files still exist. Takes a database backup first and keeps it until a reviewed retention removes it. |
-| `relocate --from DIR [--config FILE] [--apply]` | Copies library files left outside the capture folder to the server's clip folder, verifies them and repoints the library. Missing optional overlays are reported in the preview and their paths are cleared on apply. The originals and a database backup are kept. Works with an SMB primary, or with Google Drive before `init --apply` creates the Drive journal, when files go to the persistent local copy; it refuses once that journal exists. |
+| `relocate --from DIR [--config FILE] [--apply]` | Copies library files left outside the capture folder, verifies them and repoints the library. Missing optional overlays are reported in the preview and their paths are cleared on apply. The originals and a database backup are kept. With cloud mode, relocate to the persistent local copy before initializing its journal. |
 | `abandon --session ID --reason TEXT [--apply]` | Gives up a session whose PC is lost and returns the library to the last published generation. Unpublished clips stay on that PC and must be reconciled by hand. |
 
 ## Test mounting before using live data

@@ -66,12 +66,12 @@ next launch can retry. Nothing is handed off until it is verified.
 | Local copy and server | Keep a complete collection on a local disk and upload it to the server before switching PCs. |
 | Local storage only | Keep media and coordination on one PC. No server needed. |
 | Cloud or personal-server primary | Use any rclone remote as primary storage, with a persistent local copy and an SMB journal. |
-| Google Drive without a server | Keep a local recording copy; use Drive for media, library history and cross-PC ownership. |
+| Cloud without a server | Keep a local recording copy. Use Google Drive, OneDrive or Dropbox for media, history and cross-PC ownership. |
 | Cloud copies (add-on) | Add OneDrive, Dropbox, Google Drive or other rclone destinations to any mode. |
 
-Server modes and Google Drive cloud mode share the library between PCs. Local
-storage only stays on one PC. [Google Drive cloud setup](docs/storage.md#google-drive-without-a-server)
-requires no SMB server.
+Server and cloud modes share the library between PCs. Local storage stays on
+one PC. Follow the [cloud setup guide](docs/storage.md#cloud-mode-without-a-server)
+to share a library without an SMB server.
 The [storage guide](docs/storage.md) explains each mode, drive and file system
 requirements, and how to set them up.
 
@@ -123,14 +123,14 @@ verification and recovery.
 share or NAS, or a cloud account you already have.
 
 **How do I sync Medal clips between two PCs?** Install Medal Sync on each PC
-and point them at the same library on an SMB share, NAS or Google Drive.
+and point them at the same library on an SMB share, NAS or a supported cloud provider.
 Launch Medal through Medal Sync. When you quit Medal, it finishes uploads,
 verifies them and shows **Ready**; the other PC can then start Medal with the
 same clip library. Each PC keeps its own Medal login and recording settings.
 
 **Can I back up Medal.tv clips to Google Drive, OneDrive or Dropbox?** Yes.
 Add verified cloud copies to any storage mode, or use
-[Google Drive without a server](docs/storage.md#google-drive-without-a-server)
+[cloud mode without a server](docs/storage.md#cloud-mode-without-a-server)
 as the main library.
 
 **Can I keep Medal clips on a NAS or home server?** Yes. Medal records to an
@@ -142,8 +142,7 @@ See the [storage guide](docs/storage.md).
 ## Limits
 
 - **Serial handoff only.** One PC owns the library at a time. Server modes use
-  an SMB coordination share; Google Drive cloud mode uses conditional API
-  updates. Local storage only does not hand off between PCs.
+  an SMB coordination share. Cloud mode uses conditional provider API updates.
 - **No automatic deletion sync.** Deleting a clip is not propagated to other
   copies by itself. Primary storage and cloud copies keep the files until you
   run a reviewed cleanup (`primary prune`, `replica prune`). Destination

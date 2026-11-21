@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Run retention, primary and replica cleanup, and persistent-media refresh in cloud mode. A maintenance lease holds the library until the reviewed work completes (#249).
+- Migrate a server-mode or cloud library to Google Drive with its retained generations, media and device identities. The migration can resume after an interruption (#250).
+- Share a library without an SMB server using OneDrive or Dropbox. Each provider must prove it rejects stale ownership writes (#252).
+
 ## 1.6.0 — 2026-11-21
 
 - Publish verified library changes while Medal stays open. If Windows shuts down before releasing ownership, a second PC can use the last synced library after confirming the first PC is powered off.
