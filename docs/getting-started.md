@@ -41,9 +41,10 @@ first.
    remain available: `medal-sync init` then `init --apply` for a new library,
    or `medal-sync enroll --out DIR` then the same command with `--apply` to join.
    Never run `init` on a library that already exists.
-7. **Record.** Open Medal from the **Medal Library** shortcut. After you quit
-   Medal, wait for **Ready** in the status panel before switching PCs. When
-   it all works, you can choose **Start Medal at sign-in** in the tray menu.
+7. **Record.** Open Medal from the **Medal Library** shortcut. You can shut down
+   Windows with Medal open. To switch while leaving this PC on, quit Medal and
+   wait for **Ready** in the status panel. Once setup is verified, you can
+   choose **Start Medal at sign-in** in the tray menu.
 
 Everything below explains each step in detail, along with recovery and
 advanced options.
@@ -323,7 +324,7 @@ Apps > Startup**, Medal Sync reports it and leaves that switch to you. Portable
 installs can still use `set-medal-startup.ps1` from their `bin` folder; both
 use the same saved originals. Launch through the Medal Library
 shortcut so storage and ownership are checked before Medal opens. After exit,
-wait for **Ready** before switching PCs, updating or uninstalling.
+wait for **Ready** before updating or uninstalling.
 
 Open **Medal Sync Status** from the Start menu, double-click its notification-area
 icon, or run `medal-sync-launch.exe --status`. A configured desktop launch starts
@@ -356,14 +357,16 @@ Medal Sync on this PC. A blocked finish shows its diagnostic and required recove
 steps in **Last finish result**; follow those steps before retrying. The last
 supervisor refusal stays available when reopening status for that same session.
 When you open Medal while another PC owns the library, Medal Sync sends a switch
-request and asks whether to **wait and open Medal when ready**. No is the
-default. If that PC has already quit Medal and is only uploading, the message
-says it hands off by itself; nobody needs to go to it. If its upload has not
-changed for 30 minutes, the status, the message and the waiting window say it
-may be off, asleep or signed out instead. A PC switched off before it finished
-keeps the library: its clips that are not uploaded yet exist only there. Turn
-it on and sign in, and it finishes and hands off by itself. Use `abandon` only
-for a PC that is lost for good. Yes shows a waiting window that names the PC that has the library,
+request and offers **Wait and open when ready**. **Cancel** is the default.
+You can shut down Windows with Medal open. Medal Sync saves verified
+clips and library changes in the background and tries to finish the handoff
+during shutdown. If the library is still held and you know the owning PC has
+fully shut down, choose **Use last synced library** on the second PC and
+confirm. Clips and edits made after the last sync stay on the owning PC.
+If you can bring the owning PC online before switching, it can recover the
+unfinished session at sign-in when **Start Medal at sign-in** is enabled.
+You can also use **Retry finish** there with Medal closed.
+**Wait and open when ready** shows a window that names the PC that has the library,
 when it was last checked and whether the server can be reached. Medal opens by
 itself once that PC finishes its handoff, after the usual startup checks. Cancel,
 Windows shutdown or 15 minutes without a handoff stop the wait and withdraw the

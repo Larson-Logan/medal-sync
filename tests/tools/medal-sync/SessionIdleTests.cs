@@ -12,7 +12,7 @@ public sealed partial class SessionTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void IdleCheckpointLeavesOwnershipActiveAndQuitOrShutdownReusesItInSeconds(bool shuttingDown)
+    public void BackgroundSyncCommitsBeforeQuitOrShutdownAndDoesNotReleaseOwnership(bool shuttingDown)
     {
         var shutdown = new SessionShutdown(_clock);
         List<SessionProgress> reports = [];
@@ -21,12 +21,14 @@ public sealed partial class SessionTests
             idleSync: (_, guard) => { guard(); syncs++; return true; });
         string session = pc.Coordinator.Launch().Session!;
         Record(pc, "clip-2");
-        var original = _store.ReadJournal();
         DateTimeOffset finishAt = default;
         byte[]? checkpoint = null;
         _clock.OnSleep = () =>
         {
-            Assert.Equal(original, _store.ReadJournal());
+            var active = _store.ReadJournal();
+            Assert.Equal(OwnershipState.Active, active.State);
+            Assert.Equal(session, active.SessionId);
+            Assert.Equal(1, active.CommittedGeneration);
             checkpoint = File.ReadAllBytes(Path.Combine(_store.Generations.Directory, GenerationStore.Name(1), "manifest.json"));
             Assert.Equal(LaunchStatus.Waiting, Computer(SecondPc, "second").Coordinator.Launch().Status);
             Assert.Empty(pc.Mount.Forgotten);
@@ -35,7 +37,7 @@ public sealed partial class SessionTests
             if (shuttingDown) shutdown.RequestEnd();
         };
         var result = pc.Coordinator.Supervise(session, _ => { }, CancellationToken.None);
-        Assert.Equal(FinishStatus.Published, result.Status);
+        Assert.Equal(FinishStatus.Unchanged, result.Status);
         Assert.Equal(1, result.Generation);
         Assert.Equal(1, syncs);
         Assert.True(_clock.Now - finishAt < TimeSpan.FromSeconds(2));
@@ -77,7 +79,8 @@ public sealed partial class SessionTests
             Assert.Empty(pc.Mount.Forgotten);
             if (attempts == 2) pc.Medal.Running = false;
         };
-        Assert.Equal(FinishStatus.Published, pc.Coordinator.Supervise(session, _ => { }, CancellationToken.None).Status);
+        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Supervise(session, _ => { }, CancellationToken.None).Status);
+        Assert.Equal(1, _store.ReadJournal().CommittedGeneration);
         Assert.Equal(2, attempts);
     }
 
@@ -154,8 +157,45 @@ public sealed partial class SessionTests
         pc.Medal.Running = false;
         Assert.Equal(FinishStatus.Pending, pc.Coordinator.Finish(session).Status);
         Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
-        Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
+        Assert.Equal(1, _store.ReadJournal().CommittedGeneration);
         Assert.Empty(pc.Mount.Forgotten);
+    }
+
+    [Fact]
+    public void SecondPcCanRecoverTheLastSyncWithoutAccessToThePoweredOffPc()
+    {
+        var first = Computer(FirstPc, "first", isIdle: () => true, idleSync: (_, _) => true);
+        string session = first.Coordinator.Launch().Session!;
+        Record(first, "synced");
+        using var cancel = new CancellationTokenSource();
+        _clock.OnSleep = cancel.Cancel;
+        first.Coordinator.Supervise(session, _ => { }, cancel.Token);
+        MedalFixture.AddContent(first.Database, "unsent", video: @"M:\Clips\unsent.mp4");
+        first.Medal.Running = false;
+        Assert.True(first.Mount.Stop());
+
+        var second = Computer(SecondPc, "second");
+        var waiting = second.Coordinator.Launch();
+        Assert.Equal(LaunchStatus.Waiting, waiting.Status);
+        Assert.Equal(1, waiting.Journal!.CommittedGeneration);
+        AssertStarted(second.Coordinator.UseLastSync(waiting.Journal));
+        Assert.Equal(SecondPc, _store.ReadJournal().Owner);
+        Assert.Equal(2, LibraryDatabase.ReadSnapshot(second.Database, MedalFixture.AccountId).RowCount("contents"));
+        Assert.Equal(3, LibraryDatabase.ReadSnapshot(first.Database, MedalFixture.AccountId).RowCount("contents"));
+        Assert.Empty(first.Mount.Forgotten);
+    }
+
+    [Fact]
+    public void RecoveryConfirmationCannotReleaseASessionThatChangedWhileTheDialogWasOpen()
+    {
+        var (_, session) = FirstPcHoldsTheLibrary();
+        var second = Computer(SecondPc, "second");
+        var reviewed = second.Coordinator.Launch().Journal!;
+        var current = _store.Update(r => Ownership.BeginDrain(r, FirstPc, session, _clock.Now), TimeSpan.Zero);
+
+        Assert.Equal(LaunchStatus.Blocked, second.Coordinator.UseLastSync(reviewed).Status);
+        Assert.Equal(current, _store.ReadJournal());
+        Assert.Empty(second.Mount.Starts);
     }
 
     [Theory]

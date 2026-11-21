@@ -9,8 +9,11 @@ namespace MedalSync.Coordination;
 
 /// <summary>Drive metadata is authoritative; local files are only an immutable generation cache.</summary>
 internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJournal api,
-    Func<IReadOnlyList<string>, string> run)
+    Func<IReadOnlyList<string>, Action?, string> run)
 {
+    internal CloudCoordination(MedalSyncConfig config, GoogleDriveJournal api, Func<IReadOnlyList<string>, string> run)
+        : this(config, api, (arguments, check) => { check?.Invoke(); return run(arguments); }) { }
+
     private string GenerationsRemote => config.Remote.TrimEnd('/') + "/.medal-sync/" + config.LibraryId + "/generations";
     private string GenerationsLocal => Path.Combine(config.LibraryCoordinationDirectory, "generations");
     private string? storageFolderId;
@@ -21,10 +24,10 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
     internal Func<DateTimeOffset> Now { get; init; } = () => DateTimeOffset.UtcNow;
 
     /// <summary>Drive permits duplicate names. Refuse ambiguous paths before copying; reserve even incomplete attempts' numbers.</summary>
-    private Dictionary<string, string?> InspectGenerations(bool allowMissing = false, bool hashes = false)
+    private Dictionary<string, string?> InspectGenerations(bool allowMissing = false, bool hashes = false, Action? check = null)
     {
         string listing;
-        try { listing = Run("lsjson", [GenerationsRemote, "--recursive", "--no-mimetype", .. hashes ? new[] { "--hash-type", "MD5" } : Array.Empty<string>()]); }
+        try { listing = Run("lsjson", check, [GenerationsRemote, "--recursive", "--no-mimetype", .. hashes ? new[] { "--hash-type", "MD5" } : Array.Empty<string>()]); }
         catch (RcloneFailedException ex) when (allowMissing && ex.ExitCode == 3) { return []; }
         try
         {
@@ -55,10 +58,11 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
     }
 
     internal static CloudCoordination For(MedalSyncConfig config, Action? requireTime = null) => new(config, GoogleDriveJournal.For(config, requireTime),
-        arguments => new RcloneRunner(config.ExpandedRclonePath).Run(arguments, TimeSpan.FromMinutes(config.Replication!.TimeoutMinutes), requireTime, captureOutput: true));
+        (arguments, check) => new RcloneRunner(config.ExpandedRclonePath).Run(arguments,
+            TimeSpan.FromMinutes(config.Replication!.TimeoutMinutes), requireTime + check, captureOutput: true, lowPriority: check is not null));
 
-    private string Run(string command, params string[] rest) => run([command, .. rest, "--config",
-        Environment.ExpandEnvironmentVariables(config.Replication!.RcloneConfigPath!), "--retries", "1", "--low-level-retries", "2", "--contimeout", "10s", "--timeout", "60s"]);
+    private string Run(string command, Action? check, params string[] rest) => run([command, .. rest, "--config",
+        Environment.ExpandEnvironmentVariables(config.Replication!.RcloneConfigPath!), "--retries", "1", "--low-level-retries", "2", "--contimeout", "10s", "--timeout", "60s"], check);
 
     private StorageActionRequiredException StorageRefusal(RcloneFailedException cause) => new(
         RcloneFailure.Describe(cause, "Google Drive coordination storage", config.Remote,
@@ -68,7 +72,7 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
     {
         if (!refresh && storageFolderId is not null) return storageFolderId;
         string listing;
-        try { listing = Run("lsjson", config.Remote, "--stat", "--no-mimetype"); }
+        try { listing = Run("lsjson", null, config.Remote, "--stat", "--no-mimetype"); }
         catch (RcloneFailedException ex) when (!RcloneFailure.IsTransient(ex))
         {
             throw StorageRefusal(ex);
@@ -126,6 +130,8 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
             throw new InvalidDataException("The local cloud generation differs from the committed Drive manifest. Preserve this cache and unpublished local work; recover with a fresh history cache before launching.");
     }
 
+    internal void RefreshGenerationNumbers(Action? check) => InspectGenerations(check: check);
+
     public void Download()
     {
         RequireOrdinaryCache();
@@ -158,7 +164,7 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
             {
                 string files = Path.Combine(staging, ".files");
                 File.WriteAllLines(files, missing);
-                Run("copy", GenerationsRemote, staging, "--immutable", "--checksum", "--files-from-raw", files);
+                Run("copy", null, GenerationsRemote, staging, "--immutable", "--checksum", "--files-from-raw", files);
             }
             var downloaded = new GenerationStore(staging, config.LibraryId, config.AccountId);
             string HeadRoot(long generation) => cached.Exists(generation) ? GenerationsLocal : staging;
@@ -231,21 +237,21 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
             throw new UnsafeOperationException("The cloud generation cache cannot be a directory link.");
     }
 
-    public void Upload(long generation)
+    public void Upload(long generation, Action? check = null)
     {
         RequireOrdinaryCache();
         string folder = Path.Combine(GenerationsLocal, GenerationStore.Name(generation));
         // Load verifies both payloads and the manifest before anything is uploaded.
         _ = new GenerationStore(GenerationsLocal, config.LibraryId, config.AccountId).Read(generation);
         string destination = GenerationsRemote + "/" + GenerationStore.Name(generation);
-        InspectGenerations(allowMissing: true);
+        InspectGenerations(allowMissing: true, check: check);
         string[] filters = ["--include", "/library.json", "--include", "/assets.json", "--include", "/manifest.json"];
-        Run("copy", [folder, destination, "--immutable", "--checksum", .. filters]);
-        InspectGenerations();
-        Run("check", [folder, destination, "--download", "--one-way", .. filters]);
+        Run("copy", check, [folder, destination, "--immutable", "--checksum", .. filters]);
+        InspectGenerations(check: check);
+        Run("check", check, [folder, destination, "--download", "--one-way", .. filters]);
     }
 
-    public OwnershipRecord Update(Func<OwnershipRecord, OwnershipRecord> transition)
+    public OwnershipRecord Update(Func<OwnershipRecord, OwnershipRecord> transition, Action? check = null)
     {
         for (int attempt = 0; attempt < 8; attempt++)
         {
@@ -260,11 +266,12 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
             }
             if (next.Revision != current.Value.Journal.Revision + 1 || next.LibraryId != config.LibraryId || next.AccountId != config.AccountId)
                 throw new InvalidOperationException("A cloud journal transition must advance the revision by exactly one.");
-            if (next.CommittedGeneration != current.Value.Journal.CommittedGeneration) Upload(next.CommittedGeneration);
+            if (next.CommittedGeneration != current.Value.Journal.CommittedGeneration) Upload(next.CommittedGeneration, check);
             // Discover immutable attempts left by an abandoned PC before selecting the next generation number.
             if (next.State == OwnershipState.Publishing && current.Value.Journal.State != OwnershipState.Publishing) Download();
             string hash = next.CommittedGeneration == current.Value.Journal.CommittedGeneration
                 ? current.Value.HeadManifestHash : ManifestHash(next.CommittedGeneration);
+            check?.Invoke();
             if (!api.CompareExchange(current, current.Value with { Journal = next, HeadManifestHash = hash })) continue;
             // A later legitimate transition may already have happened; the successful CAS is the ownership proof.
             return next;

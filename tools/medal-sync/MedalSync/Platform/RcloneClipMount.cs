@@ -73,9 +73,8 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
             if (clock.Now >= deadline) throw new UnsafeOperationException($"{DriveRoot} did not appear within {StartTimeout.TotalSeconds:0} seconds.");
             clock.Sleep(TimeSpan.FromMilliseconds(500));
         }
-        // Read every directory once so Medal's existence checks are answered from
-        // memory, even if the server becomes unreachable during the session.
-        if (Control()?.Call("vfs/refresh", "{\"recursive\":\"true\"}", TimeSpan.FromMinutes(10)) is null)
+        // Preload Medal's directory lookups for playback. A drive opened only to drain its cache needs no preload.
+        if (forRecording && Control()?.Call("vfs/refresh", "{\"recursive\":\"true\"}", TimeSpan.FromMinutes(10)) is null)
         {
             throw new UnsafeOperationException("rclone could not read the clip folders on the server.");
         }
@@ -127,6 +126,9 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
         if (control is null) return DrainVerdict.Unknown("This PC does not know the drive's session.");
         return VfsStatus.Evaluate(control.Call("vfs/stats"), control.Call("vfs/queue"), config.MountRemote);
     }
+
+    public bool StoppedCacheIsEmpty(string session) => !IsRunning
+        && AbortedStartRecovery.CacheIsEmptyOrAbsent(config.SessionCacheDirectory(session), allowEmptyDirectories: true);
 
     public string? UseUploadLimit(bool recording) => _uploadLimit.Apply(Control(), recording);
 

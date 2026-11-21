@@ -119,10 +119,8 @@ internal static class CloudHandoff
             "the second PC hydrates and byte-verifies both Google Drive media paths, including Unicode and filter characters");
         store.Update(j => Ownership.Acquire(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
         store.Update(j => Ownership.MarkActive(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
-        store.Update(j => Ownership.BeginDrain(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
-        store.Update(j => Ownership.BeginPublish(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
         store.Generations.Publish(2, 1, session, first, changed, new(1, [], []), versions, DateTimeOffset.UtcNow);
-        store.Update(j => Ownership.CompletePublish(j, first, session, 2, DateTimeOffset.UtcNow), TimeSpan.Zero);
+        store.Update(j => Ownership.CommitCheckpoint(j, first, session, 2, DateTimeOffset.UtcNow), TimeSpan.Zero);
         interruptDownload = true;
         bool downloadInterrupted = false;
         try { otherStore.ReadJournal(); }
@@ -132,9 +130,12 @@ internal static class CloudHandoff
             "interrupted real history transfers remove scratch files and never expose partial generations");
         interruptDownload = false;
         downloadedFiles.Clear();
-        check(otherStore.ReadJournal().CommittedGeneration == 2 && downloadedFiles.Count == 3
+        check(otherStore.ReadJournal() is { State: OwnershipState.Active, CommittedGeneration: 2 } && downloadedFiles.Count == 3
             && downloadedFiles.All(file => file.StartsWith(GenerationStore.Name(2) + "/", StringComparison.Ordinal)),
-            "a later handoff transfers only the missing generation with a real rclone file list");
+            "a background sync transfers only the missing generation while the first PC keeps ownership");
+        store.Update(j => Ownership.BeginDrain(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
+        store.Update(j => Ownership.BeginPublish(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
+        store.Update(j => Ownership.CompleteUnchanged(j, first, session, DateTimeOffset.UtcNow), TimeSpan.Zero);
         string secondSession = new('2', 32);
         otherStore.Update(j => Ownership.Acquire(j, second, secondSession, DateTimeOffset.UtcNow), TimeSpan.Zero);
         check(store.ReadJournal().Owner == second, "the first PC observes the second PC's authoritative cloud ownership");
@@ -187,11 +188,12 @@ internal static class CloudHandoff
             File.WriteAllText(config.Capture.Append("mounted-new.mp4").Display, "Synthetic recording through the cloud-mode clip drive.");
             MedalFixture.AddContent(db, "mounted-new", video: config.Capture.Append("mounted-new.mp4").Display);
             medal.Running = false;
+            check(mount.Stop(), "the original clip drive stopped before finish, simulating Windows closing the uploader first");
             var finished = coordinator.Finish(started.Session!);
             var journal = store.ReadJournal();
             check(finished.Status == FinishStatus.Published && !mount.IsRunning && journal.State == OwnershipState.Clean
                 && journal.CommittedGeneration == previousGeneration + 1,
-                "cloud mode drains the real mount, verifies rclone media and snapshot uploads, and only then releases ownership: " + finished.Message);
+                "cloud mode reopens and drains the real cache, verifies media and snapshot uploads, and releases ownership: " + finished.Message);
             var snapshot = firstStore.Generations.Read(firstStore.ReadJournal().CommittedGeneration).Snapshot;
             new StorageReplication(first, new(fixture.PathFor("return-state")), () => { }).Prepare(snapshot);
             check(File.ReadAllText(first.MountedCapture.Append("mounted-new.mp4").Display) == "Synthetic recording through the cloud-mode clip drive.",

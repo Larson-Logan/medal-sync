@@ -24,9 +24,9 @@ directly. Allow disk space for the collection, cache and new recordings.
 
 ## Background sync and shutdown
 
-While this PC owns an **Active** session, Medal Sync checks for idle work every
-30 seconds. Windows must have had no keyboard or mouse input for a minute,
-CPU use must be below 20 percent, and Medal must not be recording. Persistent
+While this PC owns an **Active** session, Medal Sync checks for background work
+every 30 seconds. CPU use must be below 20 percent and Medal must not be
+recording. You can keep using the PC. Persistent
 local media is copied to primary storage and configured replicas, using one
 transfer at a time, at most 2 MiB/s (or a lower `replication.bandwidthLimitMiB`).
 The copy process runs at idle priority. Recording detection uses Medal's disk
@@ -44,7 +44,7 @@ to its backing folder after `mount.writeBackSeconds`, as documented by
 server mode this already uploads to the share while Medal is open; that path
 uses `mount.bandwidthLimitMiB`, defaulting to 2 MiB/s.
 
-New input, recording, cancellation, Medal exit or shutdown interrupts idle
+High CPU use, recording, cancellation, Medal exit or shutdown interrupts background
 transfers. Transfer guards run every 200 milliseconds; the supervisor then
 continues its normal finish path. Failed or interrupted verification leaves
 no reusable evidence for that destination. An unreachable share or provider
@@ -52,41 +52,29 @@ keeps this PC's session and local media and retries later, with a one-minute
 pause after an idle failure. Idle work never deletes local clips or releases
 ownership.
 
-Once every referenced file is settled and verified, the supervisor prepares
-an immutable generation containing the current library and asset manifest.
-This is an **uncommitted checkpoint**, not a published head: the journal stays
-Active, `CommittedGeneration` stays unchanged, and no other PC may acquire the
-library. Generation files use the existing staging-and-rename protocol;
-`writer.lock` still serializes the final journal transitions. A crash or
-explicit abandon can leave an uncommitted attempt, which other PCs ignore.
-No deletion or cleared media path bypasses the existing finish review.
-In Google Drive cloud mode the prepared generation stays in this PC's history
-cache until finish uploads and commits it through the existing conditional
-journal update.
+Once the referenced files settle and verify, the supervisor commits a new
+generation with the library and its asset manifest. The same PC keeps
+ownership while Medal is open. SMB uses the writer lock for the journal
+update. In Google Drive cloud mode, Medal Sync verifies the generation in
+Drive before updating the journal. Suspect removals and cleared paths still
+require finish review.
 
-The tray shows **All clips uploaded** after primary storage and required
-copies verify and the library checkpoint is prepared. New library edits or
-queued uploads clear that indication on the next supervisor poll. This means
-the remaining handoff is small; only **Ready** means another PC can start.
-Quit Medal normally so its recorder and encoder can finish saving.
+The tray shows when finished clips and library changes are synced. New edits
+or queued uploads clear that indication on the next supervisor poll. You can
+shut down Windows with Medal open. Windows asks Medal to exit, and Medal Sync
+finishes any remaining work and releases ownership when it can verify the final
+state. If Windows already stopped the clip drive and its cache is empty, finish
+skips restarting rclone.
 
-At quit or Windows shutdown, Draining reuses rclone's existing queue, and
-Publishing reuses the exact matching checkpoint (including the asset manifest
-and Medal versions). Replication checks destination sizes and copies or byte
-checks only changed media from the idle receipts. Idle checks do not consume
+At quit or shutdown, finish reuses the background verification receipts for
+matching media. Idle checks do not consume
 the handoff verification interval: a due full verification runs during idle,
 and finish consumes that evidence once. Missing evidence, source changes,
 expired full verification or failed destination checks require verification
-again. New work after the last idle sync still has to finish. Windows' existing
-25-second shutdown budget is unchanged; if Medal has not exited, storage is
-offline or verification runs out of time, ownership and cached clips remain
-for automatic recovery at next sign-in on this PC.
-
-The shared journal and generation formats remain version 1. Older installed
-versions on the other PC continue to ignore uncommitted attempts and wait for
-Clean. They do not perform idle sync themselves. Private verification receipts
-with the new idle marker fail older builds' integrity checks and safely fall
-back to full verification; downgrading does not authorize an early release.
+again. Windows gives finish up to 25 seconds. If it cannot complete, the other
+PC can open **Use last synced library** from the handoff dialog after you
+confirm that the owning PC fully shut down. Clips or edits after the last sync
+stay on the original PC. Ordinary launch waits for **Ready**.
 
 ## Choose drives and file systems
 
@@ -817,8 +805,8 @@ recovery decision and does not reconcile local media.
 
 ### Library history
 
-Every switch that changes the library publishes a new numbered generation on
-the server. Two read-only commands show that history. They never take
+Background sync and finish publish new numbered generations when the library
+changes. Two read-only commands show that history. They never take
 ownership, hold the server lock, restore anything or delete anything, so they
 are safe while another PC records:
 

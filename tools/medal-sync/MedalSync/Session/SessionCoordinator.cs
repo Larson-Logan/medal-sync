@@ -11,6 +11,7 @@ internal enum LaunchStatus
     Started,
     AlreadyRunning,
     FinishingPreviousSession,
+    RecoveredPreviousSession,
     Waiting,
     Blocked,
 }
@@ -90,8 +91,8 @@ internal sealed partial class SessionCoordinator(
     Func<Action, IAssetChecker>? idleAssets = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
-    private const string ActiveMessage = "Medal is open. Quit Medal normally from its tray icon when you want to switch PCs.";
-    private const string RecordingMessage = "Medal is recording a game. Quit Medal normally from its tray icon when you want to switch PCs.";
+    private const string ActiveMessage = "Medal is open. You can shut down Windows normally when you are done.";
+    private const string RecordingMessage = "Medal is recording a game. You can shut down Windows normally when you are done.";
     private const string ShutdownMessage = "Windows is shutting down; Medal was not started.";
     private const string WaitCancelledMessage = "Stopped waiting for the other PC. Medal was not started and this PC's switch request was withdrawn.";
     private string? _uploadSession;

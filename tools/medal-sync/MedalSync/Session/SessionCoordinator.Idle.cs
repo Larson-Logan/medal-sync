@@ -6,7 +6,7 @@ namespace MedalSync.Session;
 internal sealed partial class SessionCoordinator
 {
     private DateTimeOffset _nextIdleSync;
-    private string _idleStatus = "Clips sync in the background when this PC is idle.";
+    private string _idleStatus = "Finished clips sync in the background while Medal is open.";
     private bool _idleSynced;
     private string? _idleDigest;
 
@@ -77,7 +77,7 @@ internal sealed partial class SessionCoordinator
             var checker = idleAssets?.Invoke(RequireIdle) ?? assets;
             checker.RequireServer();
             var start = store.Generations.Read(journal!.CommittedGeneration);
-            // Never silently accept a deletion/path clearing, even in an uncommitted checkpoint.
+            // The background worker cannot approve suspect removals or cleared media paths.
             if (LostEntries(start.Snapshot, snapshot, checker).Count > 0)
             {
                 _idleStatus = "Clips uploaded; library changes need review when Medal quits.";
@@ -90,18 +90,24 @@ internal sealed partial class SessionCoordinator
                 || (compatibility?.RequirePublish() ?? options.Medal) != versions) throw new OperationCanceledException();
             if (start.Manifest.SnapshotDigest != snapshot.Digest())
             {
-                store.RefreshGenerationHistory();
+                store.RefreshGenerationNumbers(RequireIdle);
                 RequireIdle();
                 if (store.ReadJournal() != journal || library.Read().Digest() != snapshot.Digest())
                     throw new OperationCanceledException();
-                // Immutable and uncommitted: older clients ignore it; Finish reuses an exact matching attempt.
-                // A concurrent abandon can leave an orphan, but can never commit or release this session here.
-                PrepareGeneration(journal, session, snapshot, onServer, versions);
+                long generation = PrepareGeneration(journal, session, snapshot, onServer, versions);
+                RequireIdle();
+                journal = store.Update(current =>
+                {
+                    RequireIdle();
+                    if (current != journal || library.Read().Digest() != snapshot.Digest()) throw new OperationCanceledException();
+                    return Ownership.CommitCheckpoint(current, Me, session, generation, clock.Now);
+                }, options.LockTimeout, RequireIdle);
             }
             RequireIdle();
+            if (library.Read().Digest() != snapshot.Digest()) throw new OperationCanceledException();
             _idleDigest = snapshot.Digest();
             _idleSynced = true;
-            _idleStatus = "All clips uploaded. Library checkpoint prepared; quit Medal normally to finish the handoff.";
+            _idleStatus = "Finished clips and library changes are synced.";
         }
         catch (OperationCanceledException)
         {

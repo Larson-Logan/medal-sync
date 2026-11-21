@@ -322,7 +322,7 @@ internal static class SessionCommands
     /// </summary>
     public static int Launch(Arguments args, TextWriter output, Action<string>? notify = null,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
-        Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait = null)
+        Func<HandoffWaitOffer, HandoffChoice>? offerHandoffWait = null, bool atSignIn = false)
     {
         bool replaceLocal = args.Flag("--replace-local-library");
         var wait = WaitSeconds(args.Value("--wait-for-server"));
@@ -361,10 +361,11 @@ internal static class SessionCommands
         var (coordinator, mount) = Coordinator(context, store, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report,
             StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null, askOwnerToSwitch: !quiet);
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
-        var outcome = LaunchOrWait(context, output, coordinator, handoff, shutdown, offerHandoffWait);
+        var outcome = LaunchOrWait(context, output, coordinator, handoff, shutdown, offerHandoffWait, atSignIn);
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
         // Recording can go ahead, but the user should learn now, not after the session, that the handoff will need them.
         if (outcome.Warning is { } warning && !shutdown.SuppressUi) Notify(notify, warning);
+        if (outcome.Status == LaunchStatus.RecoveredPreviousSession) return 0;
         if (outcome.Status is not (LaunchStatus.Started or LaunchStatus.AlreadyRunning or LaunchStatus.FinishingPreviousSession))
             return outcome.Status == LaunchStatus.Waiting ? 3 : 1;
         // A recovered, already-running session must pass the coordinator's drive
@@ -400,7 +401,7 @@ internal static class SessionCommands
     /// found the library owned elsewhere. Otherwise this is the unchanged immediate launch. Ctrl+C stops a wait.
     /// </summary>
     private static LaunchOutcome LaunchOrWait(Context context, TextWriter output, SessionCoordinator coordinator, TimeSpan? handoff,
-        SessionShutdown shutdown, Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait)
+        SessionShutdown shutdown, Func<HandoffWaitOffer, HandoffChoice>? offerHandoffWait, bool atSignIn)
     {
         if (handoff is { } timeout)
         {
@@ -408,15 +409,22 @@ internal static class SessionCommands
             return WaitWithCtrlC(cancelled => coordinator.LaunchWhenReleased(new HandoffWait(timeout, cancelled, update =>
             {
                 // One line per change, not per check.
-                var key = (update.Owner, update.State, update.Fresh);
+                var key = (update.Owner, update.State, update.Fresh, update.QuietSince);
                 if (key.Equals(last)) return;
                 last = key;
                 Report(context, output, "launch: waiting: " + update.Describe());
             })));
         }
-        var outcome = coordinator.Launch();
+        var outcome = coordinator.Launch(atSignIn);
         if (outcome.Wait != LaunchWait.OwnedElsewhere || offerHandoffWait is null || shutdown.SuppressUi) return outcome;
-        var view = offerHandoffWait(new HandoffWaitOffer(outcome.Message, OfferedHandoffWait));
+        var recovery = outcome.Journal is { } journal && SessionCoordinator.CanUseLastSync(journal) ? journal : null;
+        var choice = offerHandoffWait(new HandoffWaitOffer(outcome.Message, OfferedHandoffWait, recovery));
+        var view = choice.View;
+        if (choice.UseLastSync && recovery is not null && !shutdown.SuppressUi)
+        {
+            view?.Dispose();
+            return coordinator.UseLastSync(recovery);
+        }
         if (view is null || shutdown.SuppressUi)
         {
             view?.Dispose();

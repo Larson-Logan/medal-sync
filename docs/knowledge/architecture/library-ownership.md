@@ -48,6 +48,7 @@ current state and owner before returning the next record:
 | --- | --- | --- |
 | `Acquire` | `Clean` | `Starting` |
 | `MarkActive` | `Starting` | `Active` |
+| `CommitCheckpoint` | `Active` | `Active`, with a newer verified `CommittedGeneration` |
 | `AbortStart` | `Starting` | `Clean` (start given back) |
 | `BeginDrain` | `Active`, `RecoveryRequired` | `Draining` |
 | `ResumeActive` | `Draining`, `RecoveryRequired` | `Active` (Medal reopened) |
@@ -86,7 +87,7 @@ holds:
 - `assets.json`: media present on primary storage, and referenced media that is
   missing.
 
-Generations are immutable. An idle **uncommitted checkpoint** may exist while a
+Generations are immutable. Background sync can commit a generation while a
 session is `Active`. Other PCs ignore uncommitted attempts and use only the
 journal's `CommittedGeneration`. `GenerationHistory` powers `history list` and
 `history diff`; retention can prune old generations and records the pruned

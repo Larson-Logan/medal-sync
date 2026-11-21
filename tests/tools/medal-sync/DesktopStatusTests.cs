@@ -163,13 +163,13 @@ public sealed class DesktopStatusTests
     public void AnotherPcThatIsOnlyUploadingIsNotDescribedAsNeedingMedalQuit()
     {
         var other = new DeviceIdentity(new string('d', 32), "Other PC");
-        Assert.StartsWith("Quit Medal and finish the handoff on Synthetic PC.", DesktopStatus.Resolve(Journal, other, null, false, Now).NextAction,
+        Assert.Contains("If Medal is open there, quit it from its tray icon.", DesktopStatus.Resolve(Journal, other, null, false, Now).NextAction,
             StringComparison.Ordinal);
         foreach (var state in new[] { OwnershipState.Draining, OwnershipState.Publishing })
         {
             var finishing = DesktopStatus.Resolve(Journal with { State = state }, other, null, false, Now);
             Assert.Equal(SessionPhase.Waiting, finishing.Phase);
-            Assert.Equal("Synthetic PC is finishing its uploads and hands off the library by itself. Open Medal here after it is Ready.", finishing.NextAction);
+            Assert.Contains("Keep that PC on while it finishes the handoff.", finishing.NextAction, StringComparison.Ordinal);
         }
     }
 
@@ -180,7 +180,7 @@ public sealed class DesktopStatusTests
         foreach (var state in new[] { OwnershipState.Draining, OwnershipState.Publishing })
         {
             var finishing = Journal with { State = state };
-            Assert.StartsWith("Synthetic PC is finishing its uploads",
+            Assert.Contains("Keep that PC on while it finishes the handoff.",
                 DesktopStatus.Resolve(finishing, other, null, false, Now + Ownership.QuietFinish - TimeSpan.FromSeconds(1)).NextAction,
                 StringComparison.Ordinal);
             var quiet = DesktopStatus.Resolve(finishing, other, null, false, Now + Ownership.QuietFinish);
@@ -188,10 +188,10 @@ public sealed class DesktopStatusTests
             Assert.False(quiet.CanRetry);
             Assert.Equal(Ownership.QuietFinishMessage("Synthetic PC", Now), quiet.NextAction);
         }
-        // An owner with Medal open, or a clock running ahead on the owner, is never described as possibly off.
-        Assert.StartsWith("Quit Medal and finish the handoff on Synthetic PC.",
+        // An Active journal has no heartbeat. Even an old timestamp cannot tell whether Medal is still open.
+        Assert.Contains("If Medal is open there, quit it from its tray icon.",
             DesktopStatus.Resolve(Journal, other, null, false, Now + TimeSpan.FromDays(1)).NextAction, StringComparison.Ordinal);
-        Assert.StartsWith("Synthetic PC is finishing its uploads",
+        Assert.Contains("Keep that PC on while it finishes the handoff.",
             DesktopStatus.Resolve(Journal with { State = OwnershipState.Draining, UpdatedAt = Now + TimeSpan.FromHours(2) }, other, null, false, Now).NextAction,
             StringComparison.Ordinal);
     }

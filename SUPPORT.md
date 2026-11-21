@@ -52,5 +52,7 @@ need to repeat an operation or alter the library to file a report.
 
 Keep ownership, cache and recovery evidence intact while asking for help.
 Do not clear SQLite sidecars, reset an existing journal, delete the cache or
-force-kill Medal to get past a refusal. Wait for **Ready** before switching
-PCs, updating or uninstalling. Keep an independent media backup.
+force-kill Medal to get past a refusal. After confirming a full shutdown on the
+owning PC, **Use last synced library** lets you switch to the latest shared
+generation. Updates and uninstall require **Ready**. Keep an independent media
+backup.

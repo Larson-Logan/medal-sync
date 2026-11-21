@@ -69,14 +69,12 @@ While Medal runs, the supervisor polls status, publishes progress to
 `desktop-status.json` for the tray, and checks free disk space every 30
 seconds.
 
-Idle sync runs inside the supervisor, serialized with finish. It copies
-settled, library-referenced media only when Windows has had no input for a
-minute, CPU use is below 20 percent and Medal is not recording.[^storage-guide]
-Transfer guards run every 200 ms, and new input, recording, Medal exit or
-shutdown interrupts them. Once everything verifies, idle sync prepares an
-**uncommitted checkpoint** generation. The tray then shows *All clips
-uploaded*, but only **Ready** means another PC can start. Idle work never
-deletes local clips or releases ownership.
+Background sync runs inside the supervisor, serialized with finish. It copies
+settled, library-referenced media while CPU use is below 20 percent and Medal
+is not recording.[^storage-guide] Transfer guards check for recording, high CPU
+use, Medal exit and shutdown. Once everything verifies, the worker commits a
+generation and keeps the session `Active`. Background work never deletes local
+clips or releases ownership.
 
 # Finish
 
@@ -95,16 +93,17 @@ without one (`CompleteUnchanged`). If Medal is opened again before publishing,
   storage is offline, and up to 10 minutes after other failures.
   `NeedsAction` shows as *Action needed* in the tray.
 
-Finish reuses an idle checkpoint only when it matches exactly. The SSD cache
+Finish reuses verification receipts only when the media match. The SSD cache
 and the session's Medal login are removed only after the generation commits;
 the login first moves to `finished-sessions/SESSION/` with a receipt.[^recovery-rules]
 
 # Windows shutdown
 
 `SessionShutdown.cs` and `WindowsSessionEnd.cs` give finish Windows' 25-second
-shutdown budget. If Medal has not exited, storage is offline or verification
-runs out of time, ownership and cached clips stay on this PC and recovery runs
-at the next sign-in.
+shutdown budget. An already-stopped drive with an empty cache needs no remount.
+If finish is interrupted, the journal retains the most recent committed
+generation and the original PC retains its cache. An operator who knows the
+original PC fully shut down can switch to that generation from the launch dialog.
 
 # Invariants to preserve
 

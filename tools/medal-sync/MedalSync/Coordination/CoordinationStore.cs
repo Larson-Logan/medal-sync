@@ -73,7 +73,7 @@ internal sealed partial class CoordinationStore
     public GenerationStore Generations { get; }
 
     /// <summary>Discover cloud attempts before allocating an idle checkpoint, just as BeginPublish does at finish.</summary>
-    internal void RefreshGenerationHistory() => cloud?.Download();
+    internal void RefreshGenerationNumbers(Action? check = null) => cloud?.RefreshGenerationNumbers(check);
 
     private string JournalPath => Path.Combine(Root, "journal.json");
 
@@ -271,9 +271,9 @@ internal sealed partial class CoordinationStore
     }
 
     /// <summary>Applies one transition under the writer lock, checking the revision it was based on.</summary>
-    public OwnershipRecord Update(Func<OwnershipRecord, OwnershipRecord> transition, TimeSpan lockTimeout)
+    public OwnershipRecord Update(Func<OwnershipRecord, OwnershipRecord> transition, TimeSpan lockTimeout, Action? check = null)
     {
-        if (cloud is not null) return cloud.Update(transition);
+        if (cloud is not null) return cloud.Update(transition, check);
         using var _ = AcquireWriterLock(lockTimeout);
         var current = ReadJournal();
         var next = transition(current);
@@ -286,6 +286,7 @@ internal sealed partial class CoordinationStore
         {
             throw new InvalidDataException($"Generation {next.CommittedGeneration} must be published before it is committed.");
         }
+        check?.Invoke();
         AtomicFile.Replace(JournalPath, Json.Serialize(next));
         var written = ReadJournal();
         if (written != next) throw new IOException("The ownership journal did not read back as written.");

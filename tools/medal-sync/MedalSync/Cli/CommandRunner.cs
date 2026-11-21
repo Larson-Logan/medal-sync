@@ -94,7 +94,7 @@ internal static class CommandRunner
     /// <summary>As <see cref="Run(string[], TextWriter, TextWriter)"/>; <paramref name="notify"/> receives a running session's messages.</summary>
     public static int Run(string[] args, TextWriter output, TextWriter error, Action<string>? notify,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, Session.SessionShutdown? shutdown = null,
-        Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait = null)
+        Func<HandoffWaitOffer, HandoffChoice>? offerHandoffWait = null, bool atSignIn = false)
     {
         try
         {
@@ -104,7 +104,7 @@ internal static class CommandRunner
                 output.WriteLine(Help);
                 return parsed.Words.Count == 0 && !args.Contains("--help") ? 2 : 0;
             }
-            return Dispatch(parsed, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait);
+            return Dispatch(parsed, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait, atSignIn);
         }
         catch (UsageException ex)
         {
@@ -124,7 +124,8 @@ internal static class CommandRunner
     }
 
     private static int Dispatch(Arguments args, TextWriter output, Action<string>? notify,
-        Func<LibraryChangeReview, bool>? reviewLibraryChanges, Session.SessionShutdown? shutdown, Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait)
+        Func<LibraryChangeReview, bool>? reviewLibraryChanges, Session.SessionShutdown? shutdown,
+        Func<HandoffWaitOffer, HandoffChoice>? offerHandoffWait, bool atSignIn)
     {
         string command = string.Join(' ', args.Words);
         // Read-only reports stay available while setup runs, which is often when help is needed.
@@ -168,7 +169,7 @@ internal static class CommandRunner
             "retention" => RetentionCommands.Run(args, output),
             "enroll" => EnrollmentCommands.Run(args, output),
             "enroll recover" => EnrollmentCommands.Recover(args, output),
-            "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait),
+            "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait, atSignIn),
             "finish" => SessionCommands.Finish(args, output),
             "recover-start" => SessionCommands.RecoverStart(args, output),
             "refresh-media" => MediaRefreshCommands.Run(args, output),

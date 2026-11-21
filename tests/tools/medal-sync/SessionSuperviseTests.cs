@@ -271,6 +271,36 @@ public sealed partial class SessionTests
     }
 
     [Fact]
+    public void ShutdownCanReleaseVerifiedLibraryWithoutRelaunchingAStoppedMountWithAnEmptyCache()
+    {
+        var shutdown = new SessionShutdown(_clock);
+        var pc = Computer(FirstPc, "first", shutdown: shutdown);
+        string session = pc.Coordinator.Launch().Session!;
+        Record(pc, "last-clip");
+        pc.Mount.Stop();
+        pc.Mount.EmptyStoppedCache = true;
+        pc.Mount.OnStart = () => Assert.Fail("Windows may already be unable to start another mount.");
+        _clock.OnSleep = () => pc.Medal.Running = false;
+        shutdown.RequestEnd();
+
+        Assert.Equal(FinishStatus.Published, pc.Coordinator.Supervise(session, _ => Assert.Fail(), CancellationToken.None).Status);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal(2, _store.Generations.Read(1).Snapshot.RowCount("contents"));
+        Assert.Equal(session, Assert.Single(pc.Mount.Starts));
+    }
+
+    [Fact]
+    public void ShutdownCacheCheckAcceptsEmptyDirectoriesAndRefusesCachedFiles()
+    {
+        string cache = _fixture.PathFor("cache");
+        string metadata = Path.Combine(cache, "vfsMeta", "remote", "clips");
+        Directory.CreateDirectory(metadata);
+        Assert.True(AbortedStartRecovery.CacheIsEmptyOrAbsent(cache, allowEmptyDirectories: true));
+        File.WriteAllText(Path.Combine(metadata, "clip.mp4"), "synthetic cache metadata");
+        Assert.False(AbortedStartRecovery.CacheIsEmptyOrAbsent(cache, allowEmptyDirectories: true));
+    }
+
+    [Fact]
     public void ShutdownOfflineKeepsOwnershipAndCache()
     {
         var shutdown = new SessionShutdown(_clock);

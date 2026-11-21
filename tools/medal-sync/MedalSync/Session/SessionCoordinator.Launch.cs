@@ -9,12 +9,38 @@ namespace MedalSync.Session;
 /// <summary>Launch: wait for the library, take ownership, prepare storage and start Medal.</summary>
 internal sealed partial class SessionCoordinator
 {
-    public LaunchOutcome Launch()
+    public LaunchOutcome Launch(bool atSignIn = false)
     {
         Report(SessionPhase.Starting, "Preparing the shared library. Keep Medal closed until startup finishes.");
-        var outcome = LaunchCore();
+        var outcome = LaunchCore(atSignIn);
         ReportLaunch(outcome);
         return outcome;
+    }
+
+    internal static bool CanUseLastSync(OwnershipRecord journal) => journal.State is
+        OwnershipState.Starting or OwnershipState.Active or OwnershipState.Draining or OwnershipState.Publishing
+        && journal.Owner is not null && journal.SessionId is not null
+        && !Platform.PersistentMediaRefresh.IsPending(journal) && !EnrollmentOwnership.IsPending(journal);
+
+    /// <summary>Use the reviewed generation after the user confirms the previous PC is powered off.</summary>
+    public LaunchOutcome UseLastSync(OwnershipRecord reviewed)
+    {
+        if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, ShutdownMessage);
+        if (!CanUseLastSync(reviewed) || reviewed.Owner!.DeviceId == Me.DeviceId || medal.IsRunning())
+            return new LaunchOutcome(LaunchStatus.Blocked, "Open Medal Library again to check who owns the library. The handoff was canceled.");
+        _ = store.Generations.Read(reviewed.CommittedGeneration);
+        try
+        {
+            store.Update(current =>
+            {
+                if (current != reviewed || shutdown?.SuppressUi == true || medal.IsRunning())
+                    throw new OwnershipConflictException("The handoff changed during confirmation. Open Medal Library to check the latest status.");
+                // Exact journal match protects a newer checkpoint or session. This leaves the original PC's work intact.
+                return Ownership.Abandon(current, Me, reviewed.SessionId!, "user confirmed the other PC was powered off", clock.Now);
+            }, options.LockTimeout);
+        }
+        catch (OwnershipConflictException ex) { return new LaunchOutcome(LaunchStatus.Blocked, ex.Message); }
+        return Launch();
     }
 
     /// <summary>
@@ -113,7 +139,7 @@ internal sealed partial class SessionCoordinator
         string request = _waitRequestSent ? ". Medal Sync will try to withdraw this PC's switch request" : ", and this PC could not confirm a switch request";
         return new LaunchOutcome(LaunchStatus.Waiting,
             $"{after}: {where} still has the library{what}. Medal was not started{request}. "
-            + $"Quit Medal on {where}, then open Medal again here.");
+            + $"{Ownership.HandoffAdvice(update.State)} Open Medal again here once the library is Ready.");
     }
 
     /// <summary>Sleeps in short slices so cancellation and shutdown stop the wait promptly. False when stopped.</summary>
@@ -154,6 +180,7 @@ internal sealed partial class SessionCoordinator
         Report(outcome.Status switch
         {
             LaunchStatus.Started or LaunchStatus.AlreadyRunning => SessionPhase.Active,
+            LaunchStatus.RecoveredPreviousSession => SessionPhase.Ready,
             LaunchStatus.Waiting when outcome.StorageOffline => SessionPhase.WaitingForStorage,
             LaunchStatus.Waiting => SessionPhase.Waiting,
             _ => SessionPhase.RecoveryNeeded,
@@ -161,7 +188,7 @@ internal sealed partial class SessionCoordinator
             ? ActiveMessage + (outcome.Warning is { } warning ? " " + warning : "") : outcome.Message, outcome.Session);
     }
 
-    private LaunchOutcome LaunchCore()
+    private LaunchOutcome LaunchCore(bool atSignIn = false)
     {
         if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, ShutdownMessage);
         OwnershipRecord journal;
@@ -183,6 +210,9 @@ internal sealed partial class SessionCoordinator
         {
             var previous = ResolveOwnSession(journal);
             if (previous is not null) return previous;
+            // As with a recovery that had to retry, sign-in finishes the old session without reacquiring the library.
+            if (atSignIn)
+                return new LaunchOutcome(LaunchStatus.RecoveredPreviousSession, "This PC recovered and released its previous session.");
             try { journal = store.ReadJournal(); }
             catch (StorageActionRequiredException ex) { return StorageActionLaunch(ex); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return StorageOfflineLaunch(ex); }
@@ -205,7 +235,8 @@ internal sealed partial class SessionCoordinator
                     StorageOffline: true, Wait: LaunchWait.ServerUnreachable);
             }
             string message = shouldAsk && !asked && !Ownership.IsFinishing(journal.State)
-                ? $"Medal is {Ownership.Describe(journal.State)} on {where}. This PC could not send the switch request because storage is busy. Try again shortly."
+                ? $"{where} still owns the library ({Ownership.Describe(journal.State)}). This PC could not send the switch request because storage is busy. "
+                    + Ownership.HandoffAdvice(journal.State)
                 : OwnedElsewhereMessage(journal.State, where, asked, Ownership.QuietSince(journal, clock.Now));
             return new LaunchOutcome(LaunchStatus.Waiting, message,
                 Wait: LaunchWait.OwnedElsewhere, Journal: journal);
@@ -247,13 +278,11 @@ internal sealed partial class SessionCoordinator
         if (quietSince is { } since) return Ownership.QuietFinishMessage(where, since);
         if (Ownership.IsFinishing(state))
         {
-            return $"{where} is finishing its last session ({Ownership.Describe(state)}). It hands off the library by itself, "
-                + "so nobody needs to quit Medal there; open Medal here once it is Ready.";
+            return $"{where} still owns its last session ({Ownership.Describe(state)}). {Ownership.HandoffAdvice(state)} "
+                + "Open Medal here once the library is Ready.";
         }
-        return asked
-            ? $"Medal is {Ownership.Describe(state)} on {where}. A switch request was sent; quit Medal there and this PC can start."
-            : $"Medal is {Ownership.Describe(state)} on {where}, so Medal Sync did not open it here at sign-in, and {where} was not interrupted. "
-                + $"To switch, quit Medal on {where}, then open Medal here.";
+        string request = asked ? "A switch request was sent." : "This PC is waiting for the library to be released.";
+        return $"{where} still owns the library ({Ownership.Describe(state)}). {request} {Ownership.HandoffAdvice(state)}";
     }
 
     /// <summary>An unreachable server, or one returning a stale journal: either way nothing was acquired.</summary>

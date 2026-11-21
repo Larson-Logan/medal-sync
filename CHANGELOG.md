@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Publish verified library changes while Medal stays open. If Windows shuts down before releasing ownership, a second PC can use the last synced library after confirming the first PC is powered off.
 - Cloud verification keeps its receipts when rclone refreshes an OAuth token (#221).
 - The clip-drive limit now throttles local and SMB write-back. It also caps reads of clips that are not cached (#222).
 - Windows uninstall asks you to restore Medal's startup entries before removing a launcher they still use (#239).

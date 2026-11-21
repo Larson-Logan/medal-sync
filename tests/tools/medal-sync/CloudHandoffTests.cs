@@ -177,10 +177,31 @@ public sealed class CloudHandoffTests : IDisposable
         string partial = fixture.PathFor("drive", "MedalSync", ".medal-sync", LibraryId, "generations", GenerationStore.Name(10));
         Directory.CreateDirectory(partial);
         File.WriteAllText(Path.Combine(partial, "manifest.json"), "incomplete abandoned attempt");
-        store.RefreshGenerationHistory();
+        store.RefreshGenerationNumbers();
         Assert.Equal(11, store.Generations.Next(0));
         Assert.Equal(active, store.ReadJournal());
         Assert.False(store.Generations.Exists(10));
+    }
+
+    [Fact]
+    public void AnotherPcCanReadTheCommittedCloudCheckpointWhileTheOwnerIsActive()
+    {
+        using var drive = new Drive();
+        var first = Seed(drive, Config("first"), Snapshot("seed", "one"));
+        var config = Config("second");
+        var second = CoordinationStore.OpenCloud(config, new CloudCoordination(config, Api(drive), Run));
+        string session = new('2', 32);
+        first.Update(j => Ownership.Acquire(j, First, session, Now), TimeSpan.Zero);
+        first.Update(j => Ownership.MarkActive(j, First, session, Now), TimeSpan.Zero);
+        var snapshot = Snapshot("active-checkpoint", "one", "two");
+        first.Generations.Publish(1, 0, session, First, snapshot, new(1, [], []), Versions, Now);
+        var committed = first.Update(j => Ownership.CommitCheckpoint(j, First, session, 1, Now), TimeSpan.Zero);
+
+        Assert.Equal(committed, second.ReadJournal());
+        Assert.Equal(OwnershipState.Active, committed.State);
+        Assert.Equal(First, committed.Owner);
+        Assert.Equal(snapshot.Digest(), second.Generations.Read(1).Snapshot.Digest());
+        Assert.Throws<OwnershipConflictException>(() => second.Update(j => Ownership.Acquire(j, Second, new string('3', 32), Now), TimeSpan.Zero));
     }
 
     [Theory]

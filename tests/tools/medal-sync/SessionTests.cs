@@ -111,6 +111,10 @@ public sealed partial class SessionTests : IDisposable
 
         public DrainVerdict Steady { get; set; } = new(DrainState.Drained, [], 0, 0);
 
+        public bool EmptyStoppedCache { get; set; }
+
+        public bool StoppedCacheIsEmpty(string session) => !IsRunning && EmptyStoppedCache;
+
         public Action? OnStart { get; set; }
         public Action<string>? OnStarted { get; set; }
 

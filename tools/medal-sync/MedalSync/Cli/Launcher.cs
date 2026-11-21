@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using MedalSync.Config;
+using MedalSync.Coordination;
 using MedalSync.Library;
 using MedalSync.Platform;
 using MedalSync.Session;
@@ -26,14 +27,17 @@ internal interface ILauncherUi
     bool OfferConfiguration(string message) { Show(message); return false; }
 
     /// <summary>
-    /// Another PC owns the library: offer to wait and open Medal when it hands off. Null when declined;
-    /// otherwise a view with a Cancel choice that stays open until it is disposed.
+    /// Another PC owns the library. Offer to wait, recover the last sync if the other PC is off, or cancel.
     /// </summary>
-    IHandoffWaitView? OfferHandoffWait(HandoffWaitOffer offer) { Show(offer.Message); return null; }
+    HandoffChoice OfferHandoffWait(HandoffWaitOffer offer) { Show(offer.Message); return new(); }
 }
 
 /// <summary>An explicit offer to wait for another PC, with the bounded time the wait would last.</summary>
-internal sealed record HandoffWaitOffer(string Message, TimeSpan Timeout);
+internal sealed record HandoffWaitOffer(string Message, TimeSpan Timeout, OwnershipRecord? Recovery = null);
+
+internal sealed record HandoffChoice(IHandoffWaitView? View = null, bool UseLastSync = false);
+
+internal enum HandoffAction { Cancel, Wait, UseLastSync }
 
 /// <summary>
 /// A cancellable view of an explicit handoff wait. Every member is called on the waiting thread. A view that
@@ -190,7 +194,7 @@ internal static partial class Launcher
             bool accepted = ui.ConfirmLibraryChanges(review) && !shutdown.SuppressUi;
             reviewDeclined = !accepted;
             return accepted;
-        }, shutdown, request.AtSignIn ? null : handoff.Offer);
+        }, shutdown, request.AtSignIn ? null : handoff.Offer, atSignIn: request.AtSignIn);
         // Declining is a deliberate cancellation, not another error dialog.
         if (shutdown.SuppressUi) return code;
         if (reviewDeclined || handoff.Settled) return 3;
@@ -213,11 +217,11 @@ internal static partial class Launcher
         /// </summary>
         public bool Settled => _declined || _stopped;
 
-        public IHandoffWaitView? Offer(HandoffWaitOffer offer)
+        public HandoffChoice Offer(HandoffWaitOffer offer)
         {
-            var view = ui.OfferHandoffWait(offer);
-            _declined = view is null;
-            return view is null ? null : new Watched(view, this);
+            var choice = ui.OfferHandoffWait(offer);
+            _declined = choice.View is null && !choice.UseLastSync;
+            return choice.View is { } view ? choice with { View = new Watched(view, this) } : choice;
         }
 
         private sealed class Watched(IHandoffWaitView inner, HandoffOfferTracker owner) : IHandoffWaitView

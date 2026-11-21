@@ -64,6 +64,9 @@ internal interface IClipMount
 
     DrainVerdict Drain();
 
+    /// <summary>True only when the drive is stopped and this session has no cached files.</summary>
+    bool StoppedCacheIsEmpty(string session) => false;
+
     /// <summary>
     /// Applies the configured upload limit for recording, or for finishing uploads after Medal exits.
     /// Null when it is in place; otherwise a notice. Never throws: a limit only changes speed.

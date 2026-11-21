@@ -130,9 +130,8 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
             return new(journal.State == OwnershipState.RecoveryRequired ? SessionPhase.RecoveryNeeded : SessionPhase.Waiting,
                 Ownership.QuietSince(journal, now) is { } since
                     ? Ownership.QuietFinishMessage(owner.DisplayName, since)
-                : Ownership.IsFinishing(journal.State)
-                    ? $"{owner.DisplayName} is finishing its uploads and hands off the library by itself. Open Medal here after it is Ready."
-                    : $"Quit Medal and finish the handoff on {owner.DisplayName}. Reopen Medal here after that PC is Ready.", now);
+                    : $"{owner.DisplayName} still owns the library ({Ownership.Describe(journal.State)}). {Ownership.HandoffAdvice(journal.State)} "
+                        + "Open Medal here once the library is Ready.", now);
         if (journal.State == OwnershipState.Clean)
         {
             // An operation may be preparing to acquire ownership. Never flash Ready during startup.

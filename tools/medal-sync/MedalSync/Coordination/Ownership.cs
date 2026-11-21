@@ -65,6 +65,15 @@ internal static class Ownership
         return Next(current, OwnershipState.Active, device, session, now, null);
     }
 
+    /// <summary>Publishes a verified snapshot while the current session keeps ownership.</summary>
+    public static OwnershipRecord CommitCheckpoint(OwnershipRecord current, DeviceIdentity device, string session, long generation, DateTimeOffset now)
+    {
+        Require(current, device, session, OwnershipState.Active);
+        if (generation <= current.CommittedGeneration)
+            throw new OwnershipConflictException($"Checkpoint {generation} must be newer than generation {current.CommittedGeneration}.");
+        return Next(current, OwnershipState.Active, device, session, now, null) with { CommittedGeneration = generation };
+    }
+
     /// <summary>Gives a session back before Medal ever started. Nothing can have been written.</summary>
     public static OwnershipRecord AbortStart(OwnershipRecord current, DeviceIdentity device, string session, string reason, DateTimeOffset now)
     {
@@ -183,6 +192,19 @@ internal static class Ownership
     /// <summary>Medal was quit on the owning PC and it is uploading: it releases the library by itself, with nobody needing to quit Medal there.</summary>
     public static bool IsFinishing(OwnershipState state) => state is OwnershipState.Draining or OwnershipState.Publishing;
 
+    public static string HandoffAdvice(OwnershipState? state)
+    {
+        string next = state switch
+        {
+            OwnershipState.Draining or OwnershipState.Publishing => "Keep that PC on while it finishes the handoff.",
+            OwnershipState.Active => "If Medal is open there, quit it from its tray icon.",
+            OwnershipState.Starting => "Let startup finish there, then quit Medal to hand off.",
+            OwnershipState.RecoveryRequired => "Finish recovery on that PC.",
+            _ => "Wait for the owning PC to finish the handoff.",
+        };
+        return next + " If that PC is off, asleep or signed out, turn it on and sign in. If needed, use Retry finish there with Medal closed.";
+    }
+
     /// <summary>
     /// A finishing owner normally hands off within minutes. A journal unchanged for this long suggests it was switched off,
     /// slept or signed out before finishing; it finishes at its next sign-in. Only wording changes: nothing is handed over.
@@ -196,8 +218,8 @@ internal static class Ownership
     /// <summary>What a waiting PC says about a quiet finishing owner: where the unuploaded clips are and how the handoff resumes.</summary>
     public static string QuietFinishMessage(string where, DateTimeOffset since) =>
         $"{where} has not handed off the library since {since.UtcDateTime:yyyy-MM-dd HH:mm} UTC. If it is off, asleep or signed out, "
-        + "turn it on and sign in: it finishes its uploads and hands off by itself. Clips it has not uploaded yet are only on that PC, "
-        + "so this PC keeps waiting. Only if that PC is lost for good, see 'medal-sync abandon'.";
+        + "turn it on and sign in. If needed, use Retry finish there with Medal closed. Unuploaded clips are still on that PC. "
+        + "If you know it fully shut down, open Medal Library here and choose Use last synced library.";
 
     public static string Describe(OwnershipState state) => state switch
     {

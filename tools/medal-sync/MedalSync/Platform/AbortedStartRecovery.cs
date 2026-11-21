@@ -34,16 +34,19 @@ internal sealed class AbortedStartRecovery(MedalSyncConfig config, LocalState st
         return $"Orphaned startup login retained at {recovery}. No cache, library or journal was deleted or published. Retry setup readiness.";
     }
 
-    internal static bool CacheIsEmptyOrAbsent(string cache)
+    internal static bool CacheIsEmptyOrAbsent(string cache, bool allowEmptyDirectories = false)
     {
         try
         {
             cache = Path.TrimEndingDirectorySeparator(Path.GetFullPath(cache));
+            if (allowEmptyDirectories)
+                for (var parent = Directory.GetParent(cache); parent is not null; parent = parent.Parent)
+                    if (File.GetAttributes(parent.FullName).HasFlag(FileAttributes.ReparsePoint)) return false;
             try
             {
                 var attributes = File.GetAttributes(cache);
                 return attributes.HasFlag(FileAttributes.Directory) && !attributes.HasFlag(FileAttributes.ReparsePoint)
-                    && !Directory.EnumerateFileSystemEntries(cache).Any();
+                    && (allowEmptyDirectories ? HasNoCachedFiles(cache) : !Directory.EnumerateFileSystemEntries(cache).Any());
             }
             catch (IOException ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
@@ -58,6 +61,17 @@ internal sealed class AbortedStartRecovery(MedalSyncConfig config, LocalState st
         {
             return false;
         }
+    }
+
+    private static bool HasNoCachedFiles(string path)
+    {
+        foreach (string entry in Directory.EnumerateFileSystemEntries(path))
+        {
+            var attributes = File.GetAttributes(entry);
+            if (!attributes.HasFlag(FileAttributes.Directory) || attributes.HasFlag(FileAttributes.ReparsePoint) || !HasNoCachedFiles(entry))
+                return false;
+        }
+        return true;
     }
 
     /// <summary>Its receipt records that its uploads were verified and its generation committed, so its leftovers are safe to remove.</summary>

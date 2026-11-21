@@ -287,6 +287,9 @@ internal sealed partial class SessionCoordinator
         }
         if (!mount.IsRunning)
         {
+            // Windows may already have stopped rclone. An empty cache needs no write-back, and the usual
+            // final library and storage verification still runs before releasing ownership.
+            if (shutdown?.Ending == true && mount.StoppedCacheIsEmpty(session)) return null;
             // After a restart the session's cache may still hold unsent files;
             // the same cache folder resumes them.
             mount.Start(session, forRecording: false);
