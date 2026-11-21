@@ -38,6 +38,23 @@ internal sealed class StartupIntegration(string stateRoot, string launcher, Regi
 
     private string OriginalsPath => Path.Combine(stateRoot, StartupEntries.OriginalsFile);
 
+    /// <summary>Checks live startup entries for this installation before its launcher is removed.</summary>
+    internal void RequireDetachedForUninstall()
+    {
+        using var held = StartupEntries.Lock();
+        using var run = software.OpenSubKey(StartupEntries.RunSubkey);
+        bool runsAtSignIn = run is not null && run.GetValueNames().Any(name =>
+            StartupEntries.StartsLauncherAt(run.GetValue(name) as string, launcher));
+        // Setup removes its own optional "Medal Sync" desktop shortcut.
+        if (runsAtSignIn || StartupEntries.StartsLauncherAt(Protocol(), launcher)
+            || Shortcuts().Any(shortcut => !Path.GetFileName(shortcut).Equals("Medal Sync.lnk", StringComparison.OrdinalIgnoreCase)
+                && StartupEntries.StartsLauncherAt(Target(shortcut), launcher)))
+        {
+            throw new UnsafeOperationException("This installation is still used by Medal's startup entries, links or shortcuts. "
+                + "Turn off Start Medal at sign-in or run 'medal-sync startup --restore' from this installation before uninstalling.");
+        }
+    }
+
     /// <summary>Whether Medal starts through Medal Sync (the originals are saved).</summary>
     public bool Enabled => File.Exists(OriginalsPath);
 

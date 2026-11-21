@@ -10,7 +10,7 @@ namespace MedalSync.Cli;
 /// </summary>
 internal static class CommandRunner
 {
-    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--no-switch-request", "--help", "--new-library", "--spike", "--rollback" };
+    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--no-switch-request", "--help", "--new-library", "--spike", "--rollback", "--uninstall" };
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
@@ -27,7 +27,7 @@ internal static class CommandRunner
 
         Read-only:
           version                                Print the Medal Sync version and supported Medal schema
-          setup check [--state-root DIR] [--out FILE]  Verify readiness for Windows setup; no library changes
+          setup check [--uninstall] [--state-root DIR] [--out FILE]  Verify readiness for Windows setup or removal
           config validate --config FILE          Validate a candidate config without reading Medal or the share
           inspect [--json]                       Inventory of this PC and anything that blocks setup
           compatibility [--json]                 Check installed Medal builds and schema without configuration

@@ -48,9 +48,9 @@ for each mode is described in [library ownership](../architecture/library-owners
 # Clip drive
 
 - `MountPlan` builds the rclone mount command (`mount-plan` shows it), including
-  the upload-only bandwidth limit (`mount.bandwidthLimitMiB`, default 2 MiB/s;
+  the bandwidth limit (`mount.bandwidthLimitMiB`, default 2 MiB/s;
   `mount.finishBandwidthLimitMiB` after Medal exits). The limit is written as
-  `NMi:off` so playback downloads are never slowed. Credentials for the rclone
+  `NMi` so rclone throttles local/SMB write-back and uncached reads. Credentials for the rclone
   control API are passed in the environment, never as arguments.
 - `RcloneClipMount`, `RcloneControl` and `RcloneRunner` start, control and stop
   rclone. `VfsStatus` reads its upload queue.
