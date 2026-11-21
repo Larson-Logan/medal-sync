@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.6.0 — 2026-11-21
+
 - Publish verified library changes while Medal stays open. If Windows shuts down before releasing ownership, a second PC can use the last synced library after confirming the first PC is powered off.
 - Sign in to Google Drive, OneDrive or Dropbox from the configuration wizard (**Cloud sign-in**) and sign in again from the status panel when the storage check reports an expired sign-in, without a terminal. `medal-sync storage sign-in` runs the bundled rclone on a private copy of the credential file and saves it only after the storage check passes; the wizard never saves a configuration whose remote failed (#253).
 - Download clips another PC published into this PC's persistent local copy while it is idle and does not own the library, newest first, so the next launch starts sooner. Files are staged, byte-checked against primary storage and the generation's recorded size, then moved in without replacing anything; input, a launch, Medal, low space or a newer generation stop it. `medal-sync prefetch` previews it; `replication.prefetchWhileIdle: false` turns it off (#254).
