@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add `primary prune` and `primary purge-trash`, a reviewed two-step cleanup of clips deleted in Medal that are still on primary storage (SMB, local or rclone). Files any kept generation references are protected, an unreadable generation refuses the review, apply moves files into a trash folder under the writer lock while every PC is Ready, and an unreachable primary exits 3 (#248).
 - Launch waits when a switch request cannot be sent and ignores Google Drive switch requests dated more than five minutes ahead (#216, #220).
 - Launch and finish tell users when Google Drive sign-in needs attention. `finish` returns exit 3 when it cannot reach the journal. Google Drive rate limits are treated as temporary (#218, #223, #228).
 - The free-space monitor warns again if a disk becomes unreadable after briefly reconnecting (#226).

@@ -69,6 +69,9 @@ internal static class CommandRunner
                                                  Review unreferenced files at an optional cloud copy
           replica prune --in FILE --apply        Move exactly those files to the copy's trash folder
           replica purge-trash --target NAME [--older-than D] [--apply]  Permanently delete old cloud trash
+          primary prune --out FILE [--grace-days N]  Review clips deleted in Medal that are still on primary storage
+          primary prune --in FILE --apply        Move exactly those files to primary storage's trash (every PC Ready)
+          primary purge-trash [--older-than D] [--apply]  Permanently delete old primary-storage trash
           retention --out FILE [--keep N] [--keep-days D] [--grace-days G]
                                                  Review old generations and recovery folders to remove
           retention --in FILE --apply            Remove exactly what that review listed (every PC Ready)
@@ -165,6 +168,8 @@ internal static class CommandRunner
             "replica history" => ReplicaCommands.History(args, output),
             "replica prune" => ReplicaCommands.Prune(args, output),
             "replica purge-trash" => ReplicaCommands.PurgeTrash(args, output),
+            "primary prune" => PrimaryCommands.Prune(args, output),
+            "primary purge-trash" => PrimaryCommands.PurgeTrash(args, output),
             "retention" => RetentionCommands.Run(args, output),
             "enroll" => EnrollmentCommands.Run(args, output),
             "enroll recover" => EnrollmentCommands.Recover(args, output),
