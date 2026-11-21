@@ -12,7 +12,9 @@ internal sealed partial class SessionCoordinator
     /// <summary>Publishes the session after Medal has exited. Safe to call repeatedly.</summary>
     public FinishOutcome Finish(string session)
     {
-        var outcome = FinishAttempt(session);
+        FinishOutcome outcome;
+        // Released on every outcome, including an unexpected exception: Ready, blocked, waiting for storage or pending.
+        using (StayAwake()) outcome = FinishAttempt(session);
         Report(outcome.Status switch
         {
             FinishStatus.Published or FinishStatus.Unchanged => SessionPhase.Ready,

@@ -82,6 +82,18 @@ again. New work after the last idle sync still has to finish. Windows' existing
 offline or verification runs out of time, ownership and cached clips remain
 for automatic recovery at next sign-in on this PC.
 
+While a finish is uploading and verifying, during an idle sync pass and during
+`replicate retry --apply`, Medal Sync asks Windows to keep the system awake, so
+a PC left alone after quitting Medal does not fall asleep on its idle timer
+with clips that exist only in its cache. The display may still turn off, and
+manual sleep, shutdown, lid and battery policies are unchanged. The request
+ends at Ready, on a refusal that needs you, while waiting for storage or
+backing off after a failure, and when Medal opens again. `powercfg /requests`
+shows it under `SYSTEM` while it is held. Set
+[`keepAwakeWhileFinishing`](configuration.md#top-level-fields) to `false` to
+turn it off. If Windows refuses the request, finish continues unchanged and the
+log records it once.
+
 The shared journal and generation formats remain version 1. Older installed
 versions on the other PC continue to ignore uncommitted attempts and wait for
 Clean. They do not perform idle sync themselves. Private verification receipts

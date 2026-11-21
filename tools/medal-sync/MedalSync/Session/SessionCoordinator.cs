@@ -87,7 +87,8 @@ internal sealed partial class SessionCoordinator(
     Func<LaunchPreflight>? preflight = null,
     Func<bool>? isIdle = null,
     Func<LibrarySnapshot, Action, bool>? idleSync = null,
-    Func<Action, IAssetChecker>? idleAssets = null)
+    Func<Action, IAssetChecker>? idleAssets = null,
+    IKeepAwake? keepAwake = null)
 {
     private const string QuitFromTray = "Quit Medal from its tray icon";
     private const string ActiveMessage = "Medal is open. Quit Medal normally from its tray icon when you want to switch PCs.";
@@ -126,6 +127,9 @@ internal sealed partial class SessionCoordinator(
         try { progress?.Invoke(new(phase, action, session, files, bytes, replica, isOutcome, recording, clipsSynced)); }
         catch (Exception) { /* Telemetry is advisory. */ }
     }
+
+    /// <summary>Asks Windows to stay awake for work that blocks a handoff. Never throws.</summary>
+    private IDisposable StayAwake() => KeepAwakeHold.Take(keepAwake);
 
     internal static string NewId() => Guid.NewGuid().ToString("N");
 }

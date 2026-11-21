@@ -99,6 +99,16 @@ Finish reuses an idle checkpoint only when it matches exactly. The SSD cache
 and the session's Medal login are removed only after the generation commits;
 the login first moves to `finished-sessions/SESSION/` with a receipt.[^recovery-rules]
 
+# Keeping the PC awake
+
+`IKeepAwake` (`Platform/KeepAwake.cs` on Windows, a `PowerRequestSystemRequired`
+power request) is held for the whole of each `Finish` call, by the supervisor
+across finish attempts while uploads are still running (`PendingCause.None`),
+during an idle sync transfer and during `replicate retry --apply`. It is
+released on Ready, a refusal, every retry backoff, a reopened Medal and any
+exception. A refused request is logged once and changes nothing else.
+`keepAwakeWhileFinishing: false` disables it.
+
 # Windows shutdown
 
 `SessionShutdown.cs` and `WindowsSessionEnd.cs` give finish Windows' 25-second
