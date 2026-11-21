@@ -11,6 +11,7 @@ internal static class SetupCommands
     {
         string? report = args.Value("--out");
         string? selectedRoot = args.Value("--state-root");
+        bool uninstall = args.Flag("--uninstall");
         args.RequireAllUsed();
         string root = selectedRoot is null ? ManagedStateRoot() : Path.GetFullPath(selectedRoot);
         string message;
@@ -18,7 +19,13 @@ internal static class SetupCommands
         try
         {
             SetupMaintenance.RequireReady(root, SetupMaintenance.RunningApplication(), SessionCommands.AnotherInstanceRunning());
-            message = "Ready for program installation. Existing user settings and library data will be preserved.";
+            if (uninstall)
+            {
+                using var startup = StartupIntegration.ForCurrentUser(root, Path.Combine(AppContext.BaseDirectory, StartupEntries.LauncherFile));
+                startup.RequireDetachedForUninstall();
+            }
+            message = uninstall ? "Ready for program removal. Existing user settings and library data will be preserved."
+                : "Ready for program installation. Existing user settings and library data will be preserved.";
             result = 0;
         }
         catch (Exception ex) when (ex is MedalSyncException or IOException or InvalidDataException or UnauthorizedAccessException)
