@@ -59,11 +59,70 @@ internal static class Program
             {
                 TestTwoPcMountRoundTrip(rclone);
                 TestTwoPcMountRoundTrip(rclone, localOnly: true);
+                TestReplayBufferHold(rclone);
             }
             Console.WriteLine($"PASS: {_checks} real-process storage integration assertions; all data was synthetic.");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
+    /// <summary>
+    /// Server mode without a local copy, with the replay-buffer hold: a held segment never uploads, a deleted segment
+    /// leaves the queue, a saved clip uploads after the normal delay, and releasing everything drains as before.
+    /// </summary>
+    private static void TestReplayBufferHold(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        char letter = Enumerable.Range('D', 'Z' - 'D' + 1).Select(c => (char)c).Reverse().First(c =>
+            !Directory.Exists(c + @":\") && !DriveInfo.GetDrives().Any(d => d.Name.StartsWith(c + ":", StringComparison.OrdinalIgnoreCase)));
+        var config = Config(fixture, rclone, letter + @":\Clips") with { StorageMode = StorageMode.Server };
+        config = config with { Mount = config.Mount with { RecordingBufferHoldSeconds = 120 } };
+        Seed(config);
+        var state = new LocalState(fixture.PathFor("state"));
+        var mount = new RcloneClipMount(config, state, .01, new SystemClock());
+        string session = SessionCoordinator.NewId();
+        bool stopped = false;
+        try
+        {
+            mount.Start(session, forRecording: true);
+            string buffer = config.Capture.Append("Temp", "RecordingBuffer").Display;
+            Directory.CreateDirectory(buffer);
+            File.WriteAllText(Path.Combine(buffer, "held-segment.bin"), "synthetic held replay segment");
+            File.WriteAllText(Path.Combine(buffer, "deleted-segment.bin"), "synthetic deleted replay segment");
+            File.WriteAllText(config.Capture.Append("saved.mp4").Display, "synthetic saved clip");
+            Thread.Sleep(TimeSpan.FromSeconds(2));
+            File.Delete(Path.Combine(buffer, "deleted-segment.bin"));
+            string server(params string[] parts) => config.ServerCapture.Append(parts).Display;
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (!File.Exists(server("saved.mp4")) && DateTime.UtcNow < deadline)
+            {
+                Check(mount.ReleaseUploads(includeBuffer: false) is null, "releasing saved clips through the real control API works");
+                Thread.Sleep(500);
+            }
+            Check(File.Exists(server("saved.mp4")) && File.ReadAllText(server("saved.mp4")) == "synthetic saved clip",
+                "a saved clip uploads after the normal delay while the replay buffer is held");
+            var queue = mount.Drain();
+            Check(queue.State == DrainState.Pending && queue.Uploads.Count == 1 && queue.Uploads[0].Name?.EndsWith("held-segment.bin", StringComparison.Ordinal) == true
+                && !queue.Uploads[0].Uploading, "only the held segment waits in the real upload queue, and it is not uploading");
+            Check(!File.Exists(server("Temp", "RecordingBuffer", "held-segment.bin")) && !File.Exists(server("Temp", "RecordingBuffer", "deleted-segment.bin")),
+                "neither a held nor a deleted replay-buffer segment reaches primary storage");
+            deadline = DateTime.UtcNow.AddSeconds(30);
+            while (mount.Drain().State != DrainState.Drained && DateTime.UtcNow < deadline)
+            {
+                mount.ReleaseUploads(includeBuffer: true);
+                Thread.Sleep(500);
+            }
+            Check(mount.Drain().State == DrainState.Drained && File.Exists(server("Temp", "RecordingBuffer", "held-segment.bin"))
+                && !File.Exists(server("Temp", "RecordingBuffer", "deleted-segment.bin")),
+                "releasing everything at finish drains the queue exactly as without the hold");
+            stopped = mount.Stop();
+            Check(stopped, "the held drive stops normally");
+        }
+        finally
+        {
+            if (!stopped && mount.IsRunning && !mount.Stop()) Console.Error.WriteLine("Synthetic mount did not stop; retaining test evidence at " + fixture.Root);
+        }
     }
 
     private static int ProbeUpdateProgress()

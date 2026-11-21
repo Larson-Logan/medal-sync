@@ -143,6 +143,9 @@ internal sealed partial class SessionCoordinator
                     // Also restores the recording limit if Medal reopened while uploads were finishing.
                     if (mount.UseUploadLimit(recording: true) is { } limitProblem) Once(limitProblem);
                     bool recording = IsRecording();
+                    // While a game records, saved clips upload after the usual delay and buffer segments stay here
+                    // until Medal deletes them. Otherwise everything uploads, as it would without the hold.
+                    if (ReleaseUploads(includeBuffer: !recording) is { } holdProblem) Once(holdProblem);
                     SyncWhileIdle(session, recording, cancellation);
                     if (shutdown?.Ending == true || !medal.IsRunning()) continue;
                     Report(SessionPhase.Active, ActiveStatus(recording, waiting) + (idleSync is null ? "" : " " + _idleStatus), session,
