@@ -155,6 +155,20 @@ public sealed partial class SessionTests : IDisposable
             return UploadLimitProblem;
         }
 
+        /// <summary>Each release request, in order: whether the replay buffer was included.</summary>
+        public List<bool> Releases { get; } = [];
+
+        public string? ReleaseProblem { get; set; }
+
+        public bool ReleaseThrows { get; set; }
+
+        public string? ReleaseUploads(bool includeBuffer)
+        {
+            if (ReleaseThrows) throw new IOException("Synthetic control failure.");
+            Releases.Add(includeBuffer);
+            return ReleaseProblem;
+        }
+
         public bool Stop()
         {
             if (StopThrows) throw new IOException("Synthetic mount stop failure.");
@@ -231,7 +245,7 @@ public sealed partial class SessionTests : IDisposable
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null, IStorageReplication? replication = null,
         ISessionCompatibility? compatibility = null, Action<SessionProgress>? progress = null, SpacePressureMonitor? space = null,
         Func<LaunchPreflight>? preflight = null, string? enrollmentFolder = null, bool askOwnerToSwitch = true,
-        Func<bool>? isIdle = null, Func<LibrarySnapshot, Action, bool>? idleSync = null)
+        Func<bool>? isIdle = null, Func<LibrarySnapshot, Action, bool>? idleSync = null, IKeepAwake? keepAwake = null)
     {
         string db = database ?? _fixture.CreateLibrary(machine);
         var medal = new FakeMedal();
@@ -243,7 +257,7 @@ public sealed partial class SessionTests : IDisposable
             AskOwnerToSwitch = askOwnerToSwitch,
         };
         var library = new SqliteLocalLibrary(db, MedalFixture.AccountId, _fixture.PathFor(machine, "backups"), _clock);
-        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space, preflight, isIdle, idleSync));
+        return new Pc(db, medal, mount, new SessionCoordinator(_store, library, mount, medal, _assets, _clock, options, prepareNativeBackup, reviewLibraryChanges, shutdown, replication, compatibility, progress, space, preflight, isIdle, idleSync, keepAwake: keepAwake));
     }
 
     private void Record(Pc pc, string id)

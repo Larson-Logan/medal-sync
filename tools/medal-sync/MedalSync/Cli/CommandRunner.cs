@@ -15,7 +15,7 @@ internal static class CommandRunner
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
         "--from", "--to", "--limit", "--before", "--wait-for-server", "--wait-for-handoff", "--state-root", "--medal-link",
-        "--local-copy-root", "--cloud-remote", "--rclone-config",
+        "--local-copy-root", "--cloud-remote", "--rclone-config", "--provider",
         "--storage-mode", "--cloud-journal-id", "--device-label",
         "--replica-conflicts",
         "--grace-days", "--history-older-than", "--older-than", "--keep", "--keep-days",
@@ -61,14 +61,22 @@ internal static class CommandRunner
                                                  Preview/create a config; never overwrite an existing file
           init [--apply]                         Create the shared library from this PC (generation 0)
           storage init-primary [--apply]         Mark an empty primary folder or rclone remote for this library
+          storage sign-in --remote NAME [--provider drive|onedrive|dropbox] [--rclone-config FILE]
+                                                 Sign in to a cloud provider in the browser, or sign in again;
+                                                 saves only after the storage check passes
           storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]
                                                  Allocate a Google Drive journal ID for a new cloud library; creates no file
           replicate retry [--target NAME] [--apply]  Preview/retry pending optional cloud copies while Ready
+          prefetch [--apply]                     Preview/download clips another PC published into this PC's
+                                                 persistent local copy while idle; never takes ownership
           replica verify [--target NAME] [--apply]  Preview/read back cloud copies while Ready; never copies or deletes
           replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]
                                                  Review unreferenced files at an optional cloud copy
           replica prune --in FILE --apply        Move exactly those files to the copy's trash folder
           replica purge-trash --target NAME [--older-than D] [--apply]  Permanently delete old cloud trash
+          primary prune --out FILE [--grace-days N]  Review clips deleted in Medal that are still on primary storage
+          primary prune --in FILE --apply        Move exactly those files to primary storage's trash (every PC Ready)
+          primary purge-trash [--older-than D] [--apply]  Permanently delete old primary-storage trash
           retention --out FILE [--keep N] [--keep-days D] [--grace-days G]
                                                  Review old generations and recovery folders to remove
           retention --in FILE --apply            Remove exactly what that review listed (every PC Ready)
@@ -161,11 +169,15 @@ internal static class CommandRunner
             "storage init-primary" => SessionCommands.InitPrimary(args, output),
             "storage check" => SessionCommands.CheckStorage(args, output),
             "storage cloud-id" => SessionCommands.CloudId(args, output),
+            "storage sign-in" => SignInCommands.Run(args, output),
             "replicate retry" => ReplicationCommands.Retry(args, output),
+            "prefetch" => PrefetchCommands.Run(args, output),
             "replica verify" => ReplicaCommands.Verify(args, output),
             "replica history" => ReplicaCommands.History(args, output),
             "replica prune" => ReplicaCommands.Prune(args, output),
             "replica purge-trash" => ReplicaCommands.PurgeTrash(args, output),
+            "primary prune" => PrimaryCommands.Prune(args, output),
+            "primary purge-trash" => PrimaryCommands.PurgeTrash(args, output),
             "retention" => RetentionCommands.Run(args, output),
             "enroll" => EnrollmentCommands.Run(args, output),
             "enroll recover" => EnrollmentCommands.Recover(args, output),

@@ -224,7 +224,20 @@ keeping a name without a prefix keeps its saved requirement. Review lists each
 requirement and calls out changed requirements and added or removed targets.
 Local mode needs no persistent-copy field because its primary storage
 already stays on this PC. Cloud credentials remain in the separate local rclone
-configuration file; authorize providers explicitly with `rclone config` first.
+configuration file. To create one without a terminal, choose the provider
+(Google Drive, OneDrive or Dropbox) and a remote name in **Cloud sign-in**, then
+**Sign in**: the provider's page opens in your browser, and after you sign in
+Medal Sync runs the storage check for that remote. Only a passing check saves
+the sign-in, into the **Provider credential file** you chose or, when that is
+empty, into a private file in Medal Sync's state folder, which then fills the
+field. Medal Sync never sees, shows or logs the token. A cancelled or failed
+sign-in leaves the credential file unchanged, and the wizard refuses to save a
+configuration that uses a remote whose sign-in failed. Sign-in is unavailable
+while a session runs on this PC, because rclone's sign-in page needs its local
+port. For Google Drive, consider
+[your own OAuth client](https://rclone.org/drive/#making-your-own-client-id); a
+client left in *Testing* status expires every sign-in after seven days. The
+documented `rclone config` flow keeps working.
 
 Create the dedicated storage, coordination and cache folders before reviewing.
 The wizard checks path rules, Medal compatibility/account, folder availability,
@@ -385,7 +398,22 @@ message also appears in the panel instead of a dialog that would take focus.
 
 The panel and tray menu support keyboard access and native accessibility APIs.
 Background notices are coalesced in the panel without popups or taking focus
-from games. Closing the panel hides it. To exit Medal Sync, quit Medal normally,
+from games.
+
+The status app also shows a Windows notification at three moments, once each
+time the state changes: when this PC's finish reaches **Ready** ("Your clips are
+uploaded and verified. You can switch PCs."), when a finish stops and needs you
+(with the same reason the panel shows), and when a cloud copy or a cloud sign-in
+check starts needing attention. Waiting for storage never notifies, because it
+resolves by itself, and nothing is shown for the state the app finds when it
+starts. Clicking a notification opens the status panel; it offers no action of
+its own. Turn them off or on again with **Show notifications** in the tray menu.
+This is saved on this PC in `desktop-preferences.json`, apart from
+`config.json`, so changing it never disturbs a running finish. Windows Focus
+Assist and notification settings still apply, and a notification that cannot be
+shown changes nothing else.
+
+Closing the panel hides it. To exit Medal Sync, quit Medal normally,
 wait for Ready, then choose **Exit Medal Sync** in the panel or tray menu.
 Exit keeps the view open with guidance while supervision or a library operation
 is active. Reopen status at any time. Setup and uninstall require all Medal Sync

@@ -40,10 +40,19 @@ internal static class Program
         }
         bool operationRunning = true;
         bool failStart = true;
+        var signIns = new List<string>();
+        bool prefetchDue = false;
+        int prefetches = 0;
+        var notifications = new List<DesktopNotification>();
+        var savedNotifications = new List<bool>();
         using var view = new WindowsTrayStatus(true, Read, @"Local\MedalSync.DesktopTest." + Guid.NewGuid().ToString("N"),
             () => { finishes++; return Task.FromResult(finishResult); }, () => operationRunning,
             () => { cloudRetries++; return cloudRetryTask; },
-            _ => { if (failStart) throw new System.ComponentModel.Win32Exception(); });
+            _ => { if (failStart) throw new System.ComponentModel.Win32Exception(); },
+            notifications.Add, () => true, savedNotifications.Add,
+            () => prefetchDue, () => { prefetches++; return null; },
+            remote => { signIns.Add(remote); return Task.FromResult(new CloudRetryCommandResult(0, "", "")); });
+
         var panel = Field<Form>(view, "_panel");
         var status = Field<TextBox>(view, "_status");
         var retry = Field<Button>(view, "_retry");
@@ -64,16 +73,50 @@ internal static class Program
             Check(ReferenceEquals(icon.Icon, icons.For(phase, recording: false)), "The tray shows the Medal Sync icon with this state's dot");
             Check(icon.Text == "Medal Sync: " + new DesktopStatus(phase, "", null).Title, "The tooltip names the state, so color is never the only cue");
         }
+        Check(notifications.Count == 1 && notifications[0].Kind == DesktopNotificationKind.Ready
+            && notifications[0].Message == DesktopNotifier.ReadyMessage, "Ready after this PC's finish notifies exactly once");
         lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
         Until(view, () => status.Text.Contains("Next action: Synthetic recording\r\n", StringComparison.Ordinal));
         Check(icon.Text == "Medal Sync: Recording" && ReferenceEquals(icon.Icon, icons.For(SessionPhase.Active)), "Only a recording session shows the red recording dot");
+        Check(prefetches == 0, "Background prefetch never starts before its first interval or while not due");
+        SetField(view, "_nextPrefetch", DateTime.MinValue);
+        prefetchDue = true;
+        Until(view, () => true);
+        Check(prefetches == 0, "Background prefetch never starts while this PC holds an active session");
+        lock (gate) current = new(SessionPhase.Waiting, "Synthetic other PC", DateTimeOffset.UtcNow);
+        Until(view, () => prefetches == 1);
+        Until(view, () => status.Text.Contains("Synthetic other PC", StringComparison.Ordinal));
+        Check(prefetches == 1, "An idle PC starts one background prefetch per interval while another PC holds the library");
+        prefetchDue = false;
+        // Back to this PC's own session: Waiting above told the notifier that nothing of this PC's is finishing.
+        lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
+        Until(view, () => status.Text.Contains("Next action: Synthetic recording\r\n", StringComparison.Ordinal));
         Check(!ReferenceEquals(icons.For(SessionPhase.Active, recording: false), icons.For(SessionPhase.Active)), "Medal open without a game has its own dot");
         CheckIcons(icons, panel);
+        var signInAgain = Field<Button>(view, "_signInAgain");
+        lock (gate) current = new(SessionPhase.Active, "Synthetic open session", DateTimeOffset.UtcNow) { SignInRemote = "gdrive" };
+        Until(view, () => status.Text.Contains("Synthetic open session", StringComparison.Ordinal));
+        Check(signInAgain.Visible && !signInAgain.Enabled && status.Text.Contains("once Medal is quit", StringComparison.Ordinal),
+            "Sign in again waits for the session to finish and says why");
+        lock (gate) current = new(SessionPhase.Ready, "Synthetic expired sign-in", DateTimeOffset.UtcNow) { SignInRemote = "gdrive" };
+        Until(view, () => signInAgain.Enabled);
+        signInAgain.PerformClick();
+        Until(view, () => status.Text.Contains("Signed in again", StringComparison.Ordinal));
+        Check(signIns.SequenceEqual(["gdrive"]), "Sign in again reconnects exactly the remote the storage check named");
+        lock (gate) current = new(SessionPhase.Ready, "Synthetic signed in", DateTimeOffset.UtcNow);
+        Until(view, () => !signInAgain.Visible);
+        Check(notifications.Count == 2 && notifications[1].Kind == DesktopNotificationKind.Ready,
+            "The open session's Ready after signing in again notifies once, like any finish");
+        // Back to this PC's own session, so the next refusal is this PC's finish needing the user.
+        lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
+        Until(view, () => status.Text.Contains("Synthetic recording", StringComparison.Ordinal));
         Check(status.ReadOnly && status.TabStop && status.AccessibleName!.Contains("next action", StringComparison.Ordinal), "Status supports keyboard and accessibility APIs");
         Check(panel.CancelButton is Button, "Escape closes the panel");
         Check(icon.BalloonTipText.Length == 0, "Background status never shows a balloon");
         lock (gate) current = new(SessionPhase.RecoveryNeeded, "Retry after recovery", DateTimeOffset.UtcNow, CanRetry: true);
         Until(view, () => retry.Enabled);
+        Check(notifications.Count == 3 && notifications[2].Kind == DesktopNotificationKind.NeedsAction
+            && notifications[2].Message.StartsWith("Retry after recovery", StringComparison.Ordinal), "A finish that needs the user notifies with the panel's text");
         retry.PerformClick();
         Until(view, () => status.Text.Contains("Run audit and repair before retrying.", StringComparison.Ordinal) && retry.Enabled);
         Check(finishes == 1, "A blocked finish exposes its diagnostic and required recovery action");
@@ -81,11 +124,16 @@ internal static class Program
         retry.PerformClick();
         Until(view, () => !status.Text.Contains("Last finish result:", StringComparison.Ordinal));
         Check(finishes == 2, "A successful retry clears the previous refusal");
+        var notify = icon.ContextMenuStrip!.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Show &notifications");
+        notify.PerformClick();
+        Check(savedNotifications.SequenceEqual([false]), "The tray toggle saves turning notifications off");
+        int shown = notifications.Count;
         lock (gate) disconnected = true;
         Until(view, () => status.Text.StartsWith("Unknown / unreachable", StringComparison.Ordinal) && !retry.Enabled);
         Check(status.Text.Contains("Last confirmed:", StringComparison.Ordinal), "Disconnect retains the last confirmation");
         lock (gate) { disconnected = false; current = new(SessionPhase.Ready, "Synthetic handoff completed", DateTimeOffset.UtcNow); }
         Until(view, () => status.Text.StartsWith("Ready\r\n", StringComparison.Ordinal));
+        Check(notifications.Count == shown, "Turned-off notifications stay quiet while the panel still updates");
         lock (gate) current = current with { ConfirmedAt = DateTimeOffset.UtcNow.AddMinutes(-1) };
         Until(view, () => status.Text.StartsWith("Unknown / unreachable", StringComparison.Ordinal));
         int before = reads;
@@ -189,6 +237,8 @@ internal static class Program
         }
     }
 
+    private static void SetField(object view, string name, object value) =>
+        view.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(view, value);
     private static T Field<T>(object view, string name) => (T)view.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(view)!;
     [DllImport("user32.dll", ExactSpelling = true)]
     private static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);

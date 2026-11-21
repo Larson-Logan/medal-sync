@@ -38,6 +38,20 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private string? _finishFailure;
     private string? _exitFailure;
     private string? _actionFailure;
+    private readonly Button _signInAgain;
+    private readonly Func<string, Task<CloudRetryCommandResult>> _runSignIn;
+    private bool _signingIn;
+    private string? _signInResult;
+    private static readonly TimeSpan PrefetchInterval = TimeSpan.FromMinutes(10);
+    private readonly Func<bool> _prefetchDue;
+    private readonly Func<Process?> _startPrefetch;
+    private readonly Platform.WindowsIdle _idle = new();
+    private Process? _prefetch;
+    private DateTime _nextPrefetch = DateTime.UtcNow + TimeSpan.FromMinutes(1);
+    private readonly DesktopNotifier _notifier = new();
+    private readonly Action<DesktopNotification> _showNotification;
+    private readonly Action<bool> _saveNotifications;
+    private bool _notifications;
 
     public static int Run(bool show)
     {
@@ -92,8 +106,14 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 
     internal WindowsTrayStatus(bool show, Func<DesktopStatus>? readStatus = null, string eventName = OpenEventName,
         Func<Task<FinishCommandResult>>? runFinish = null, Func<bool>? operationRunning = null,
-        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null, Action<ProcessStartInfo>? startProcess = null)
+        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null, Action<ProcessStartInfo>? startProcess = null,
+        Action<DesktopNotification>? showNotification = null, Func<bool>? readNotifications = null, Action<bool>? saveNotifications = null,
+        Func<bool>? prefetchDue = null, Func<Process?>? startPrefetch = null,
+        Func<string, Task<CloudRetryCommandResult>>? runSignIn = null)
     {
+        _runSignIn = runSignIn ?? RunSignIn;
+        _prefetchDue = prefetchDue ?? (() => PrefetchEnabled() && _idle.IsIdle());
+        _startPrefetch = startPrefetch ?? StartPrefetch;
         _readStatus = readStatus ?? SessionCommands.ReadDesktopStatus;
         _runFinish = runFinish ?? RunFinish;
         _runCloudRetry = runCloudRetry ?? RunCloudRetry;
@@ -101,6 +121,9 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         _open = new EventWaitHandle(false, EventResetMode.AutoReset, eventName);
         _exit = new EventWaitHandle(false, EventResetMode.AutoReset, eventName + ".Exit");
         _operationRunning = operationRunning ?? SessionCommands.AnotherInstanceRunning;
+        _showNotification = showNotification ?? ShowBalloon;
+        _saveNotifications = saveNotifications ?? SaveNotifications;
+        _notifications = (readNotifications ?? ReadNotifications)();
         _icons = new AppIcons();
         _panel = new StatusForm(() => _ending = true)
         {
@@ -126,6 +149,9 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         _retryCloud = new Button { Text = "Retry &cloud copies", AccessibleName = "Retry pending cloud copies while Ready", AutoSize = true, Enabled = false };
         _retryCloud.Click += async (_, _) => await RetryCloudCopies();
         buttons.Controls.Add(_retryCloud);
+        _signInAgain = new Button { Text = "Sign &in again", AccessibleName = "Sign in to cloud storage again in your browser", AutoSize = true, Visible = false, Enabled = false };
+        _signInAgain.Click += async (_, _) => await SignInAgain();
+        buttons.Controls.Add(_signInAgain);
         var guide = new Button { Text = "Setup &guide", AutoSize = true };
         guide.Click += (_, _) => OpenGuide();
         buttons.Controls.Add(guide);
@@ -159,9 +185,14 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         signIn.Click += (_, _) => ToggleSignIn();
         menu.Opening += (_, _) => signIn.Checked = SignInEnabled();
         menu.Items.Add(signIn);
+        var notifications = new ToolStripMenuItem("Show &notifications") { CheckOnClick = false };
+        notifications.Click += (_, _) => ToggleNotifications();
+        menu.Opening += (_, _) => notifications.Checked = _notifications;
+        menu.Items.Add(notifications);
         menu.Items.Add("E&xit Medal Sync", null, (_, _) => TryExit());
         _icon = new NotifyIcon { Icon = _icons.For(SessionPhase.Unknown), Text = "Medal Sync: Unknown", Visible = true, ContextMenuStrip = menu };
         _icon.DoubleClick += (_, _) => ShowPanel();
+        _icon.BalloonTipClicked += (_, _) => ShowPanel();
         _timer = new System.Windows.Forms.Timer { Interval = 1000 };
         _timer.Tick += (_, _) => Poll();
         _timer.Start();
@@ -178,6 +209,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         {
             _last = _read.IsCompletedSuccessfully ? _read.Result : DesktopStatus.Unknown(_last.ConfirmedAt);
             _read = null;
+            // Once per completed read, never per tick: the notifier only reacts to a changed state.
+            Notify(_last.At(DateTimeOffset.UtcNow));
         }
         // At most one read: a hung SMB connection cannot accumulate workers or block the UI. Each read loads the
         // configuration and reaches the share, so it runs every second only while the panel is open. The supervisor's
@@ -191,13 +224,112 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         var status = _last.At(DateTimeOffset.UtcNow);
         if (status.Phase is SessionPhase.Ready or SessionPhase.Active or SessionPhase.Waiting) _finishFailure = null;
         if (status.Phase == SessionPhase.Ready && !_finishing && !_retryingCloud) _exitFailure = null;
+        MaybePrefetch(status);
         _retry.Enabled = !_finishing && !_retryingCloud && status.CanRetry;
         _retryCloud.Enabled = !_finishing && !_retryingCloud && status.Phase == SessionPhase.Ready && status.CanRetryCloudCopies;
+        _signInAgain.Visible = status.SignInRemote is not null || _signingIn;
+        _signInAgain.Enabled = !_signingIn && !_finishing && !_retryingCloud && CanSignIn(status);
         _icon.Text = "Medal Sync: " + status.Title;
         var icon = _icons.For(status.Phase, status.Recording);
         if (!ReferenceEquals(_icon.Icon, icon)) _icon.Icon = icon;
         RenderStatus(status);
     }
+
+    /// <summary>
+    /// Every ten minutes while this PC is idle and Ready, or another PC holds the library, start the background
+    /// prefetch. It stops by itself on input, Medal starting, a launch, shutdown or low space; nothing else waits on it.
+    /// </summary>
+    private void MaybePrefetch(DesktopStatus status)
+    {
+        if (_prefetch is { } running)
+        {
+            bool exited;
+            try { exited = running.HasExited; }
+            catch (InvalidOperationException) { exited = true; }
+            if (!exited) return;
+            running.Dispose();
+            _prefetch = null;
+        }
+        var now = DateTime.UtcNow;
+        if (_ending || _finishing || _retryingCloud || now < _nextPrefetch || status.Phase is not (SessionPhase.Ready or SessionPhase.Waiting)) return;
+        _nextPrefetch = now + PrefetchInterval;
+        try
+        {
+            if (!_prefetchDue()) return;
+            _prefetch = _startPrefetch();
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException
+            or InvalidDataException or MedalSyncException) { /* Advisory: launch downloads what it needs. */ }
+    }
+
+    private static bool PrefetchEnabled() => Platform.MediaPrefetch.Enabled(Config.MedalSyncConfig.Load(LocalState.ForCurrentUser().ConfigPath));
+
+    private static Process? StartPrefetch()
+    {
+        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "medal-sync.exe"))
+            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = false, RedirectStandardError = false };
+        start.ArgumentList.Add("prefetch");
+        start.ArgumentList.Add("--apply");
+        var process = Process.Start(start);
+        try { if (process is not null) process.PriorityClass = ProcessPriorityClass.Idle; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* Its downloads already run at low priority. */ }
+        return process;
+    }
+
+    /// <summary>Exit and shutdown end a running prefetch; it keeps nothing partial in the local copy.</summary>
+    private void StopPrefetch()
+    {
+        if (_prefetch is not { } running) return;
+        try { if (!running.HasExited) running.Kill(entireProcessTree: true); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* Already gone. */ }
+        running.Dispose();
+        _prefetch = null;
+    }
+
+    /// <summary>Advisory: a notification that cannot be shown (Focus Assist, notifications off in Windows) changes nothing.</summary>
+    private void Notify(DesktopStatus status)
+    {
+        var notification = _notifier.Observe(status);
+        if (notification is null || !_notifications || _ending) return;
+        try { _showNotification(notification); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ArgumentException) { /* Advisory only. */ }
+    }
+
+    private void ShowBalloon(DesktopNotification notification)
+    {
+        // Windows shows a balloon as a toast; clicking it opens this panel, which offers only the existing actions.
+        const int Limit = 255;
+        string message = notification.Message.Length <= Limit ? notification.Message : notification.Message[..(Limit - 1)] + "…";
+        _icon.ShowBalloonTip(10_000, notification.Title, message,
+            notification.Kind == DesktopNotificationKind.Ready ? ToolTipIcon.Info : ToolTipIcon.Warning);
+    }
+
+    private void ToggleNotifications()
+    {
+        if (_ending) return;
+        bool next = !_notifications;
+        try
+        {
+            _saveNotifications(next);
+            _notifications = next;
+            _actionFailure = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _actionFailure = "The notification setting could not be saved. Try again from the tray menu.";
+            ShowPanel();
+        }
+        RenderStatus(_last.At(DateTimeOffset.UtcNow));
+    }
+
+    private static bool ReadNotifications()
+    {
+        try { return DesktopPreferences.Read(LocalState.ForCurrentUser()).Notifications; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or MedalSyncException) { return true; }
+    }
+
+    private static void SaveNotifications(bool on) =>
+        (DesktopPreferences.Read(LocalState.ForCurrentUser()) with { Notifications = on }).Save(LocalState.ForCurrentUser());
 
     private void RenderStatus(DesktopStatus status)
     {
@@ -210,6 +342,10 @@ internal sealed class WindowsTrayStatus : ApplicationContext
             + (lastResult is null ? "" : $"\r\n\r\nLast finish result: {lastResult}")
             + (_retryingCloud ? "\r\n\r\nCloud retry: Running. Unfinished copies remain pending."
                 : _cloudRetryResult is null ? "" : $"\r\n\r\nLast cloud retry result: {_cloudRetryResult}")
+            + (_signingIn ? "\r\n\r\nSign-in: finish signing in in your browser. The credential file changes only after a storage check passes."
+                : _signInResult is not null ? $"\r\n\r\nSign-in: {_signInResult}"
+                : status.SignInRemote is not null && !CanSignIn(status) ? "\r\n\r\nSign in again is available once Medal is quit and this PC's session has finished."
+                : "")
             + (_exitFailure is null ? "" : $"\r\n\r\nExit: {_exitFailure}")
             + (_actionFailure is null ? "" : $"\r\n\r\n{_actionFailure}")
             + (status.Notice is null ? "" : $"\r\n\r\nLatest notice: {status.Notice}");
@@ -277,6 +413,37 @@ internal sealed class WindowsTrayStatus : ApplicationContext
             _cloudRetryResult = "Could not start cloud retry. Copies remain pending; check the installation and retry while Ready.";
         }
         finally { _retryingCloud = false; _nextRead = default; }
+    }
+
+    /// <summary>rclone's sign-in page needs its local port and a stable credential file, so no session may run here.</summary>
+    private static bool CanSignIn(DesktopStatus status) => status.SignInRemote is not null && status.Phase is SessionPhase.Ready or SessionPhase.Waiting;
+
+    private async Task SignInAgain()
+    {
+        var status = _last.At(DateTimeOffset.UtcNow);
+        if (_ending || _signingIn || _finishing || _retryingCloud || !CanSignIn(status)) return;
+        _signingIn = true;
+        _signInResult = null;
+        _signInAgain.Enabled = false;
+        RenderStatus(status);
+        try
+        {
+            var result = await _runSignIn(status.SignInRemote!);
+            _signInResult = result.ExitCode == 0
+                ? "Signed in again; the storage check passed."
+                : "Not signed in. " + (string.IsNullOrWhiteSpace(result.Error) ? result.Output.Trim() : result.Error.Trim());
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
+        {
+            _signInResult = "Sign-in could not start. Check the installation and try again.";
+        }
+        finally { _signingIn = false; _nextRead = default; }
+    }
+
+    private static async Task<CloudRetryCommandResult> RunSignIn(string remote)
+    {
+        var result = await RunCommand("storage", "sign-in", "--remote", remote);
+        return new(result.ExitCode, result.Output, result.Error);
     }
 
     private static async Task<CloudRetryCommandResult> RunCloudRetry()
@@ -369,6 +536,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     protected override void ExitThreadCore()
     {
         _ending = true;
+        StopPrefetch();
         _timer.Stop();
         _icon.Visible = false;
         _panel.Close();

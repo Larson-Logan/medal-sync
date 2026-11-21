@@ -12,7 +12,9 @@ internal sealed partial class SessionCoordinator
     /// <summary>Publishes the session after Medal has exited. Safe to call repeatedly.</summary>
     public FinishOutcome Finish(string session)
     {
-        var outcome = FinishAttempt(session);
+        FinishOutcome outcome;
+        // Released on every outcome, including an unexpected exception: Ready, blocked, waiting for storage or pending.
+        using (StayAwake()) outcome = FinishAttempt(session);
         Report(outcome.Status switch
         {
             FinishStatus.Published or FinishStatus.Unchanged => SessionPhase.Ready,
@@ -301,6 +303,8 @@ internal sealed partial class SessionCoordinator
         {
             shutdown?.RequireTime();
             if (Reopened(session) is { } reopened) return reopened;
+            // Nothing is held back once Medal has exited: draining and verification are exactly as without the hold.
+            ReleaseUploads(includeBuffer: true);
             var verdict = mount.Drain();
             bool needsAction = UploadRetriesNeedAction(verdict);
             Report(verdict.State switch
@@ -351,6 +355,13 @@ internal sealed partial class SessionCoordinator
             if (upload.Tries > 1 && clock.Now - retry.Since >= TimeSpan.FromMinutes(15)) needsAction = true;
         }
         return needsAction;
+    }
+
+    /// <summary>Advisory: a release that fails or throws only delays uploads until the hold ends.</summary>
+    private string? ReleaseUploads(bool includeBuffer)
+    {
+        try { return mount.ReleaseUploads(includeBuffer); }
+        catch (Exception ex) when (IsExpected(ex) || ex is System.Text.Json.JsonException or InvalidOperationException) { return null; }
     }
 
     private void Pause(TimeSpan duration)

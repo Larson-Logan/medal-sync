@@ -41,6 +41,13 @@ internal sealed class WindowsConfigurationWizard : Form
     private bool _setupReviewed;
     private string? _setupConfigDigest;
     private string? _setupReviewDirectory;
+    private readonly Func<string, CloudProvider?, string?, CancellationToken, SignInResult> _signIn;
+    private readonly ComboBox _provider = new() { DropDownStyle = ComboBoxStyle.DropDownList, AccessibleName = "Cloud provider to sign in to" };
+    private readonly TextBox _signInRemote = new() { AccessibleName = "rclone remote name to create or sign in again", Width = 140 };
+    private readonly Button _signInButton = new() { Text = "Sign &in", AutoSize = true, AccessibleName = "Sign in to the provider in your browser" };
+    private CancellationTokenSource? _signInCancel;
+    /// <summary>Remotes whose sign-in in this wizard did not pass the storage check; a configuration using one is never saved.</summary>
+    private readonly HashSet<string> _failedSignIns = new(StringComparer.Ordinal);
 
     public static int Run(LocalState state)
     {
@@ -59,9 +66,12 @@ internal sealed class WindowsConfigurationWizard : Form
     }
 
     internal WindowsConfigurationWizard(LocalState state, Action<MedalSyncConfig, bool>? validate = null, Func<IDisposable>? acquireGuard = null,
-        Func<string>? detectAccount = null, Func<string[], (int Code, string Text)>? runSetupCommand = null)
+        Func<string>? detectAccount = null, Func<string[], (int Code, string Text)>? runSetupCommand = null,
+        Func<string, CloudProvider?, string?, CancellationToken, SignInResult>? signIn = null)
     {
         _state = state;
+        _signIn = signIn ?? (validate is null ? SignInWithRclone
+            : (_, _, _, _) => throw new InvalidOperationException("Tests must provide an isolated sign-in."));
         _runSetupCommand = runSetupCommand ?? (validate is null ? RunSetupCommand
             : _ => throw new InvalidOperationException("Tests must provide an isolated library setup command."));
         _validate = validate ?? ValidateEnvironment;
@@ -117,6 +127,12 @@ internal sealed class WindowsConfigurationWizard : Form
         Field(fields, "rclone", _existing?.RclonePath ?? ConfigCommands.DefaultRclonePath(), Pick.Executable);
         Field(fields, "copy", _existing?.Replication?.LocalCopyRoot ?? "", Pick.Folder);
         Field(fields, "cloudConfig", _existing?.Replication?.RcloneConfigPath ?? "", Pick.Credentials);
+        _provider.Items.AddRange(["Google Drive", "OneDrive", "Dropbox"]);
+        _provider.SelectedIndex = 0;
+        var signInRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, AccessibleName = "Cloud sign-in" };
+        signInRow.Controls.AddRange([_provider, _signInRemote, _signInButton]);
+        _signInButton.Click += async (_, _) => await SignIn();
+        AddRow(fields, "signIn", signInRow);
         Field(fields, "targets", string.Join(Environment.NewLine, _existing?.Replication?.Targets.Select(t => (t.Required ? "required " : "optional ") + t.Name + "=" + t.Remote) ?? []), multiline: true);
         Field(fields, "syncFolder", _existing?.SyncExclusions.FirstOrDefault()?.FolderId ?? "");
         Field(fields, "syncPattern", _existing?.SyncExclusions.FirstOrDefault()?.Pattern ?? "/Videos/Clips");
@@ -208,6 +224,10 @@ internal sealed class WindowsConfigurationWizard : Form
         "cloudConfig" => mode == StorageMode.Cloud
             ? ("Provider credential &file", "rclone.conf holding the Google Drive sign-in from 'rclone config'. Required in this mode.")
             : ("Provider credential &file (optional)", "rclone.conf from 'rclone config'. Required for cloud copies or an rclone storage remote."),
+        "signIn" => ("Cloud sign-&in", "Choose the provider and a remote name (such as gdrive), then Sign in: the provider's page opens in your browser. "
+            + "Medal Sync saves the sign-in to the provider credential file above, or to one in its private folder, only after a storage check passes. "
+            + "It never sees the token. For Google Drive, consider your own OAuth client (" + ProviderSignIn.GoogleClientGuide + "). "
+            + ProviderSignIn.GoogleTestingWarning),
         "targets" => ("Cloud targets (one per line)", "Use name=remote:folder. Prefix with 'required ' to block handoff until verified, or 'optional ' to allow retry later. Existing names keep their requirement when no prefix is given."),
         "syncFolder" => ("Sync folder ID (optional)", "Only when Syncthing shares a folder that contains the clip folder. Most setups leave this empty."),
         "syncPattern" => ("Sync exclusion pattern", "Rooted folder the Syncthing folder must ignore, such as /Videos/Clips."),
@@ -391,12 +411,76 @@ internal sealed class WindowsConfigurationWizard : Form
         };
     }
 
+    /// <summary>
+    /// Creates or reconnects the named remote in the provider credential file (or Medal Sync's private one), then checks
+    /// it. Choosing Sign in again while it runs cancels it; the credential file changes only after a passing check.
+    /// </summary>
+    private async Task SignIn()
+    {
+        if (_signInCancel is { } running) { running.Cancel(); return; }
+        if (_busy || _ending) return;
+        string remote = _signInRemote.Text.Trim();
+        if (remote.Length == 0) remote = ProviderSignIn.RemoteOf(_fields["remote"].Text.Trim()) ?? "";
+        _signInRemote.Text = remote;
+        var provider = (CloudProvider)_provider.SelectedIndex;
+        string? configured = _fields["cloudConfig"].Text.Trim() is { Length: > 0 } path ? path : null;
+        using var cancel = new CancellationTokenSource();
+        _signInCancel = cancel;
+        _busy = true;
+        _next.Enabled = false;
+        _signInButton.Text = "Cancel sign-&in";
+        SetHint("signIn", "Waiting for you to finish signing in in your browser. Choose Cancel sign-in to stop; nothing is saved until the check passes.");
+        try
+        {
+            var result = await Task.Run(() => _signIn(remote, provider, configured, cancel.Token));
+            if (_ending) return;
+            if (result.Succeeded)
+            {
+                _failedSignIns.Remove(remote);
+                if (configured is null && result.ConfigPath is { } saved) _fields["cloudConfig"].Text = saved;
+            }
+            else if (ProviderSignIn.ValidRemoteName(remote)) _failedSignIns.Add(remote);
+            SetHint("signIn", result.Message);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or MedalSyncException)
+        {
+            if (ProviderSignIn.ValidRemoteName(remote)) _failedSignIns.Add(remote);
+            SetHint("signIn", ex.Message);
+        }
+        finally
+        {
+            _signInCancel = null;
+            _busy = false;
+            _signInButton.Text = "Sign &in";
+            if (!_ending) _next.Enabled = _proposal is null;
+        }
+    }
+
+    private SignInResult SignInWithRclone(string remote, CloudProvider? provider, string? configPath, CancellationToken cancel)
+    {
+        // Runs on one worker thread from start to end, which the instance lock (a mutex) requires.
+        using var instance = SignInCommands.HoldNoSession(_existing);
+        string rclone = Environment.ExpandEnvironmentVariables(_fields["rclone"].Text.Trim());
+        if (!File.Exists(rclone)) throw new UnsafeOperationException("The rclone executable is missing. Select the bundled rclone.exe before signing in.");
+        return new ProviderSignIn(rclone, _state).SignIn(remote, provider, configPath, cancel);
+    }
+
+    /// <summary>A configuration that uses a remote whose sign-in failed here is never saved.</summary>
+    private void RequireSignedIn(MedalSyncConfig candidate)
+    {
+        var used = new[] { candidate.Remote }.Concat(candidate.Replication?.Targets.Select(t => t.Remote) ?? [])
+            .Select(ProviderSignIn.RemoteOf).Where(r => r is not null && _failedSignIns.Contains(r)).ToList();
+        if (used.Count > 0)
+            throw new InvalidDataException($"Sign-in to '{used[0]}' did not pass the storage check. Sign in again, or choose another remote, before saving.");
+    }
+
     private async Task Review()
     {
         if (_busy || _ending) return;
         await Work(async () =>
         {
             var candidate = Candidate();
+            RequireSignedIn(candidate);
             bool fresh = _identity.SelectedIndex == 0;
             _proposal = await Task.Run(() => { using var guard = _acquireGuard(); return ConfigurationReview.Prepare(_state, candidate, fresh, _validate, _validateExisting); });
             if (_ending) return;
@@ -425,6 +509,7 @@ internal sealed class WindowsConfigurationWizard : Form
         bool fresh = _identity.SelectedIndex == 0;
         await Work(async () =>
         {
+            RequireSignedIn(_proposal.Config);
             string? backup = await Task.Run(() =>
             {
                 using var guard = _acquireGuard();

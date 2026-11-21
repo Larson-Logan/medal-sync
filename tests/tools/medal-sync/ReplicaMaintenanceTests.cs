@@ -258,7 +258,9 @@ public sealed class ReplicaMaintenanceTests : IDisposable
             ["one.mp4"] = RemoteCheck.Match, ["two.mp4"] = RemoteCheck.Match,
         }, null);
         Assert.Equal(ReplicaAudit.Passed, Assert.Single(Audit().Apply(Audit().Plan("vault"))).Result);
-        Assert.Null(DesktopStatus.Read(_state, _config.LibraryId, _store.ReadJournal(), _first, false, _now).Notice);
+        var cleared = DesktopStatus.Read(_state, _config.LibraryId, _store.ReadJournal(), _first, false, _now);
+        Assert.Null(cleared.Notice);
+        Assert.Null(cleared.StorageAttention);
         using var after = new StringWriter();
         SessionCommands.WriteStatus(_config, _state, _first, false, after, () => false);
         Assert.DoesNotContain("failed its last complete check", after.ToString(), StringComparison.Ordinal);

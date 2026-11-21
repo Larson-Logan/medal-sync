@@ -73,6 +73,13 @@ internal interface IClipMount
     /// </summary>
     string? UseUploadLimit(bool recording) => null;
 
+    /// <summary>
+    /// Releases held uploads when the drive holds Medal's replay buffer: everything but buffer segments while
+    /// recording, and everything once <paramref name="includeBuffer"/>. Null when nothing is held or the release
+    /// worked; otherwise a notice. Never throws: a failed release only delays uploads until the hold ends.
+    /// </summary>
+    string? ReleaseUploads(bool includeBuffer) => null;
+
     /// <summary>Stops gracefully. False when it is still running afterwards.</summary>
     bool Stop();
 
@@ -108,6 +115,34 @@ internal interface IAssetChecker
     /// <see cref="IOException"/> when it cannot be reached.
     /// </summary>
     void RequireServer();
+}
+
+/// <summary>
+/// Keeps the PC from sleeping on its idle timer while it holds work that blocks a handoff. Advisory: a hold that
+/// Windows refuses changes nothing about ownership or verification. Holds nest; dispose each one exactly once.
+/// </summary>
+internal interface IKeepAwake
+{
+    IDisposable Hold();
+}
+
+/// <summary>A hold that releases once, however often it is disposed.</summary>
+internal sealed class KeepAwakeHold(Action release) : IDisposable
+{
+    public static readonly IDisposable None = new KeepAwakeHold(() => { });
+    private int _released;
+
+    /// <summary>A hold from <paramref name="keepAwake"/>, or none. Never throws: a failed request only lets the PC sleep as before.</summary>
+    public static IDisposable Take(IKeepAwake? keepAwake)
+    {
+        try { return keepAwake?.Hold() ?? None; }
+        catch (Exception) { return None; }
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _released, 1) == 0) release();
+    }
 }
 
 internal interface IClock

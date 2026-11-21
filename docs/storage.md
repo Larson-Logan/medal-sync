@@ -22,6 +22,39 @@ dedicated storage root, for example `E:\MedalLibrary`; with capture folder
 either folder in a provider's desktop sync folder. Provider access uses rclone
 directly. Allow disk space for the collection, cache and new recordings.
 
+## Download new clips in the background
+
+With a persistent local copy (`replication.localCopyRoot`, required for cloud
+mode and rclone primaries), a PC must have every referenced clip on its own
+disk before Medal can start there. After a long session on the other PC, that
+download would otherwise happen while you wait to start a game.
+
+While this PC is idle and does not own the library, the status app starts
+`medal-sync prefetch --apply` about every ten minutes. It downloads the clips
+the newest committed generation references and this PC lacks, newest first:
+
+- It runs only while the library is Ready or another PC holds it, under the
+  same rules as idle sync: no input for a minute, CPU use below 20 percent,
+  Medal not running, idle priority and at most 2 MiB/s (or a lower
+  `replication.bandwidthLimitMiB`).
+- It reads only a committed generation that passes verification, and only
+  files that generation recorded as present on primary storage.
+- Files are downloaded into `.medal-sync-prefetch` beside the capture folder in
+  the local copy, byte-compared with primary storage and checked against the
+  size the generation recorded, then moved into place. A file already in the
+  local copy is never replaced. Prefetch refuses a capture folder inside
+  `.medal-sync-prefetch` (or the reverse), because it empties that folder.
+- Input, Medal starting, a launch on this PC, shutdown, setup, a configuration
+  change, a newer generation and low space (the `mount.minFreeGiB` reserve) stop
+  it. A partial download stays in the staging folder and is discarded; nothing
+  partial ever reaches the local copy.
+- It never takes ownership, writes to the journal or deletes library media.
+  Launch still hydrates and verifies as before; prefetch only shortens it.
+
+Run `medal-sync prefetch` to preview what is missing. Set
+[`replication.prefetchWhileIdle`](configuration.md#replication-local-copy-and-cloud-copies)
+to `false` to turn it off.
+
 ## Background sync and shutdown
 
 While this PC owns an **Active** session, Medal Sync checks for background work
@@ -75,6 +108,18 @@ again. Windows gives finish up to 25 seconds. If it cannot complete, the other
 PC can open **Use last synced library** from the handoff dialog after you
 confirm that the owning PC fully shut down. Clips or edits after the last sync
 stay on the original PC. Ordinary launch waits for **Ready**.
+
+While a finish is uploading and verifying, during an idle sync pass and during
+`replicate retry --apply`, Medal Sync asks Windows to keep the system awake, so
+a PC left alone after quitting Medal does not fall asleep on its idle timer
+with clips that exist only in its cache. The display may still turn off, and
+manual sleep, shutdown, lid and battery policies are unchanged. The request
+ends at Ready, on a refusal that needs you, while waiting for storage or
+backing off after a failure, and when Medal opens again. `powercfg /requests`
+shows it under `SYSTEM` while it is held. Set
+[`keepAwakeWhileFinishing`](configuration.md#top-level-fields) to `false` to
+turn it off. If Windows refuses the request, finish continues unchanged and the
+log records it once.
 
 ## Choose drives and file systems
 
@@ -188,6 +233,26 @@ Where supported by your Medal recording mode, its **Recording Buffer** setting
 can use memory instead of disk. This uses more RAM; see
 [Medal's buffer guide](https://support.medal.tv/support/solutions/articles/48001165759-what-is-the-recording-buffer-).
 Medal Sync does not change that preference.
+
+Without a persistent local copy, you can instead hold the buffer on this PC:
+set [`mount.recordingBufferHoldSeconds`](configuration.md#mount-the-clip-drive)
+to, for example, `600`. While Medal records a game, the clip drive then waits
+that long before uploading a closed file. Every five seconds Medal Sync releases
+each queued file outside `Temp\RecordingBuffer` once it has waited the usual
+`mount.writeBackSeconds`, so saved clips and overlays upload as quickly as
+before. Medal deletes replay segments long before the hold ends, and a deleted
+file leaves rclone's upload queue, so it never reaches the server. Pick a hold
+longer than Medal's replay buffer.
+
+When Medal is open but not recording, and on every finish pass before uploads
+are drained, everything is released, buffer included, so draining and
+verification are exactly as without the hold. If a release cannot be made, the
+supervisor shows a notice once and the held files upload when the hold ends; if
+Medal Sync itself stops while the drive keeps running, saved clips stay in the
+SSD cache until then. The hold is ignored with a persistent local copy, in local
+mode and with a cloud primary, where buffer segments never reach primary
+storage anyway. CI cannot measure Medal's real segment lifetime or how long
+clips wait under game load.
 
 A separate mount just for the buffer folder is not supported. rclone's
 [combine](https://rclone.org/combine/) builds a synthetic directory layout and
@@ -326,7 +391,9 @@ To keep them, merge them with `enroll` instead
 Launch restores only library tables, backs up the database, and updates the
 capture-folder setting to the configured virtual drive when necessary; other
 device settings and sign-ins remain on that PC. Missing clips hydrate and
-verify before Medal starts. Quit Medal normally and wait for **Ready** before
+verify before Medal starts; an idle PC usually has them already, see
+[download new clips in the background](#download-new-clips-in-the-background).
+Quit Medal normally and wait for **Ready** before
 switching. Finish verifies media, uploads and reads back the new generation,
 then conditionally releases ownership. An outage or uncertain acknowledgement
 keeps ownership and local media for recovery on the same PC. Drive must be
@@ -678,7 +745,47 @@ receipt before moving files, even if the move is interrupted. Applying a
 nonempty trash purge drops it too. This PC's next handoff reads every referenced
 file back at that destination before releasing ownership. Other PCs' private
 receipts are unchanged; cleanup protects the referenced files they verify.
-Cleaning an rclone primary is not supported by these commands.
+Primary storage has its own commands, described next.
+
+### Clean up deleted clips on primary storage
+
+When you delete a clip in Medal, the next generation stops referencing it, but
+its file stays on primary storage. Remove those files with the same two-step,
+reviewed cleanup, while every PC is Ready:
+
+```powershell
+medal-sync primary prune --out C:\Private\primary-cleanup.json [--grace-days 14]
+medal-sync primary prune --in C:\Private\primary-cleanup.json --apply
+medal-sync primary purge-trash [--older-than 7] [--apply]
+```
+
+It works for SMB, local-folder and rclone primaries. The rules are stricter
+than for a cloud copy, because every PC restores its clips from primary storage:
+
+- A file is planned only when it is clip media or a sidecar, older than the
+  grace period, and referenced by **no** generation still kept: the committed
+  one, any earlier one and any uncommitted attempt, however old. Generations
+  that `retention` removed no longer protect anything.
+- If any kept generation cannot be read, the whole review is refused instead
+  of planning around it.
+- Medal's `Temp` folder (its replay buffer), Medal Sync's own `.medal-sync*`
+  files and folders, `Databases` and anything that is not clip media are left
+  alone. Links and junctions in a share or local folder refuse the review.
+- Apply holds the journal writer lock, so no PC can start or finish meanwhile,
+  requires the library to be Ready, and refuses if the committed generation or
+  any file listed in the review changed. It moves files into
+  `.medal-sync-trash/<review ID>/` in the clip folder on primary storage and
+  deletes nothing. Applying the same review again finishes an interrupted
+  apply; files already in its trash folder count as moved.
+- `purge-trash` deletes only whole batches whose files were moved at least
+  `--older-than` days ago, as it does for cloud copies.
+- If primary storage cannot be reached, both steps exit 3 and change nothing.
+- Applying, and a nonempty purge, drop this PC's incremental verification
+  receipt for primary storage, so its next handoff reads every referenced file
+  back.
+- A persistent local copy (`replication.localCopyRoot`) is reported but not
+  cleaned. Google Drive cloud mode refuses these commands, because they need
+  the SMB writer lock.
 
 ### Check sign-in before recording
 
@@ -693,7 +800,9 @@ medal-sync storage check
 
 For an rclone primary it reads the library marker; for each cloud target it
 lists the configured folder one level deep. Each remote is reported as OK,
-offline, *sign in again* (with the `rclone config reconnect` command to run),
+offline, *sign in again* (with the command to run; the status panel also
+offers **Sign in again**, which runs `medal-sync storage sign-in --remote NAME`
+once this PC has no session),
 a configuration problem (missing credential file, or one that asks for a
 password or does not define the remote), folder missing, marker missing, or
 another library's folder. A missing target folder is fine: the next finish

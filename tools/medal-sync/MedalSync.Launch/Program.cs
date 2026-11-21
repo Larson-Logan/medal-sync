@@ -48,6 +48,8 @@ internal static class Program
 
     private static HandoffAction ChooseHandoff(HandoffWaitOffer offer)
     {
+        // TaskDialog needs common controls v6; an ordinary launch reaches this without the tray or the wizard.
+        Application.EnableVisualStyles();
         var wait = new TaskDialogButton("Wait and open when ready");
         var useLastSync = new TaskDialogButton("Use last synced library");
         var cancel = TaskDialogButton.Cancel;

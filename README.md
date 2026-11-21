@@ -144,9 +144,11 @@ See the [storage guide](docs/storage.md).
 - **Serial handoff only.** One PC owns the library at a time. Server modes use
   an SMB coordination share; Google Drive cloud mode uses conditional API
   updates. Local storage only does not hand off between PCs.
-- **No deletion sync.** Deleting a clip is not propagated to other copies.
-  Cloud copies keep older files. Destination conflicts stop by default;
-  optional versioned updates keep the previous file before replacing it.
+- **No automatic deletion sync.** Deleting a clip is not propagated to other
+  copies by itself. Primary storage and cloud copies keep the files until you
+  run a reviewed cleanup (`primary prune`, `replica prune`). Destination
+  conflicts stop by default; optional versioned updates keep the previous file
+  before replacing it.
 - **Private data stays private.** Provider credentials, Medal logins and full
   Medal databases are never copied to shared storage or cloud copies. Cloud
   mode stores normalized library snapshots and history in the private Drive folder.

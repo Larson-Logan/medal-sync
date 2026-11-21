@@ -21,7 +21,8 @@ internal static class ReplicationCommands
         ReplicaRetryStatus? telemetry = null;
         try
         {
-            var retry = new ReadyReplicaRetry(config, state, store, operation.Guard, progress: p => { output.WriteLine(p.NextAction); telemetry?.Report(p); });
+            var retry = new ReadyReplicaRetry(config, state, store, operation.Guard, progress: p => { output.WriteLine(p.NextAction); telemetry?.Report(p); },
+                keepAwake: apply ? SessionCommands.KeepAwake(config, output.WriteLine) : null);
             var plan = retry.Plan(target);
             output.WriteLine($"Committed generation {plan.Generation}: {plan.Targets.Count} pending cloud copy/copies{(plan.Targets.Count > 0 ? ": " + string.Join(", ", plan.Targets) : ".")}");
             if (!apply) { output.WriteLine("Preview only. Run again with --apply to copy and verify; ownership stays Ready."); return 0; }
