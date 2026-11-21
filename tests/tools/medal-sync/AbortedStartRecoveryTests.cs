@@ -43,6 +43,7 @@ public sealed class AbortedStartRecoveryTests : IDisposable
     {
         string cache = _config.SessionCacheDirectory(_session);
         if (emptyCache) Directory.CreateDirectory(cache);
+        else Directory.CreateDirectory(Path.GetDirectoryName(cache)!);
         var original = _state.SessionSecret(_session, DateTimeOffset.UtcNow);
         var journal = _store.ReadJournal();
         Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(_state.Root, false, false));
@@ -88,6 +89,39 @@ public sealed class AbortedStartRecoveryTests : IDisposable
         Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(_state.Root, false, false));
     }
 
+    [Fact]
+    public void UnavailableCacheParentKeepsTheLegacyLoginAndBlocksSetup()
+    {
+        string cache = _config.SessionCacheDirectory(_session);
+        Directory.CreateDirectory(_config.CacheRoot);
+        Assert.False(Directory.Exists(Path.GetDirectoryName(cache)));
+        Assert.Contains("uncertain cache", Assert.Throws<UnsafeOperationException>(() => Recovery().Run(_session, false)).Message);
+        Assert.Contains("uncertain cache", Assert.Throws<UnsafeOperationException>(() => Recovery().Run(_session, true)).Message);
+        Assert.True(File.Exists(Path.Combine(_state.Root, "sessions", _session + ".json")));
+        Assert.Throws<UnsafeOperationException>(() => SetupMaintenance.RequireReady(_state.Root, false, false));
+    }
+
+    [Fact]
+    public void UnreadableCacheKeepsTheLegacyLogin()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string cache = _config.SessionCacheDirectory(_session);
+        var directory = Directory.CreateDirectory(cache);
+        var original = FileSystemAclExtensions.GetAccessControl(directory);
+        var denied = FileSystemAclExtensions.GetAccessControl(directory);
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        denied.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(identity.User!,
+            System.Security.AccessControl.FileSystemRights.ListDirectory, System.Security.AccessControl.AccessControlType.Deny));
+        try
+        {
+            FileSystemAclExtensions.SetAccessControl(directory, denied);
+            Assert.Throws<UnauthorizedAccessException>(() => Directory.EnumerateFileSystemEntries(cache).Any());
+            Assert.Contains("uncertain cache", Assert.Throws<UnsafeOperationException>(() => Recovery().Run(_session, true)).Message);
+            Assert.True(File.Exists(Path.Combine(_state.Root, "sessions", _session + ".json")));
+        }
+        finally { FileSystemAclExtensions.SetAccessControl(directory, original); }
+    }
+
     [Theory]
     [InlineData((int)OwnershipState.Starting)]
     [InlineData((int)OwnershipState.Active)]
@@ -114,6 +148,7 @@ public sealed class AbortedStartRecoveryTests : IDisposable
     [Fact]
     public void CorruptCredentialsAndRetainedEvidenceRefuseWithRecoveryBytesPreserved()
     {
+        Directory.CreateDirectory(Path.GetDirectoryName(_config.SessionCacheDirectory(_session))!);
         string login = Path.Combine(_state.Root, "sessions", _session + ".json");
         File.WriteAllText(login, "{}");
         Assert.Throws<InvalidDataException>(() => Recovery().Run(_session, true));
