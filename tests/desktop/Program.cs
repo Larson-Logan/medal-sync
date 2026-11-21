@@ -89,13 +89,18 @@ internal static class Program
         Check(signIns.SequenceEqual(["gdrive"]), "Sign in again reconnects exactly the remote the storage check named");
         lock (gate) current = new(SessionPhase.Ready, "Synthetic signed in", DateTimeOffset.UtcNow);
         Until(view, () => !signInAgain.Visible);
+        Check(notifications.Count == 2 && notifications[1].Kind == DesktopNotificationKind.Ready,
+            "The open session's Ready after signing in again notifies once, like any finish");
+        // Back to this PC's own session, so the next refusal is this PC's finish needing the user.
+        lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
+        Until(view, () => status.Text.Contains("Synthetic recording", StringComparison.Ordinal));
         Check(status.ReadOnly && status.TabStop && status.AccessibleName!.Contains("next action", StringComparison.Ordinal), "Status supports keyboard and accessibility APIs");
         Check(panel.CancelButton is Button, "Escape closes the panel");
         Check(icon.BalloonTipText.Length == 0, "Background status never shows a balloon");
         lock (gate) current = new(SessionPhase.RecoveryNeeded, "Retry after recovery", DateTimeOffset.UtcNow, CanRetry: true);
         Until(view, () => retry.Enabled);
-        Check(notifications.Count == 2 && notifications[1].Kind == DesktopNotificationKind.NeedsAction
-            && notifications[1].Message.StartsWith("Retry after recovery", StringComparison.Ordinal), "A finish that needs the user notifies with the panel's text");
+        Check(notifications.Count == 3 && notifications[2].Kind == DesktopNotificationKind.NeedsAction
+            && notifications[2].Message.StartsWith("Retry after recovery", StringComparison.Ordinal), "A finish that needs the user notifies with the panel's text");
         retry.PerformClick();
         Until(view, () => status.Text.Contains("Run audit and repair before retrying.", StringComparison.Ordinal) && retry.Enabled);
         Check(finishes == 1, "A blocked finish exposes its diagnostic and required recovery action");
