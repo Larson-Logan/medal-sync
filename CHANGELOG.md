@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add `mount.recordingBufferHoldSeconds` for server mode without a persistent local copy: while a game records, Medal's replay-buffer segments stay on this PC until Medal deletes them, while saved clips still upload after the normal write-back delay. Everything is released when recording stops and before finish drains uploads (#201).
 - Launch waits when a switch request cannot be sent and ignores Google Drive switch requests dated more than five minutes ahead (#216, #220).
 - Launch and finish tell users when Google Drive sign-in needs attention. `finish` returns exit 3 when it cannot reach the journal. Google Drive rate limits are treated as temporary (#218, #223, #228).
 - The free-space monitor warns again if a disk becomes unreadable after briefly reconnecting (#226).

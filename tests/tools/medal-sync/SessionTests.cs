@@ -151,6 +151,20 @@ public sealed partial class SessionTests : IDisposable
             return UploadLimitProblem;
         }
 
+        /// <summary>Each release request, in order: whether the replay buffer was included.</summary>
+        public List<bool> Releases { get; } = [];
+
+        public string? ReleaseProblem { get; set; }
+
+        public bool ReleaseThrows { get; set; }
+
+        public string? ReleaseUploads(bool includeBuffer)
+        {
+            if (ReleaseThrows) throw new IOException("Synthetic control failure.");
+            Releases.Add(includeBuffer);
+            return ReleaseProblem;
+        }
+
         public bool Stop()
         {
             if (StopThrows) throw new IOException("Synthetic mount stop failure.");
