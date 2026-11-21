@@ -250,7 +250,11 @@ internal sealed record MedalSyncConfig(
         {
             try
             {
-                MountPlan.Validate(MountSettings(new string('0', 32), WindowsPath.Parse(CacheRoot).Append("rclone.log").Display));
+                // Both drives this configuration starts: the recording one (which may hold buffer segments) and the one
+                // that only finishes or recovers uploads, which always uses the normal write-back delay.
+                string log = WindowsPath.Parse(CacheRoot).Append("rclone.log").Display;
+                MountPlan.Validate(MountSettings(new string('0', 32), log));
+                MountPlan.Validate(MountSettings(new string('0', 32), log, forRecording: false));
             }
             catch (ArgumentException ex)
             {

@@ -108,6 +108,14 @@ public sealed class ReplayBufferHoldTests
     }
 
     [Fact]
+    public void TheNormalWriteBackDelayIsValidatedEvenWhenTheHoldReplacesIt()
+    {
+        var server = Server(600);
+        var config = server with { Mount = server.Mount with { WriteBackSeconds = -1 } };
+        Assert.Throws<InvalidDataException>(config.Validate);
+    }
+
+    [Fact]
     public void TheSettingIsLeftOutOfTheFileUntilSet()
     {
         Assert.DoesNotContain("recordingBufferHoldSeconds", System.Text.Encoding.UTF8.GetString(Json.Serialize(Server(null))), StringComparison.Ordinal);
