@@ -252,7 +252,12 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
             var current = Read(refreshStorage: true);
             RequireHead(current.Value);
             var next = transition(current.Value.Journal);
-            if (ReferenceEquals(next, current.Value.Journal)) return next;
+            if (ReferenceEquals(next, current.Value.Journal))
+            {
+                // A new process resuming BeginPublish has no in-memory high-water mark.
+                if (next.State == OwnershipState.Publishing) Download();
+                return next;
+            }
             if (next.Revision != current.Value.Journal.Revision + 1 || next.LibraryId != config.LibraryId || next.AccountId != config.AccountId)
                 throw new InvalidOperationException("A cloud journal transition must advance the revision by exactly one.");
             if (next.CommittedGeneration != current.Value.Journal.CommittedGeneration) Upload(next.CommittedGeneration);
@@ -302,22 +307,31 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
         // The pre-generated ID makes simultaneous initialization or retry return 409, rather than create two journals.
         RequireOrdinaryCache();
         var generations = new GenerationStore(GenerationsLocal, config.LibraryId, config.AccountId);
-        LibraryIdentity identity;
-        if (Directory.Exists(config.LibraryCoordinationDirectory) && Directory.EnumerateFileSystemEntries(config.LibraryCoordinationDirectory).Any())
+        string[] entries = Directory.Exists(config.LibraryCoordinationDirectory)
+            ? Directory.GetFileSystemEntries(config.LibraryCoordinationDirectory) : [];
+        const string differs = "The retained cloud initialization differs from this PC's reviewed library. Preserve both and recover before retrying.";
+        if (entries.Length != 0
+            && (!entries.SequenceEqual([GenerationsLocal], StringComparer.OrdinalIgnoreCase)
+                || !CoordinationStore.IsInitGenerationDirectory(GenerationsLocal)))
+            throw new UnsafeOperationException(differs);
+
+        DateTimeOffset createdAt = now;
+        if (generations.Exists(0))
         {
             // Resume only this device's exact verified bootstrap. Never adopt a cached or edited library.
             var original = generations.Read(0);
-            if (!Directory.EnumerateFileSystemEntries(config.LibraryCoordinationDirectory).SequenceEqual([GenerationsLocal], StringComparer.OrdinalIgnoreCase)
-                || !generations.Numbered().SequenceEqual([0L]) || original.Manifest.Device.DeviceId != device.DeviceId || original.Snapshot.Digest() != snapshot.Digest()
+            if (original.Manifest.ParentGeneration is not null || original.Manifest.Device.DeviceId != device.DeviceId
+                || original.Snapshot.Digest() != snapshot.Digest()
                 || !Json.Serialize(original.Assets).AsSpan().SequenceEqual(Json.Serialize(assets)))
-                throw new UnsafeOperationException("The retained cloud initialization differs from this PC's reviewed library. Preserve both and recover before retrying.");
-            identity = new(1, config.LibraryId, config.AccountId, original.Manifest.CreatedAt, device);
+                throw new UnsafeOperationException(differs);
+            createdAt = original.Manifest.CreatedAt;
         }
         else
         {
-            identity = new(1, config.LibraryId, config.AccountId, now, device);
+            // Staging folders from an interrupted local publish are never committed generations.
             generations.Publish(0, null, session, device, snapshot, assets, medal, now);
         }
+        var identity = new LibraryIdentity(1, config.LibraryId, config.AccountId, createdAt, device);
         Upload(0);
         api.Create(new(1, identity, Ownership.Initial(config.LibraryId, config.AccountId, identity.CreatedAt), [], StorageFolder(), config.CaptureFolder, ManifestHash(0)), StorageFolder());
     }

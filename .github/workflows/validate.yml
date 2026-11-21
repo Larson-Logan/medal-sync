@@ -232,12 +232,12 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-${{ github.job }}-
       # Release validation never uses caches. Cached downloads are re-checked
       # against their SHA-256 pins before use.
-      - name: Cache pinned Inno Setup compiler
+      - name: Cache pinned Inno Setup installer download
         if: ${{ !inputs.release }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: .validation/build-tools/inno-*
-          key: inno-${{ runner.os }}-${{ hashFiles('installer/windows/toolchain.json') }}
+          path: .validation/build-tools/innosetup-*.exe
+          key: inno-download-${{ runner.os }}-${{ hashFiles('installer/windows/toolchain.json') }}
       - name: Cache pinned storage dependencies
         if: ${{ !inputs.release }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

@@ -37,23 +37,23 @@ internal sealed partial class SessionCoordinator
         catch (StorageOfflineException ex)
         {
             return new FinishOutcome(FinishStatus.Pending,
-                $"Waiting for storage: {ex.Message} Clips are safe on this PC, which keeps the library; the switch finishes automatically when storage is back.",
+                $"Waiting for storage: {ex.Message} Clips are safe on this PC, which keeps the library until finish succeeds.",
                 -1, PendingCause.StorageOffline);
         }
         catch (StorageActionRequiredException ex)
         {
             return new FinishOutcome(FinishStatus.Pending,
-                $"Action needed before switching PCs: {ex.Message} The session and clips stay on this PC, and the switch is retried every few minutes.",
+                $"Action needed before switching PCs: {ex.Message} The session and clips stay on this PC.",
                 -1, PendingCause.NeedsAction);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or StorageBusyException)
         {
             if (ex is not StorageBusyException && !store.IsReachable())
                 return new FinishOutcome(FinishStatus.Pending,
-                    "Waiting for storage: the shared library's server cannot be reached right now. Clips are safe on this PC, which keeps the library; "
-                    + "the switch finishes automatically when it is back.", -1, PendingCause.StorageOffline);
+                    "Waiting for storage: the shared library's server cannot be reached right now. Clips are safe on this PC, which keeps the library until finish succeeds.",
+                    -1, PendingCause.StorageOffline);
             return new FinishOutcome(FinishStatus.Pending,
-                $"Clip storage is unreachable or busy ({ex.Message}); the session stays on this PC and will be retried.", -1,
+                $"Clip storage is unreachable or busy ({ex.Message}). The session stays on this PC until finish succeeds.", -1,
                 ex is StorageBusyException ? PendingCause.None : PendingCause.Failed);
         }
         catch (Exception ex) when (IsExpected(ex))
@@ -321,7 +321,7 @@ internal sealed partial class SessionCoordinator
             if (needsAction)
                 return new FinishOutcome(FinishStatus.Pending,
                     "Action needed: upload retries have not recovered for at least 15 minutes. " + string.Join(" ", verdict.Reasons)
-                    + " Ownership and cached clips stay on this PC; finish will retry automatically.", 0, PendingCause.NeedsAction);
+                    + " Ownership and cached clips stay on this PC.", 0, PendingCause.NeedsAction);
             if (clock.Now >= deadline)
             {
                 return new FinishOutcome(FinishStatus.Pending, (verdict.CacheSpaceTrouble ? "Waiting for SSD cache cleanup: " : "Still uploading: ")
