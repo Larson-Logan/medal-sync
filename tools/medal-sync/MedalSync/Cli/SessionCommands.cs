@@ -711,8 +711,23 @@ internal static class SessionCommands
                 if (new MedalProcess(context.Install).IsRunning())
                     throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
             }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress, SpaceMonitor(context.Config, bitrate), preflight,
-            idle.IsIdle, idleMedia.Sync, guard => PrimaryStorage.Checker(context.Config, context.State, guard)), mount);
+            idle.IsIdle, idleMedia.Sync, guard => PrimaryStorage.Checker(context.Config, context.State, guard), KeepAwake(context)), mount);
     }
+
+    /// <summary>
+    /// The process-wide keep-awake request, or null when <c>keepAwakeWhileFinishing</c> is false. Its handle closes
+    /// with the process; every hold is released as soon as its work ends.
+    /// </summary>
+    private static IKeepAwake? KeepAwake(Context context) => KeepAwake(context.Config, context.Log.Write);
+
+    internal static IKeepAwake? KeepAwake(MedalSyncConfig config, Action<string> log)
+    {
+        if (config.KeepAwakeWhileFinishing == false) return null;
+        lock (KeepAwakeGate) return _keepAwake ??= new WindowsKeepAwake(log);
+    }
+
+    private static readonly object KeepAwakeGate = new();
+    private static WindowsKeepAwake? _keepAwake;
 
     /// <summary>
     /// Runs before ownership is taken. Never throws: a check that cannot run is logged and launch continues,
