@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Start Medal at sign-in again after Windows shut down before the session finished. Sign-in still finishes the interrupted session first, and leaves the library released only when another PC asked for it.
 - Run retention, primary and replica cleanup, and persistent-media refresh in cloud mode. A maintenance lease holds the library until the reviewed work completes (#249).
 - Migrate a server-mode or cloud library to Google Drive with its retained generations, media and device identities. The migration can resume after an interruption (#250).
 - Share a library without an SMB server using OneDrive or Dropbox. Each provider must prove it rejects stale ownership writes (#252).

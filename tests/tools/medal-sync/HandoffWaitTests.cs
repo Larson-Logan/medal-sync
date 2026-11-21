@@ -94,6 +94,28 @@ public sealed partial class SessionTests
     }
 
     [Fact]
+    public void SignInAfterAnInterruptedShutdownStartsMedalWhenNoPcIsWaiting()
+    {
+        var shutdown = new SessionShutdown(_clock);
+        var first = Computer(FirstPc, "first", shutdown: shutdown, askOwnerToSwitch: false);
+        var started = first.Coordinator.Launch(atSignIn: true);
+        AssertStarted(started);
+        Record(first, "last-recording");
+        // Windows ends before Medal and its recorder exit, and nobody asked for the library.
+        shutdown.RequestEnd();
+        Assert.Equal(FinishStatus.Pending, first.Coordinator.Supervise(started.Session!, _ => Assert.Fail(), CancellationToken.None).Status);
+
+        var restarted = Computer(FirstPc, "restarted", database: first.Database, askOwnerToSwitch: false);
+        var outcome = restarted.Coordinator.Launch(atSignIn: true);
+
+        AssertStarted(outcome);
+        Assert.NotEqual(started.Session, outcome.Session);
+        Assert.Equal(1, restarted.Medal.Launches);
+        Assert.Equal(FirstPc, _store.ReadJournal().Owner);
+        Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
+    }
+
+    [Fact]
     public void TimeoutBacksOffWithdrawsTheRequestAndLeavesTheOwnerAlone()
     {
         var (first, _) = FirstPcHoldsTheLibrary();
