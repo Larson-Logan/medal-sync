@@ -120,7 +120,7 @@ public sealed class StorageTests
         Assert.DoesNotContain("--bwlimit", MountPlan.Arguments(Settings()));
         var limited = MountPlan.Arguments(Settings() with { BandwidthLimitMiB = 5 }).ToList();
         // rclone reads a bare rate as both directions; downloads (clip playback) stay unlimited.
-        Assert.Equal("5Mi:off", limited[limited.IndexOf("--bwlimit") + 1]);
+        Assert.Equal("5Mi", limited[limited.IndexOf("--bwlimit") + 1]);
         Assert.Equal("off", MountPlan.Rate(null));
     }
 

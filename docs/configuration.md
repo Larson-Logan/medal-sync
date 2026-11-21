@@ -69,8 +69,8 @@ The defaults suit most PCs.
 | `dirCacheHours` | `1000` | At least 1 | How long folder listings are cached (`--dir-cache-time`). |
 | `transfers` | `2` | 1 to 8 | Uploads run in parallel (`--transfers`). |
 | `controlPort` | `53684` | 1024 to 65535 | Local port for rclone's control API, on 127.0.0.1 only. `config create --spike` uses `53683`. Avoid `53682` (browser sign-in) and `5572` (rclone's default control API). |
-| `bandwidthLimitMiB` | `null` (2 MiB/s) | 1 to 10000 | Upload limit in MiB/s while Medal runs. See [limit upload speed while recording](storage.md#limit-upload-speed-while-recording). |
-| `finishBandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Upload limit in MiB/s after Medal exits, while uploads finish. |
+| `bandwidthLimitMiB` | `null` (2 MiB/s) | 1 to 10000 | Clip-drive transfer limit in MiB/s while Medal runs. See [limit upload speed while recording](storage.md#limit-upload-speed-while-recording). |
+| `finishBandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Clip-drive transfer limit in MiB/s after Medal exits, while uploads finish. |
 
 Older setups may use `53682`. rclone's [browser sign-in server](https://github.com/rclone/rclone/blob/v1.75.2/lib/oauthutil/oauthutil.go)
 needs that port for `rclone config` and `rclone config reconnect`, so a clip drive

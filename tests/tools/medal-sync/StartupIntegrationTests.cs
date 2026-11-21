@@ -96,6 +96,7 @@ public sealed class StartupIntegrationTests : IDisposable
 
             startup.Apply();
             Assert.True(startup.Enabled);
+            Assert.Contains("startup --restore", Assert.Throws<UnsafeOperationException>(startup.RequireDetachedForUninstall).Message);
         }
         using (var run = Key(StartupEntries.RunSubkey))
         {
@@ -117,6 +118,7 @@ public sealed class StartupIntegrationTests : IDisposable
         {
             startup.Restore();
             Assert.False(startup.Enabled);
+            startup.RequireDetachedForUninstall();
         }
         using (var run = Key(StartupEntries.RunSubkey))
         {
@@ -127,6 +129,33 @@ public sealed class StartupIntegrationTests : IDisposable
         using (var protocol = Key(StartupEntries.ProtocolSubkey)) Assert.Equal($"\"{Medal}\" \"%1\"", protocol.GetValue(null));
         Assert.Equal(Medal, StartupEntries.ShortcutTarget(shortcut), ignoreCase: true);
         Assert.Single(Directory.GetFiles(_state, StartupEntries.OriginalsFile + ".restored-20261101-120200"));
+    }
+
+    [Fact]
+    public void UninstallChecksEachLiveEntryAndKeepsPortableStartupSeparate()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var startup = Startup();
+        using var run = Key(StartupEntries.RunSubkey);
+        using var protocol = Key(StartupEntries.ProtocolSubkey);
+        string portable = _fixture.PathFor("portable", StartupEntries.LauncherFile);
+        string shortcut = Path.Combine(_desktop, "Medal.lnk");
+        run.SetValue(StartupEntries.RunValue, StartupEntries.RunCommand(portable));
+        protocol.SetValue(null, StartupEntries.ProtocolCommand(portable));
+        MakeShortcut(shortcut, portable);
+        MakeShortcut(Path.Combine(_desktop, "Medal Sync.lnk"), _launcher); // Removed by native setup.
+        MakeShortcut(Path.Combine(_desktop, "Medal Sync Status.lnk"), _launcher);
+        MakeShortcut(Path.Combine(_desktop, "Check for Medal Sync updates - Copy.lnk"), _launcher);
+        startup.RequireDetachedForUninstall();
+
+        run.SetValue(StartupEntries.RunValue, StartupEntries.RunCommand(_launcher));
+        Assert.Throws<UnsafeOperationException>(startup.RequireDetachedForUninstall);
+        run.SetValue(StartupEntries.RunValue, StartupEntries.RunCommand(portable));
+        protocol.SetValue(null, StartupEntries.ProtocolCommand(_launcher));
+        Assert.Throws<UnsafeOperationException>(startup.RequireDetachedForUninstall);
+        protocol.SetValue(null, StartupEntries.ProtocolCommand(portable));
+        MakeShortcut(shortcut, _launcher);
+        Assert.Throws<UnsafeOperationException>(startup.RequireDetachedForUninstall);
     }
 
     [Fact]

@@ -87,13 +87,17 @@ internal static class StartupEntries
     }
 
     /// <summary>A command or shortcut target that starts a launcher other than <paramref name="launcher"/>.</summary>
-    internal static bool StartsOtherLauncher(string? command, string launcher)
+    internal static bool StartsOtherLauncher(string? command, string launcher) =>
+        StartsLauncher(command) && !StartsLauncherAt(command, launcher);
+
+    /// <summary>Whether the command or shortcut starts this specific copy of the launcher.</summary>
+    internal static bool StartsLauncherAt(string? command, string launcher)
     {
         if (!StartsLauncher(command)) return false;
         string text = command!.Trim();
         int end = text.StartsWith('"') ? text.IndexOf('"', 1) : -1;
         string executable = end > 1 ? text[1..end] : text;
-        return !SamePath(executable, launcher);
+        return SamePath(executable, launcher);
     }
 
     private static bool SamePath(string a, string b)
