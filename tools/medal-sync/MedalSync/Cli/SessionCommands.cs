@@ -365,7 +365,8 @@ internal static class SessionCommands
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
         // Recording can go ahead, but the user should learn now, not after the session, that the handoff will need them.
         if (outcome.Warning is { } warning && !shutdown.SuppressUi) Notify(notify, warning);
-        if (outcome.Status is not (LaunchStatus.Started or LaunchStatus.AlreadyRunning)) return outcome.Status == LaunchStatus.Waiting ? 3 : 1;
+        if (outcome.Status is not (LaunchStatus.Started or LaunchStatus.AlreadyRunning or LaunchStatus.FinishingPreviousSession))
+            return outcome.Status == LaunchStatus.Waiting ? 3 : 1;
         // A recovered, already-running session must pass the coordinator's drive
         // and ownership checks before it receives a link.
         if (outcome.Status == LaunchStatus.AlreadyRunning && link is not null
@@ -384,7 +385,7 @@ internal static class SessionCommands
             {
                 Report(context, output, m);
                 if (!shutdown.SuppressUi) Notify(notify, m);
-            }, cancel.Token);
+            }, cancel.Token, outcome.PendingFinish);
         }
         if (!shutdown.Ending) GuardStartup(context);
         Report(context, output, $"finish: {finished.Status}: {finished.Message}");

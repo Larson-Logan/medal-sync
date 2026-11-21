@@ -753,8 +753,42 @@ public sealed class CloudHandoffTests : IDisposable
         Assert.Equal(Now, drive.Value!.Identity.CreatedAt);
     }
 
-    [Fact]
-    public void PartialAbandonedRemoteGenerationIsKeptAndItsNumberIsNeverReused()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InitResumesWithoutAPublishedLocalGeneration(bool stagingExists)
+    {
+        using var drive = new Drive();
+        var config = Config("first");
+        string generations = Path.Combine(config.LibraryCoordinationDirectory, "generations");
+        Directory.CreateDirectory(generations);
+        if (stagingExists)
+        {
+            string staging = Path.Combine(generations, ".staging-0000000000-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(staging);
+            File.WriteAllText(Path.Combine(staging, "library.json"), "truncated");
+        }
+        var backend = new CloudCoordination(config, Api(drive), Run);
+        var snapshot = Snapshot("seed", "one");
+        string session = new('1', 32);
+
+        string unexpected = Path.Combine(generations, "unrecognized");
+        Directory.CreateDirectory(unexpected);
+        Assert.Throws<UnsafeOperationException>(() => backend.Create(snapshot, new(1, [], []), First, session, Versions, Now));
+        Assert.Null(drive.Value);
+        Directory.Delete(unexpected);
+
+        backend.Create(snapshot, new(1, [], []), First, session, Versions, Now);
+
+        Assert.Equal(OwnershipState.Clean, backend.ReadJournal().State);
+        Assert.Equal(0, drive.Value!.Journal.CommittedGeneration);
+        Assert.Equal(snapshot.Digest(), CoordinationStore.OpenCloud(config, backend).Generations.Read(0).Snapshot.Digest());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PartialAbandonedRemoteGenerationIsKeptAndItsNumberIsNeverReused(bool restartInPublishing)
     {
         using var drive = new Drive();
         var config = Config("first");
@@ -767,6 +801,11 @@ public sealed class CloudHandoffTests : IDisposable
         store.Update(j => Ownership.MarkActive(j, First, session, Now), TimeSpan.Zero);
         store.Update(j => Ownership.BeginDrain(j, First, session, Now), TimeSpan.Zero);
         store.Update(j => Ownership.BeginPublish(j, First, session, Now), TimeSpan.Zero);
+        if (restartInPublishing)
+        {
+            store = CoordinationStore.OpenCloud(config, new(config, Api(drive), Run));
+            store.Update(j => Ownership.BeginPublish(j, First, session, Now), TimeSpan.Zero);
+        }
         Assert.Equal(2, store.Generations.Next(0));
         Assert.False(store.Generations.Exists(1));
         Assert.True(File.Exists(Path.Combine(orphan, "library.json")));

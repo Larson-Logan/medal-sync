@@ -10,6 +10,7 @@ internal enum LaunchStatus
 {
     Started,
     AlreadyRunning,
+    FinishingPreviousSession,
     Waiting,
     Blocked,
 }
@@ -17,8 +18,9 @@ internal enum LaunchStatus
 /// <param name="Warning">Medal started, but something the user must fix will stop the handoff; shown as a passive notice.</param>
 /// <param name="Wait">Whether an explicit handoff wait may keep polling after this outcome.</param>
 /// <param name="Journal">The journal that showed another PC as owner, for <see cref="LaunchWait.OwnedElsewhere"/>.</param>
+/// <param name="PendingFinish">The first attempt to finish this PC's previous session, for the supervisor to retry.</param>
 internal sealed record LaunchOutcome(LaunchStatus Status, string Message, string? Session = null, bool StorageOffline = false, string? Warning = null,
-    LaunchWait Wait = LaunchWait.None, OwnershipRecord? Journal = null);
+    LaunchWait Wait = LaunchWait.None, OwnershipRecord? Journal = null, FinishOutcome? PendingFinish = null);
 
 /// <summary>
 /// The result of a read-only check that runs before ownership is taken. <paramref name="Refusal"/> keeps Medal closed

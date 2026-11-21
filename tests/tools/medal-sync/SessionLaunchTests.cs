@@ -491,6 +491,115 @@ public sealed partial class SessionTests
         Assert.Contains(interrupted, pc.Mount.Forgotten);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Launch_SupervisesAPreviousFinishUntilItPublishes(bool storageOffline)
+    {
+        var pc = Computer(FirstPc, "first");
+        string session = pc.Coordinator.Launch().Session!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        pc.Mount.Stop();
+        if (storageOffline)
+            pc.Mount.OnStart = () => throw new StorageOfflineException("Synthetic outage");
+        else
+            pc.Mount.Steady = new(DrainState.Pending, ["Synthetic upload"], 1, 100);
+
+        var launch = pc.Coordinator.Launch();
+
+        Assert.Equal(LaunchStatus.FinishingPreviousSession, launch.Status);
+        Assert.Equal(session, launch.Session);
+        Assert.Equal(storageOffline, launch.StorageOffline);
+        Assert.Equal(OwnershipState.Draining, _store.ReadJournal().State);
+        using var timeout = new CancellationTokenSource();
+        var retryAt = _clock.Now.AddSeconds(storageOffline ? 30 : 10);
+        _clock.OnSleep = () =>
+        {
+            if (_clock.Now < retryAt) return;
+            pc.Mount.OnStart = null;
+            pc.Mount.Steady = new(DrainState.Drained, [], 0, 0);
+            if (_clock.Now > retryAt.AddMinutes(1)) timeout.Cancel();
+        };
+
+        var finish = pc.Coordinator.Supervise(session, _ => { }, timeout.Token, launch.PendingFinish);
+
+        Assert.Equal(FinishStatus.Published, finish.Status);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+        Assert.Equal(1, pc.Medal.Launches);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Launch_RechecksTheDriveWhenMedalReopensDuringThePreviousFinish(bool healthy)
+    {
+        var pc = Computer(FirstPc, "first");
+        string session = pc.Coordinator.Launch().Session!;
+        Record(pc, "clip-2");
+        pc.Medal.Running = false;
+        pc.Mount.Stop();
+        pc.Mount.OnDrain = () =>
+        {
+            pc.Medal.Running = true;
+            pc.Mount.HealthResult = new(healthy, "Synthetic health result");
+            pc.Mount.OnDrain = null;
+        };
+
+        var launch = pc.Coordinator.Launch();
+
+        Assert.Equal(healthy ? LaunchStatus.AlreadyRunning : LaunchStatus.Blocked, launch.Status);
+        Assert.Equal(OwnershipState.Active, _store.ReadJournal().State);
+        Assert.Equal(1, pc.Medal.Launches);
+        if (!healthy)
+        {
+            Assert.Contains("could not be verified", launch.Message);
+            Assert.Equal(0, _store.ReadJournal().CommittedGeneration);
+            return;
+        }
+        Assert.Equal(session, launch.Session);
+        using var timeout = new CancellationTokenSource();
+        var retryAt = _clock.Now;
+        _clock.OnSleep = () =>
+        {
+            pc.Medal.Running = false;
+            if (_clock.Now > retryAt.AddMinutes(1)) timeout.Cancel();
+        };
+        Assert.Equal(FinishStatus.Published, pc.Coordinator.Supervise(session, _ => { }, timeout.Token).Status);
+        Assert.Contains(true, pc.Mount.UploadLimits);
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
+    public void Launch_AdoptsMedalWhenItReopensBetweenPreviousFinishAttempts()
+    {
+        var pc = Computer(FirstPc, "first");
+        string session = pc.Coordinator.Launch().Session!;
+        pc.Medal.Running = false;
+        pc.Mount.Steady = new(DrainState.Pending, ["Synthetic upload"], 1, 100);
+
+        var launch = pc.Coordinator.Launch();
+
+        Assert.Equal(LaunchStatus.FinishingPreviousSession, launch.Status);
+        using var timeout = new CancellationTokenSource();
+        var deadline = _clock.Now.AddMinutes(1);
+        bool supervised = false;
+        _clock.OnSleep = () =>
+        {
+            if (_clock.Now > deadline) timeout.Cancel();
+            if (pc.Medal.Running)
+            {
+                supervised = _store.ReadJournal().State == OwnershipState.Active && pc.Mount.UploadLimits.Last();
+                pc.Mount.Steady = new(DrainState.Drained, [], 0, 0);
+                pc.Medal.Running = false;
+            }
+            else pc.Medal.Running = true;
+        };
+        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Supervise(session, _ => { }, timeout.Token, launch.PendingFinish).Status);
+        Assert.True(supervised);
+        Assert.Equal(1, pc.Medal.Launches);
+    }
+
     [Fact]
     public void Launch_IsBlockedWhileAnotherPcNeedsRecovery()
     {

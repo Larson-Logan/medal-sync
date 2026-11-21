@@ -149,6 +149,8 @@ internal sealed partial class SessionCoordinator
 
     private void ReportLaunch(LaunchOutcome outcome)
     {
+        // Finish already reported the upload or storage state. The supervisor keeps it current.
+        if (outcome.Status == LaunchStatus.FinishingPreviousSession) return;
         Report(outcome.Status switch
         {
             LaunchStatus.Started or LaunchStatus.AlreadyRunning => SessionPhase.Active,
@@ -176,25 +178,7 @@ internal sealed partial class SessionCoordinator
         // Leftovers of published sessions only; anything still left is reported by the next finish.
         _ = RetryFinishedCleanup();
         if (medal.IsRunning())
-        {
-            if (journal.State == OwnershipState.Active && journal.Owner?.DeviceId == Me.DeviceId)
-            {
-                // Ownership survives a reboot or companion crash; it does not
-                // prove that a manually reopened Medal still has its drive.
-                // Never resume uploads or replace the library under that app.
-                if (!mount.IsRunning)
-                    return new LaunchOutcome(LaunchStatus.Blocked,
-                        $"Medal is running but its clip drive is stopped. {QuitFromTray}, then open Medal Library to recover this PC's session.");
-                var health = mount.Health();
-                if (!health.Healthy)
-                    return new LaunchOutcome(LaunchStatus.Blocked,
-                        $"Medal's clip drive could not be verified: {health.Detail} {QuitFromTray}, then open Medal Library to recover this PC's session.");
-                return new LaunchOutcome(LaunchStatus.AlreadyRunning, "Medal is already running in this PC's session.", journal.SessionId);
-            }
-            return new LaunchOutcome(LaunchStatus.Blocked,
-                "Medal is already running without medal-sync (for example after an update or from its own startup entry). "
-                + $"{QuitFromTray}, then open Medal again from the medal-sync shortcut.");
-        }
+            return CheckRunningSession(journal);
         if (journal.Owner?.DeviceId == Me.DeviceId)
         {
             var previous = ResolveOwnSession(journal);
@@ -227,6 +211,31 @@ internal sealed partial class SessionCoordinator
                 Wait: LaunchWait.OwnedElsewhere, Journal: journal);
         }
         return StartSession();
+    }
+
+    private LaunchOutcome CheckRunningSession(OwnershipRecord journal, string? expectedSession = null)
+    {
+        if (journal.State != OwnershipState.Active || journal.Owner?.DeviceId != Me.DeviceId
+            || expectedSession is not null && !journal.IsOwnedBy(Me, expectedSession))
+            return new LaunchOutcome(LaunchStatus.Blocked,
+                "Medal is already running without medal-sync (for example after an update or from its own startup entry). "
+                + $"{QuitFromTray}, then open Medal again from the medal-sync shortcut.");
+        // A manually reopened Medal still needs a running, verified clip drive.
+        if (!mount.IsRunning)
+            return new LaunchOutcome(LaunchStatus.Blocked,
+                $"Medal is running but its clip drive is stopped. {QuitFromTray}, then open Medal Library to recover this PC's session.");
+        var health = mount.Health();
+        if (!health.Healthy)
+            return new LaunchOutcome(LaunchStatus.Blocked,
+                $"Medal's clip drive could not be verified: {health.Detail} {QuitFromTray}, then open Medal Library to recover this PC's session.");
+        return new LaunchOutcome(LaunchStatus.AlreadyRunning, "Medal is already running in this PC's session.", journal.SessionId);
+    }
+
+    private LaunchOutcome CheckReopenedSession(string session)
+    {
+        try { return CheckRunningSession(store.ReadJournal(), session); }
+        catch (StorageActionRequiredException ex) { return StorageActionLaunch(ex); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return StorageOfflineLaunch(ex); }
     }
 
     /// <summary>
@@ -285,10 +294,18 @@ internal sealed partial class SessionCoordinator
             return cleanup.Length == 0 ? null : new LaunchOutcome(LaunchStatus.Blocked, cleanup.TrimStart(), session);
         }
         var finished = Finish(session);
-        return finished.Status is FinishStatus.Published or FinishStatus.Unchanged
-            ? null
-            : new LaunchOutcome(finished.Status == FinishStatus.Pending && finished.Cause != PendingCause.NeedsAction ? LaunchStatus.Waiting : LaunchStatus.Blocked,
-                "This PC's previous session must finish first. " + finished.Message, StorageOffline: finished.StorageOffline);
+        if (finished.Status is FinishStatus.Published or FinishStatus.Unchanged) return null;
+        string message = "This PC's previous session must finish first. " + finished.Message;
+        if (finished.Status != FinishStatus.Pending || finished.Cause == PendingCause.NeedsAction)
+            return new LaunchOutcome(LaunchStatus.Blocked, message, session);
+        if (shutdown?.Ending == true) return new LaunchOutcome(LaunchStatus.Waiting, message, session);
+        if (medal.IsRunning())
+        {
+            var reopened = CheckReopenedSession(session);
+            if (reopened.Status != LaunchStatus.Waiting) return reopened;
+        }
+        return new LaunchOutcome(LaunchStatus.FinishingPreviousSession, message, session,
+            StorageOffline: finished.StorageOffline, PendingFinish: finished);
     }
 
     private LaunchOutcome StartSession()

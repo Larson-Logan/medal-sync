@@ -10,13 +10,14 @@ namespace MedalSync.Session;
 internal sealed partial class SessionCoordinator
 {
     /// <summary>Watches a running session until Medal exits, then finishes it.</summary>
-    public FinishOutcome Supervise(string session, Action<string> notify, CancellationToken cancellation)
+    public FinishOutcome Supervise(string session, Action<string> notify, CancellationToken cancellation, FinishOutcome? pendingFinish = null)
     {
         var told = new HashSet<string>(StringComparer.Ordinal);
         int consecutiveStatusFailures = 0;
         int failedAttempts = 0;
         var nextCompatibilityCheck = clock.Now;
         var nextRequestCleanup = clock.Now;
+        bool recoveringPreviousSession = pendingFinish is not null;
         // The PCs asking for the library at the last successful check, shown in this PC's status while Medal runs.
         IReadOnlyList<string> waiting = [];
         void Send(string message)
@@ -34,7 +35,8 @@ internal sealed partial class SessionCoordinator
             if (shutdown?.Ending == true) return FinishShutdown(session);
             if (!medal.IsRunning())
             {
-                var outcome = Finish(session);
+                var outcome = pendingFinish ?? Finish(session);
+                pendingFinish = null;
                 if (outcome.Status != FinishStatus.Pending) return outcome;
                 if (outcome.Cause != PendingCause.None)
                 {
@@ -54,6 +56,26 @@ internal sealed partial class SessionCoordinator
             }
             else
             {
+                if (recoveringPreviousSession)
+                {
+                    // Medal can also reopen while the previous finish waits between attempts.
+                    pendingFinish = null;
+                    var resumed = Finish(session);
+                    if (resumed.Status != FinishStatus.Pending) return resumed;
+                    var running = CheckReopenedSession(session);
+                    if (running.Status == LaunchStatus.Blocked)
+                    {
+                        Report(SessionPhase.RecoveryNeeded, running.Message, session, isOutcome: true);
+                        return new FinishOutcome(FinishStatus.Blocked, running.Message, resumed.Generation);
+                    }
+                    if (running.Status == LaunchStatus.Waiting)
+                    {
+                        Once(running.Message);
+                        Pause(options.PollInterval);
+                        continue;
+                    }
+                    recoveringPreviousSession = false;
+                }
                 if (compatibility is not null && clock.Now >= nextCompatibilityCheck)
                 {
                     nextCompatibilityCheck = clock.Now + TimeSpan.FromMinutes(1);
