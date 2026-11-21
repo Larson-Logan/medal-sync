@@ -15,9 +15,42 @@ internal sealed class ReplicationVerification(MedalSyncConfig config, LocalState
     private string Binding => Hashing.Sha256Hex(Json.Serialize(new
     {
         config.LibraryId, source, destination, config,
-        credentials = config.Replication?.RcloneConfigPath is { } path && File.Exists(Environment.ExpandEnvironmentVariables(path))
-            ? Hashing.Sha256File(Environment.ExpandEnvironmentVariables(path)) : null,
+        credentials = config.Replication?.RcloneConfigPath is { } path && !WindowsPath.TryParse(destination, out _, out _)
+            ? CredentialFingerprint(Environment.ExpandEnvironmentVariables(path)) : null,
     }));
+
+    private static string? CredentialFingerprint(string path)
+    {
+        // rclone can atomically rewrite the INI file when it refreshes OAuth. Bind to the remote
+        // configuration, including the presence of a token, without binding to its rotating contents.
+        var settings = new List<string>();
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            while (reader.ReadLine() is { } line)
+            {
+                line = line.Trim();
+                if (line.Length == 0 || line[0] is '#' or ';') continue;
+                if (line[0] == '[' && line[^1] == ']')
+                {
+                    settings.Add($"[{line[1..^1].Trim()}]");
+                    continue;
+                }
+                int separator = line.AsSpan().IndexOfAny('=', ':');
+                if (separator <= 0)
+                {
+                    settings.Add(line);
+                    continue;
+                }
+                string key = line[..separator].TrimEnd();
+                settings.Add(key is "token" or "\"token\"" or "`token`" or "\"\"\"token\"\"\""
+                    ? "token=" : key + "=" + line[(separator + 1)..].TrimStart());
+            }
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return null; }
+        return Hashing.Sha256Hex(Json.Serialize(settings));
+    }
 
     private string ReceiptPath => Path.Combine(state.Root, "replication", "destinations",
         Hashing.Sha256Hex(System.Text.Encoding.UTF8.GetBytes(destination)) + ".json");

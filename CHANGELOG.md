@@ -3,6 +3,10 @@
 ## Unreleased
 
 - Show a Windows notification when this PC's finish reaches Ready, when a finish needs you, and when a cloud copy or sign-in check needs attention, once per state change. Clicking it opens the status panel; **Show notifications** in the tray menu turns them off (#247).
+- Cloud verification keeps its receipts when rclone refreshes an OAuth token (#221).
+- The clip-drive limit now throttles local and SMB write-back. It also caps reads of clips that are not cached (#222).
+- Windows uninstall asks you to restore Medal's startup entries before removing a launcher they still use (#239).
+
 - Launch keeps retrying an interrupted session's handoff. If Medal reopens during the drain, launch verifies the clip drive and resumes supervision (#214, #215).
 - Google Drive initialization can resume after a partial local write. A finish resuming publication skips generation numbers already used by interrupted cloud uploads (#217, #219).
 - A persistent-media refresh can retry an interrupted backup when the reviewed local file is still intact. Legacy startup recovery keeps the session login when its cache is inaccessible (#224, #225).
