@@ -39,13 +39,14 @@ RULES = [
     # Linux job only. docs/setup.html, LICENSE and THIRD_PARTY.md ship in the
     # installer, so they are deliberately not here.
     (['README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md',
-      'SECURITY.md', 'SUPPORT.md', 'docs/*.md', 'tests/README.md',
+      'SECURITY.md', 'SUPPORT.md', 'docs/*.md', 'docs/knowledge/', 'tests/README.md',
       '.github/ISSUE_TEMPLATE/', '.github/PULL_REQUEST_TEMPLATE.md',
       '.github/labels.json', '.github/project.json', '.github/release.yml',
       '.github/dependabot.yml', '.github/rulesets/',
       '.github/workflows/milestones.yml', '.github/workflows/release.yml',
       '.github/workflows/beta.yml', '.github/workflows/pages.yml', 'site/',
       '.github/workflows/branch-cleanup.yml', 'scripts/cleanup-pr-branch.py',
+      'scripts/cleanup-beta-releases.py',
       '.github/workflows/winget.yml', 'scripts/new-winget-manifest.py',
       'scripts/check-promotion.py', 'scripts/prepare-release.py',
       'scripts/check-repository.py', 'scripts/check-doc-links.mjs',

@@ -78,8 +78,11 @@ Setup checks the initiating user's library readiness before copying programs.
 Quit Medal normally, wait for Ready, then choose **Exit Medal Sync** in the
 status panel or tray menu first. Older versions call this **Exit status view
 (supervision continues)** in the tray menu. Running companion processes,
-retained session credentials, incomplete configuration, unavailable coordination
-storage and non-CLEAN ownership refuse installation. Setup never force-closes
+retained session credentials, a device identity without a configuration,
+unavailable coordination storage and non-CLEAN ownership refuse installation.
+A configuration saved by the wizard before the first `init` or `enroll` does
+not block setup, uninstall or **Check for updates**: without a device identity
+this PC cannot own the library. Setup never force-closes
 Medal or automatically reboots. While setup or uninstall is open, new companion
 library operations are blocked.
 
@@ -115,11 +118,14 @@ folder; uninstall before moving the programs to another folder.
 A destination containing a portable installation or user configuration
 is refused so that program and data locations remain separate.
 
-Each desktop launch checks the public GitHub endpoint for a newer stable release
-with a two-second network budget. Offline operation, private repositories, rate
-limits and missing or malformed releases continue normal launch. When an update
-is available, the launch notice points you to **Check for updates**. Nothing
-installs until you ask for it.
+Each desktop launch checks for updates in the background, using a successful
+answer from the past day when available. A changed beta preference, unreadable
+cache or clock correction triggers a fresh check, with a two-second network
+budget. Opening Medal never waits for the answer. Offline operation, rate limits
+and missing or malformed releases stay silent. When an update is available, a
+notice in the status view points you to **Check for updates**. That explicit
+command always contacts GitHub directly and verifies the selected release.
+Nothing installs until you ask for it.
 
 Update checks offer only stable releases unless this PC opts in to betas: add
 `"betaUpdates": true` to its [configuration](configuration.md#top-level-fields).
@@ -153,9 +159,10 @@ update now:
 4. When setup ends, it reopens the Medal Sync status panel, including after a
    refused or failed installation. Open Medal again when you are ready.
 
-If the library still is not Ready after Medal and supervision stop, for example
-because a session needs recovery or another PC owns the library, the update
-stops with that guidance and opens the saved installer folder. Fix it, then
+If this PC still holds the library after Medal and supervision stop, for
+example because its session needs recovery, the update stops with that
+guidance and opens the saved installer folder. A session held by another PC
+does not stop the update: setup changes only this PC's programs. Fix it, then
 choose **Check for updates** again. A program folder that is not a standard
 installation location opens the normal setup wizard instead of installing
 unattended. Download folders holding only setups for the installed version or
@@ -173,11 +180,15 @@ EXE is already bundled in every setup package: installation creates
 `unins000.exe` and `unins000.dat` in the chosen program folder. Keep both together;
 the EXE uses its installation log to remove only managed files. It can also be
 run directly from that folder.
-The native uninstaller
-requires the programs to be stopped and checks readiness for its Windows user.
-It checks again after confirmation, immediately before removing programs.
-If you supplied credentials for a different administrator account, quit all
-sessions and verify the original user's Ready status before uninstalling.
+The native uninstaller requires the programs to be stopped and checks readiness
+and Medal's startup entries for the Windows account running it. It checks again
+after confirmation, immediately before removing programs. If Medal's sign-in
+entry, `medal://` handler or shortcuts still point to this installation, turn
+off **Start Medal at sign-in** in the status app or run
+`medal-sync startup --restore` from this installation, then exit Medal Sync
+and retry. For an all-users installation, do this from each account using
+that launcher. If you supply credentials for a different administrator
+account, also quit all sessions and verify the original user's Ready status.
 
 Uninstall removes managed program files, its own shortcuts, its PATH entry and
 Installed apps registration. User settings, identity, recordings, cache, backups and unowned

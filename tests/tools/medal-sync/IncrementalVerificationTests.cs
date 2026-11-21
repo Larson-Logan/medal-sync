@@ -20,13 +20,13 @@ public sealed class IncrementalVerificationTests : IDisposable
         File.WriteAllText(Path.Combine(Source, name), bytes);
     }
     private (string[] Bytes, string[] Sizes, bool Full) Pass(MedalSyncConfig? config = null, string target = "cloud:folder",
-        DateTimeOffset? now = null, Action? end = null, bool fail = false, string[]? files = null)
+        DateTimeOffset? now = null, Action? end = null, bool fail = false, string[]? files = null, bool idle = false)
     {
         string[] bytes = [], sizes = [];
         bool full = false;
         new ReplicationVerification(config ?? Config, State, Source, target, new string('b', 64), files ?? ["one.mp4"], now ?? _now)
             .Run((delta, _) => { if (fail) throw new IOException("interrupted"); bytes = delta.ToArray(); },
-                same => sizes = same.ToArray(), (_, _, f) => full = f, end ?? (() => { }));
+                same => sizes = same.ToArray(), (_, _, f) => full = f, end ?? (() => { }), idleCheckpoint: idle);
         return (bytes, sizes, full);
     }
 
@@ -98,6 +98,18 @@ public sealed class IncrementalVerificationTests : IDisposable
             Assert.Throws<InvalidDataException>((Config with { Replication = Config.Replication! with { FullVerifyEveryHandoffs = bad } }).Validate);
         foreach (int bad in new[] { 0, 31 })
             Assert.Throws<InvalidDataException>((Config with { Replication = Config.Replication! with { FullVerifyEveryDays = bad } }).Validate);
+    }
+
+    [Fact]
+    public void IdleEvidenceIsConsumedByFinishWithoutDeferringTheNextFullVerification()
+    {
+        Media("one.mp4");
+        var config = Config with { Replication = new(null, null, []) };
+        Assert.True(Pass(config, idle: true).Full);
+        Assert.Empty(Pass(config, idle: true).Bytes);
+        Assert.Empty(Pass(config).Bytes); // Finish checks destination sizes instead of reading every byte again.
+        Assert.True(Pass(config, idle: true).Full); // Next session still respects always-full policy.
+        Assert.True(Pass(config, now: _now.AddDays(7), idle: true).Full);
     }
 
     public void Dispose() => _fixture.Dispose();

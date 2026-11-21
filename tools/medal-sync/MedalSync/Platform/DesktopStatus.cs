@@ -49,10 +49,27 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
 {
     /// <summary>Replaces the phase's own title when the phase alone would mislead, as before this PC is set up.</summary>
     public string? Heading { get; init; }
+    public bool ClipsSynced { get; init; }
+
+    /// <summary>The rclone remote whose last storage check said its sign-in expired or was revoked, offered as Sign in again.</summary>
+    public string? SignInRemote { get; init; }
+
+    /// <summary>
+    /// A failed sign-in check or a cloud copy that needs attention, whichever notice the panel shows. Kept apart from
+    /// <see cref="Notice"/>, which a more urgent notice can replace, so a notification follows each change once.
+    /// </summary>
+    public string? StorageAttention { get; init; }
+
+    /// <summary>
+    /// The status describes this PC's own session in the journal, not another PC's session or a refused storage access,
+    /// so a later Ready is this PC's own finish.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool OwnedHere { get; init; }
 
     public string Title => Heading ?? Phase switch
     {
-        SessionPhase.Active => Recording ? "Recording" : "Medal open",
+        SessionPhase.Active => Recording ? "Recording" : ClipsSynced ? "All clips uploaded" : "Medal open",
         SessionPhase.Waiting => "Waiting for another PC",
         SessionPhase.RecoveryNeeded => "Recovery needed",
         SessionPhase.Unknown => "Unknown / unreachable",
@@ -70,6 +87,10 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
     public static DesktopStatus NotConfigured(DateTimeOffset now) => new(SessionPhase.Unknown,
         "Medal Sync is not set up on this PC yet. Right-click the Medal Sync icon in the notification area and choose Configure, "
         + "or open Medal Sync Setup Guide from the Start menu.", now) { Heading = "Not set up yet" };
+
+    public static DesktopStatus SetupPending(LibrarySetupPending pending, DateTimeOffset now) => new(SessionPhase.Unknown,
+        $"Configuration is saved. Quit Medal, then choose Configure to review and {pending.Action} the library. "
+        + "Nothing is applied until you confirm the library preview.", now) { Heading = "Finish library setup" };
 
     public static DesktopStatus Unknown(DateTimeOffset? lastConfirmed = null) => new(SessionPhase.Unknown,
         "Status is stale or unreadable. Keep this PC's session and cache; reconnect to storage or reopen status to retry.", lastConfirmed);
@@ -90,7 +111,10 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         ProgressEnvelope? report = null;
         try { report = Json.ReadFile<ProgressEnvelope>(Path.Combine(state.Root, "desktop-status.json"), "Desktop progress"); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Explicit unknown below. */ }
-        var status = Resolve(journal, device ?? NoDevice, report, supervisorRunning, now);
+        var status = Resolve(journal, device ?? NoDevice, report, supervisorRunning, now) with
+        {
+            OwnedHere = device is not null && journal.State != OwnershipState.Clean && journal.Owner?.DeviceId == device.DeviceId,
+        };
         var retry = ReplicaRetryStatus.Read(state, libraryId, now);
         var pending = StorageReplication.Pending(state, libraryId);
         status = status with { CanRetryCloudCopies = status.Phase == SessionPhase.Ready && pending.Count > 0 && retry?.Running != true };
@@ -102,11 +126,17 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
             if (status.Notice is null && now - notice.At < TimeSpan.FromHours(1)) status = status with { Notice = notice.Message };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Optional notice. */ }
-        if (status.Notice is null && StorageCheckReport.Outstanding(state, libraryId) is { Count: > 0 } problems)
-            status = status with { Notice = "Storage needs attention: " + string.Join(" ", problems.Select(p => p.Detail))
-                + " Run 'medal-sync storage check' after fixing it." };
+        if (StorageCheckReport.Outstanding(state, libraryId).FirstOrDefault(p => p.Result == StorageCheckResult.SignInRequired) is { } expired
+            && ProviderSignIn.RemoteOf(expired.Destination) is { } remote)
+            status = status with { SignInRemote = remote };
+        string? signIn = StorageCheckReport.Outstanding(state, libraryId) is { Count: > 0 } problems
+            ? "Storage needs attention: " + string.Join(" ", problems.Select(p => p.Detail)) + " Run 'medal-sync storage check' after fixing it."
+            : null;
+        if (status.Notice is null && signIn is not null) status = status with { Notice = signIn };
         var checkNotice = string.Join(" ", (cloudChecks ?? ReplicaCheckStatus.Read(state, libraryId, now)).SelectMany(c => c.Messages()));
         if (status.Notice is null && checkNotice.Length > 0) status = status with { Notice = checkNotice };
+        string? attention = signIn ?? (checkNotice.Length > 0 ? checkNotice : null);
+        if (attention is not null) status = status with { StorageAttention = attention };
         if (status.Notice is null && pending.Count > 0)
             status = status with { Notice = $"Cloud copy {string.Join(", ", pending.Select(p => $"'{p.Name}'"))} is pending. Choose Retry cloud copies while Ready, run 'medal-sync replicate retry --apply', or wait for the next finish." };
         return status;
@@ -123,9 +153,10 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         var progress = fresh ? report?.Progress : null;
         if (journal.Owner is { } owner && owner.DeviceId != device.DeviceId)
             return new(journal.State == OwnershipState.RecoveryRequired ? SessionPhase.RecoveryNeeded : SessionPhase.Waiting,
-                Ownership.IsFinishing(journal.State)
-                    ? $"{owner.DisplayName} is finishing its uploads and hands off the library by itself. Open Medal here after it is Ready."
-                    : $"Quit Medal and finish the handoff on {owner.DisplayName}. Reopen Medal here after that PC is Ready.", now);
+                Ownership.QuietSince(journal, now) is { } since
+                    ? Ownership.QuietFinishMessage(owner.DisplayName, since)
+                    : $"{owner.DisplayName} still owns the library ({Ownership.Describe(journal.State)}). {Ownership.HandoffAdvice(journal.State)} "
+                        + "Open Medal here once the library is Ready.", now);
         if (journal.State == OwnershipState.Clean)
         {
             // An operation may be preparing to acquire ownership. Never flash Ready during startup.
@@ -152,7 +183,8 @@ internal sealed record DesktopStatus(SessionPhase Phase, string NextAction, Date
         if (progress is null || report is null || progress.SessionId != journal.SessionId) return Unknown(report?.ConfirmedAt);
         if (!Enum.IsDefined(progress.Phase) || progress.Phase is SessionPhase.Ready or SessionPhase.Waiting) return Unknown(report.ConfirmedAt);
         return new(progress.Phase, progress.NextAction, report.ConfirmedAt, progress.QueuedFiles, progress.QueuedBytes, progress.Replica,
-            Recording: progress.Phase == SessionPhase.Active && progress.Recording);
+            Recording: progress.Phase == SessionPhase.Active && progress.Recording)
+        { ClipsSynced = progress.Phase == SessionPhase.Active && !progress.Recording && progress.ClipsSynced };
     }
 }
 
@@ -213,8 +245,9 @@ internal sealed class DesktopStatusPublisher : IDisposable
 /// status files. Opening the store again on every read is what costs: in cloud mode it starts rclone twice (for the
 /// sign-in token and the Drive folder) and makes two extra Drive requests. The cloud connection, with its token and
 /// folder, is kept even while opening fails, so an outage costs one failed request per read. Generations never change
-/// once published, so the committed manifest is checked once per generation. An outage keeps everything; any other
-/// failure drops the store and the connection, so the next read opens the library afresh.
+/// once published, so the committed manifest is checked once per generation. An outage is reported as Waiting for
+/// storage and keeps the connection. Other failures drop it, so the next read opens the library afresh. A refused history download
+/// keeps its connection's short retry pause, so every status poll does not start the same failed transfer again.
 /// </summary>
 internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> supervisorRunning,
     Func<MedalSyncConfig, CloudCoordination>? connect = null)
@@ -239,9 +272,12 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
                 return DesktopStatus.NotConfigured(DateTimeOffset.UtcNow);
             }
             var config = Config(local.ConfigPath);
+            var device = File.Exists(Path.Combine(local.Root, "device.json")) ? local.ExistingDevice() : null;
+            var pending = LibrarySetupPending.Read(local, config);
+            if (pending?.AwaitsInitialization(local, config, supervisorRunning) == true)
+                return DesktopStatus.SetupPending(pending, DateTimeOffset.UtcNow);
             // The wizard saves only the configuration. A PC that has not run its first command has no identity yet,
             // and so owns nothing; a damaged or copied identity still refuses.
-            var device = File.Exists(Path.Combine(local.Root, "device.json")) ? local.ExistingDevice() : null;
             if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot)) return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
             OwnershipRecord journal;
             try
@@ -254,12 +290,23 @@ internal sealed class DesktopStatusSource(Func<LocalState> state, Func<bool> sup
                     _checkedGeneration = journal.CommittedGeneration;
                 }
             }
-            catch (Exception ex) when (ex is not IOException)
+            catch (StorageActionRequiredException ex)
+            {
+                // A refused sign-in or access to the cloud journal is storage attention for this PC, whoever owns the library.
+                return new DesktopStatus(SessionPhase.RecoveryNeeded, ex.Message, DateTimeOffset.UtcNow) { StorageAttention = ex.Message };
+            }
+            catch (IOException)
+            {
+                return DesktopStatus.StorageOffline(DateTimeOffset.UtcNow);
+            }
+            catch when (_cloud?.HasHistoryRefusal is not true)
             {
                 Forget();
                 throw;
             }
             var now = DateTimeOffset.UtcNow;
+            if (pending is not null && journal.State == OwnershipState.Clean && !LibrarySetupPending.HasSession(local) && !supervisorRunning())
+                return DesktopStatus.SetupPending(pending, now);
             return DesktopStatus.Read(local, config.LibraryId, journal, device, supervisorRunning(), now,
                 ReplicaCheckStatus.Read(local, config.LibraryId, now, config.Replication?.Targets ?? []));
         }

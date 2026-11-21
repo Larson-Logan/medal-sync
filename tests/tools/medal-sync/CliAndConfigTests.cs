@@ -370,7 +370,7 @@ public sealed class CliAndConfigTests : IDisposable
         }
         config.Validate();
         string session = new('1', 32);
-        Assert.Equal(recording, config.MountSettings(session, @"C:\log.txt").BandwidthLimitMiB);
+        Assert.Equal(recording ?? 2, config.MountSettings(session, @"C:\log.txt").BandwidthLimitMiB);
         Assert.Equal(finishing, config.MountSettings(session, @"C:\log.txt", forRecording: false).BandwidthLimitMiB);
         // Unset limits are not written back, so older builds can still read a saved configuration.
         string json = System.Text.Encoding.UTF8.GetString(Util.Json.Serialize(config.Mount));

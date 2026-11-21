@@ -11,5 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../tools/medal-sync/MedalSync.Launch/MedalSync.Launch.csproj" />
+    <Compile Include="../tools/medal-sync/Fixtures/MedalFixture.cs" Link="Fixtures/MedalFixture.cs" />
+    <None Include="../tools/medal-sync/Fixtures/*.sql" Link="Fixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

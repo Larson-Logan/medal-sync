@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using MedalSync.Cli;
 using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Library;
@@ -12,6 +14,7 @@ using MedalSync.Session;
 using MedalSync.Storage;
 using MedalSync.Tests.Fixtures;
 using MedalSync.Util;
+using Microsoft.Win32;
 
 namespace MedalSync.Integration;
 
@@ -46,9 +49,12 @@ internal static class Program
                 return 0;
             }
             TestReplication(rclone);
+            TestLocalMountBandwidth(rclone);
             TestIncrementalAndReadyRetry(rclone);
             TestReplicaAuditAndPrune(rclone);
             TestCloudPrimary(rclone);
+            TestPrimaryPrune(rclone);
+            TestIdlePrefetch(rclone);
             CloudEnrollment.Run(rclone, Check);
             CloudHandoff.Run(rclone, Check, testMount: args.Contains("--mount"));
             TestInterruptedTransfer(rclone);
@@ -56,11 +62,70 @@ internal static class Program
             {
                 TestTwoPcMountRoundTrip(rclone);
                 TestTwoPcMountRoundTrip(rclone, localOnly: true);
+                TestReplayBufferHold(rclone);
             }
             Console.WriteLine($"PASS: {_checks} real-process storage integration assertions; all data was synthetic.");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
+    /// <summary>
+    /// Server mode without a local copy, with the replay-buffer hold: a held segment never uploads, a deleted segment
+    /// leaves the queue, a saved clip uploads after the normal delay, and releasing everything drains as before.
+    /// </summary>
+    private static void TestReplayBufferHold(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        char letter = Enumerable.Range('D', 'Z' - 'D' + 1).Select(c => (char)c).Reverse().First(c =>
+            !Directory.Exists(c + @":\") && !DriveInfo.GetDrives().Any(d => d.Name.StartsWith(c + ":", StringComparison.OrdinalIgnoreCase)));
+        var config = Config(fixture, rclone, letter + @":\Clips") with { StorageMode = StorageMode.Server };
+        config = config with { Mount = config.Mount with { RecordingBufferHoldSeconds = 120 } };
+        Seed(config);
+        var state = new LocalState(fixture.PathFor("state"));
+        var mount = new RcloneClipMount(config, state, .01, new SystemClock());
+        string session = SessionCoordinator.NewId();
+        bool stopped = false;
+        try
+        {
+            mount.Start(session, forRecording: true);
+            string buffer = config.Capture.Append("Temp", "RecordingBuffer").Display;
+            Directory.CreateDirectory(buffer);
+            File.WriteAllText(Path.Combine(buffer, "held-segment.bin"), "synthetic held replay segment");
+            File.WriteAllText(Path.Combine(buffer, "deleted-segment.bin"), "synthetic deleted replay segment");
+            File.WriteAllText(config.Capture.Append("saved.mp4").Display, "synthetic saved clip");
+            Thread.Sleep(TimeSpan.FromSeconds(2));
+            File.Delete(Path.Combine(buffer, "deleted-segment.bin"));
+            string server(params string[] parts) => config.ServerCapture.Append(parts).Display;
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (!File.Exists(server("saved.mp4")) && DateTime.UtcNow < deadline)
+            {
+                Check(mount.ReleaseUploads(includeBuffer: false) is null, "releasing saved clips through the real control API works");
+                Thread.Sleep(500);
+            }
+            Check(File.Exists(server("saved.mp4")) && File.ReadAllText(server("saved.mp4")) == "synthetic saved clip",
+                "a saved clip uploads after the normal delay while the replay buffer is held");
+            var queue = mount.Drain();
+            Check(queue.State == DrainState.Pending && queue.Uploads.Count == 1 && queue.Uploads[0].Name?.EndsWith("held-segment.bin", StringComparison.Ordinal) == true
+                && !queue.Uploads[0].Uploading, "only the held segment waits in the real upload queue, and it is not uploading");
+            Check(!File.Exists(server("Temp", "RecordingBuffer", "held-segment.bin")) && !File.Exists(server("Temp", "RecordingBuffer", "deleted-segment.bin")),
+                "neither a held nor a deleted replay-buffer segment reaches primary storage");
+            deadline = DateTime.UtcNow.AddSeconds(30);
+            while (mount.Drain().State != DrainState.Drained && DateTime.UtcNow < deadline)
+            {
+                mount.ReleaseUploads(includeBuffer: true);
+                Thread.Sleep(500);
+            }
+            Check(mount.Drain().State == DrainState.Drained && File.Exists(server("Temp", "RecordingBuffer", "held-segment.bin"))
+                && !File.Exists(server("Temp", "RecordingBuffer", "deleted-segment.bin")),
+                "releasing everything at finish drains the queue exactly as without the hold");
+            stopped = mount.Stop();
+            Check(stopped, "the held drive stops normally");
+        }
+        finally
+        {
+            if (!stopped && mount.IsRunning && !mount.Stop()) Console.Error.WriteLine("Synthetic mount did not stop; retaining test evidence at " + fixture.Root);
+        }
     }
 
     private static int ProbeUpdateProgress()
@@ -119,6 +184,13 @@ internal static class Program
         try
         {
             SetupMaintenance.RequireReady(root, File.Exists(Path.Combine(root, "application-running")), File.Exists(Path.Combine(root, "supervisor-running")));
+            if (args.Contains("--uninstall"))
+            {
+                string key = @"Software\MedalSyncTests\" + Path.GetFileName(Path.GetDirectoryName(root));
+                using var startup = new StartupIntegration(root, Path.Combine(AppContext.BaseDirectory, StartupEntries.LauncherFile),
+                    Registry.CurrentUser.CreateSubKey(key), [], Path.Combine(root, "Medal.exe"), () => DateTimeOffset.UtcNow);
+                startup.RequireDetachedForUninstall();
+            }
             // Model a state change while the uninstall confirmation is open.
             if (File.Exists(Path.Combine(root, "refuse-second-check")))
             {
@@ -215,6 +287,23 @@ internal static class Program
         string history = Path.Combine(Path.GetDirectoryName(ReplicaFile(fixture, "onedrive", "#clip [test].mp4"))!, ".medal-sync-history");
         Check(Directory.EnumerateFiles(history, "*.mp4", SearchOption.AllDirectories).Any(f => File.ReadAllText(f) == "prior destination version"), "versioned replication preserves the previous destination before updating");
         Check(File.ReadAllText(ReplicaFile(fixture, "onedrive", "#clip [test].mp4")) == "synthetic media bytes", "versioned replication verifies the updated destination");
+    }
+
+    private static void TestLocalMountBandwidth(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone);
+        var mount = MountPlan.Arguments(config.MountSettings("synthetic-session", fixture.PathFor("mount.log")));
+        string rate = mount[mount.ToList().IndexOf("--bwlimit") + 1];
+        string source = fixture.PathFor("recording.mp4");
+        string destination = fixture.PathFor("backing", "recording.mp4");
+        const int bytes = 12 * 1024 * 1024;
+        using (var clip = File.Create(source)) clip.SetLength(bytes);
+        var clock = Stopwatch.StartNew();
+        new RcloneRunner(rclone).Run(["copyto", source, destination, "--config", fixture.PathFor("empty.conf"),
+            "--bwlimit", rate], TimeSpan.FromSeconds(30));
+        Check(new FileInfo(destination).Length == bytes && clock.Elapsed >= TimeSpan.FromSeconds(3),
+            $"the clip-drive rate throttles a real local-backend copy ({clock.Elapsed.TotalSeconds:F1} s for 12 MiB at {rate})");
     }
 
     private static void TestIncrementalAndReadyRetry(string rclone)
@@ -361,6 +450,90 @@ internal static class Program
             "a second local collection hydrates missing bytes from the real named primary");
     }
 
+    /// <summary>PC A published new clips to a named rclone primary; idle PC B prefetches them and its next launch downloads nothing.</summary>
+    private static void TestIdlePrefetch(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone) with
+        {
+            StorageMode = StorageMode.Server, Remote = "onedrive:Primary",
+            Replication = new(fixture.PathFor("second-persistent"), Remotes(fixture), []),
+        };
+        var state = new LocalState(fixture.PathFor("second-state"));
+        new RcloneAssetChecker(config, state).Initialize(false);
+        string primary = fixture.PathFor("onedrive", "Primary", "Clips");
+        File.WriteAllText(Path.Combine(primary, "older #1.mp4"), "clip this PC already has");
+        File.WriteAllText(Path.Combine(primary, "new [clip].mp4"), "clip the other PC recorded");
+        Directory.CreateDirectory(config.MountedCapture.Display);
+        File.WriteAllText(config.MountedCapture.Append(MedalSyncConfig.StorageMarker).Display, config.LibraryId);
+        File.WriteAllText(config.MountedCapture.Append("older #1.mp4").Display, "clip this PC already has");
+        string db = fixture.CreateLibrary("published");
+        foreach (string name in new[] { "older #1", "new [clip]" })
+            MedalFixture.AddContent(db, name, video: config.Capture.Append(name + ".mp4").Display);
+        var snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        var manifest = new AssetManifest(1, new[] { "older #1.mp4", "new [clip].mp4" }.Select(name =>
+        {
+            var file = new FileInfo(Path.Combine(primary, name));
+            return new AssetEntry(config.Capture.Append(name).Display, file.Length, file.LastWriteTimeUtc);
+        }).ToArray(), []);
+        var otherPc = new DeviceIdentity(new string('d', 32), "Synthetic other PC");
+        var store = CoordinationStore.Create(config.LibraryCoordinationDirectory, config.LibraryId, snapshot, manifest, otherPc,
+            new string('e', 32), Versions, DateTimeOffset.UtcNow);
+        var before = store.ReadJournal();
+        var result = new MediaPrefetch(config, state, store, new DeviceIdentity(new string('f', 32), "Synthetic idle PC"), () => { }).Run();
+        Check(result.Downloaded == 1 && result.Remaining == 0 && File.ReadAllText(config.MountedCapture.Append("new [clip].mp4").Display) == "clip the other PC recorded",
+            "real rclone prefetch downloads and byte-checks only the clip this idle PC lacks");
+        Check(!Directory.Exists(Path.Combine(config.Replication!.LocalCopyRoot!, MediaPrefetch.StagingFolder)) && store.ReadJournal() == before,
+            "prefetch leaves no staging folder and never changes the journal");
+        new StorageReplication(config, state, () => { }, _ => throw new InvalidOperationException("Launch must not download anything.")).Prepare(snapshot);
+        Check(true, "the next launch on the prefetched PC downloads nothing");
+    }
+
+    private static void TestPrimaryPrune(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone) with
+        {
+            StorageMode = StorageMode.Server, Remote = "onedrive:Primary",
+            Replication = new(fixture.PathFor("persistent"), Remotes(fixture), []),
+        };
+        var state = new LocalState(fixture.PathFor("state"));
+        new RcloneAssetChecker(config, state).Initialize(false);
+        string primary = fixture.PathFor("onedrive", "Primary", "Clips");
+        void Put(string relative, string text, int ageDays)
+        {
+            string path = Path.Combine(primary, relative.Replace('/', '\\'));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text);
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-ageDays));
+        }
+        Put("kept [clip].mp4", "referenced", 60);
+        Put("deleted #1.mp4", "deleted in Medal", 60);
+        Put("recent.mp4", "changed this week", 2);
+        Put("Temp/RecordingBuffer/segment.mp4", "replay buffer", 60);
+        string db = fixture.CreateLibrary("primary-prune");
+        MedalFixture.AddContent(db, "kept", video: config.Capture.Append("kept [clip].mp4").Display);
+        var snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        var store = CoordinationStore.Create(config.LibraryCoordinationDirectory, config.LibraryId, snapshot, new(1, [], []),
+            new(new string('d', 32), "Synthetic PC"), new string('e', 32), Versions, DateTimeOffset.UtcNow.AddDays(-100));
+        var before = store.ReadJournal();
+        var remote = new RcloneReplicaRemote(config, state, () => { });
+        var prune = PrimaryCommands.Prune(config, state, store, () => { }, remote);
+        var plan = prune.Plan(ReplicaPrune.PrimaryTarget);
+        Check(plan.Files.Select(f => f.Path).SequenceEqual(["deleted #1.mp4"]),
+            "real rclone primary listing plans only the old clip no generation references");
+        var result = ReplicaCommands.ApplyPrune(prune, store, plan);
+        string trashed = Path.Combine(primary, ".medal-sync-trash", plan.Id, "deleted #1.mp4");
+        Check(result.Moved == 1 && File.ReadAllText(trashed) == "deleted in Medal" && File.Exists(Path.Combine(primary, "kept [clip].mp4"))
+            && File.Exists(Path.Combine(primary, "recent.mp4")) && File.Exists(Path.Combine(primary, "Temp", "RecordingBuffer", "segment.mp4"))
+            && File.Exists(Path.Combine(primary, MedalSyncConfig.StorageMarker)), "real rclone moves exactly the reviewed primary file into its trash");
+        Check(PrimaryCommands.Prune(config, state, store, () => { }, remote, () => DateTimeOffset.UtcNow.AddDays(8))
+            .Purge(ReplicaPrune.PrimaryTarget, ReplicaPrune.DefaultPurgeDays, apply: true).Count == 1
+            && !Directory.Exists(Path.Combine(primary, ".medal-sync-trash", plan.Id)) && File.Exists(Path.Combine(primary, "kept [clip].mp4")),
+            "real rclone purge deletes only the old primary trash batch");
+        Check(store.ReadJournal() == before, "primary cleanup never acquires ownership or changes the journal");
+    }
+
     private static void TestInterruptedTransfer(string rclone)
     {
         using var fixture = new MedalFixture();
@@ -452,6 +625,11 @@ internal static class Program
                 Check(File.ReadAllBytes(config.Capture.Append("#clip [test].mp4").Display).SequenceEqual(Encoding.UTF8.GetBytes("synthetic media bytes")), "PC " + (pc + 1) + " reads committed media through the real mount");
                 if (pc == 0)
                 {
+                    string buffer = config.Capture.Append("Temp", "RecordingBuffer").Display;
+                    Directory.CreateDirectory(buffer);
+                    File.WriteAllText(Path.Combine(buffer, "kept-segment.bin"), "synthetic disposable replay segment");
+                    File.WriteAllText(Path.Combine(buffer, "deleted-segment.bin"), "synthetic deleted replay segment");
+                    File.Delete(Path.Combine(buffer, "deleted-segment.bin"));
                     File.WriteAllBytes(config.Capture.Append("new.mp4").Display, Encoding.UTF8.GetBytes("new synthetic recording"));
                     MedalFixture.AddContent(db, "new", video: config.Capture.Append("new.mp4").Display);
                 }
@@ -483,6 +661,16 @@ internal static class Program
                 Check(store.ReadJournal().State == OwnershipState.Clean, "PC " + (pc + 1) + " releases ownership only after verified copies");
                 Check(!Directory.Exists(config.SessionCacheDirectory(launch.Session!)), "PC " + (pc + 1) + " clears only its finished session cache");
                 Check(File.Exists(config.MountedCapture.Append("new.mp4").Display), "PC " + (pc + 1) + " retains the persistent local collection");
+                if (pc == 0 && !localOnly)
+                {
+                    Check(File.Exists(config.MountedCapture.Append("Temp", "RecordingBuffer", "kept-segment.bin").Display),
+                        "unreferenced replay-buffer bytes remain on the recording PC after local-copy handoff");
+                    Check(!File.Exists(config.ServerCapture.Append("Temp", "RecordingBuffer", "kept-segment.bin").Display)
+                        && !File.Exists(config.ServerCapture.Append("Temp", "RecordingBuffer", "deleted-segment.bin").Display),
+                        "neither kept nor deleted replay-buffer segments reach primary storage through a real mount");
+                    Check(File.ReadAllText(config.ServerCapture.Append("new.mp4").Display) == "new synthetic recording",
+                        "saved clips still reach and verify on primary storage while replay buffers stay local");
+                }
                 mount = null;
             }
             foreach (string remote in new[] { "onedrive", "dropbox", "gdrive" })

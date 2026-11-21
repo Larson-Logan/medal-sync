@@ -16,7 +16,8 @@ internal static class NativeBackupIdentity
         // shared-memory/WAL sidecars. Inspect a verified private copy so reading
         // this compatibility marker never changes the native backup on SMB.
         Directory.CreateDirectory(backupDirectory);
-        string inspected = Path.Combine(backupDirectory, "native-source-" + Guid.NewGuid().ToString("N") + ".db");
+        PruneInspectionCopies(backupDirectory);
+        string inspected = Path.Combine(backupDirectory, InspectionPrefix + Guid.NewGuid().ToString("N") + ".db");
         string hash = Util.Hashing.Sha256File(backupDatabase);
         File.Copy(backupDatabase, inspected, overwrite: false);
         if (Util.Hashing.Sha256File(inspected) != hash || Util.Hashing.Sha256File(backupDatabase) != hash)
@@ -33,6 +34,8 @@ internal static class NativeBackupIdentity
         if (Util.Hashing.Sha256File(backupDatabase) != hash || sidecars.Count != after.Count
             || sidecars.Any(pair => !after.TryGetValue(pair.Key, out string? digest) || digest != pair.Value))
             throw new UnsafeOperationException("The native backup group changed while being inspected; retained its private copy.");
+        // Inspection succeeded, so the private copy is no longer evidence of anything.
+        DeleteInspectionCopy(inspected);
         if (expected == 0) return false; // Medal does not restore zero-ID backups.
         if (expected is < 0 or > int.MaxValue) throw new UnsafeOperationException("Unsupported native backup identity.");
         using var local = LibraryDatabase.OpenReadWrite(localDatabase);
@@ -50,6 +53,34 @@ internal static class NativeBackupIdentity
             throw new UnsafeOperationException("Native backup alignment changed library or device records; rolled back.");
         transaction.Commit();
         return true;
+    }
+
+    private const string InspectionPrefix = "native-source-";
+    // Copies kept by a failed inspection are evidence; keep the newest few.
+    // Earlier versions also left one copy after every successful inspection.
+    internal const int KeptInspectionCopies = 3;
+
+    private static void PruneInspectionCopies(string backupDirectory)
+    {
+        var stale = new DirectoryInfo(backupDirectory).EnumerateFiles(InspectionPrefix + "*.db")
+            // File.Copy keeps the source's write time, so order copies by when they were made.
+            .OrderByDescending(file => file.CreationTimeUtc).ThenByDescending(file => file.Name, StringComparer.Ordinal)
+            .Skip(KeptInspectionCopies);
+        foreach (var file in stale) DeleteInspectionCopy(file.FullName);
+    }
+
+    private static void DeleteInspectionCopy(string path)
+    {
+        // Cleanup never blocks a launch: a copy that cannot be removed now
+        // (for example, one an antivirus scan holds open) is pruned next time.
+        try
+        {
+            // Reading a copy can leave SQLite sidecars beside it; they belong to the copy.
+            foreach (string suffix in new[] { "-wal", "-shm", "-journal" })
+                if (File.Exists(path + suffix)) File.Delete(path + suffix);
+            File.Delete(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     private static Dictionary<string, string> InspectSidecars(string database)

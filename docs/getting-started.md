@@ -33,13 +33,18 @@ first.
    **Server (SMB)**. On the first PC choose a new library; on every other PC
    enter the first PC's library ID. Review, then save. See
    [plan configuration](#plan-configuration-before-using-live-data).
-6. **Create or join the library.** On the first PC run `medal-sync init`, read
-   the preview, then `medal-sync init --apply`. On every other PC run
-   `medal-sync enroll --out DIR` and then the same command with `--apply`.
+6. **Create or join the library.** Keep Medal quit. After saving configuration,
+   choose **Review library** in the same window, read the preview, then explicitly
+   confirm creating or joining. Enrollment shows its private review folder;
+   unresolved conflicts stop here for manual review. You can close the window
+   and resume through **Configure** in the status panel or tray menu. Commands
+   remain available: `medal-sync init` then `init --apply` for a new library,
+   or `medal-sync enroll --out DIR` then the same command with `--apply` to join.
    Never run `init` on a library that already exists.
-7. **Record.** Open Medal from the **Medal Library** shortcut. After you quit
-   Medal, wait for **Ready** in the status panel before switching PCs. When
-   it all works, you can choose **Start Medal at sign-in** in the tray menu.
+7. **Record.** Open Medal from the **Medal Library** shortcut. You can shut down
+   Windows with Medal open. To switch while leaving this PC on, quit Medal and
+   wait for **Ready** in the status panel. Once setup is verified, you can
+   choose **Start Medal at sign-in** in the tray menu.
 
 Everything below explains each step in detail, along with recovery and
 advanced options.
@@ -219,7 +224,20 @@ keeping a name without a prefix keeps its saved requirement. Review lists each
 requirement and calls out changed requirements and added or removed targets.
 Local mode needs no persistent-copy field because its primary storage
 already stays on this PC. Cloud credentials remain in the separate local rclone
-configuration file; authorize providers explicitly with `rclone config` first.
+configuration file. To create one without a terminal, choose the provider
+(Google Drive, OneDrive or Dropbox) and a remote name in **Cloud sign-in**, then
+**Sign in**: the provider's page opens in your browser, and after you sign in
+Medal Sync runs the storage check for that remote. Only a passing check saves
+the sign-in, into the **Provider credential file** you chose or, when that is
+empty, into a private file in Medal Sync's state folder, which then fills the
+field. Medal Sync never sees, shows or logs the token. A cancelled or failed
+sign-in leaves the credential file unchanged, and the wizard refuses to save a
+configuration that uses a remote whose sign-in failed. Sign-in is unavailable
+while a session runs on this PC, because rclone's sign-in page needs its local
+port. For Google Drive, consider
+[your own OAuth client](https://rclone.org/drive/#making-your-own-client-id); a
+client left in *Testing* status expires every sign-in after seven days. The
+documented `rclone config` flow keeps working.
 
 Create the dedicated storage, coordination and cache folders before reviewing.
 The wizard checks path rules, Medal compatibility/account, folder availability,
@@ -236,7 +254,12 @@ shows a message and keeps the original value unless you edit that field.
 Review shows the actual values that will be saved.
 Press **Confirm and save** only after reviewing them; Enter in the review page
 does not save. **Back** discards that review; **Cancel** and Escape leave the
-existing setup untouched.
+existing setup untouched before saving. After saving a new setup, **Review
+library** shows the existing `init` or `enroll` preview. Confirmation is separate
+from saving configuration. Closing then keeps the saved configuration and
+records that library setup still needs to be completed; return through
+**Configure**. An enrollment needing manual review cannot be confirmed. Keep
+its displayed review folder; interrupted applies use `enroll recover --out DIR`.
 
 An existing setup displays and preserves its account, library and device
 identities. Before changes, both its original journal and the proposed
@@ -245,9 +268,11 @@ rechecks compatibility, storage and the exact reviewed config/device files,
 retains a verified configuration backup in `Backups`, and atomically replaces
 the configuration. Changed review state or a linked/reparse state path refuses
 saving. Recover missing configuration with an existing device identity from its
-original backup instead of creating a new identity. No wizard operation mounts
-storage, initializes a journal, enrolls a PC, changes Medal's database or edits
-startup entries. Continue with the separate reviewed steps below after saving.
+original backup instead of creating a new identity. Saving configuration alone
+does not change the library or startup entries. The separately confirmed
+library step runs the existing commands, including their ownership locks,
+backups and rechecks that Medal is quit. The command-line steps below remain
+available for scripted setup and recovery.
 
 The CLI configuration workflow remains available:
 
@@ -312,7 +337,7 @@ Apps > Startup**, Medal Sync reports it and leaves that switch to you. Portable
 installs can still use `set-medal-startup.ps1` from their `bin` folder; both
 use the same saved originals. Launch through the Medal Library
 shortcut so storage and ownership are checked before Medal opens. After exit,
-wait for **Ready** before switching PCs, updating or uninstalling.
+wait for **Ready** before updating or uninstalling.
 
 Open **Medal Sync Status** from the Start menu, double-click its notification-area
 icon, or run `medal-sync-launch.exe --status`. A configured desktop launch starts
@@ -345,9 +370,16 @@ Medal Sync on this PC. A blocked finish shows its diagnostic and required recove
 steps in **Last finish result**; follow those steps before retrying. The last
 supervisor refusal stays available when reopening status for that same session.
 When you open Medal while another PC owns the library, Medal Sync sends a switch
-request and asks whether to **wait and open Medal when ready**. No is the
-default. If that PC has already quit Medal and is only uploading, the message
-says it hands off by itself; nobody needs to go to it. Yes shows a waiting window that names the PC that has the library,
+request and offers **Wait and open when ready**. **Cancel** is the default.
+You can shut down Windows with Medal open. Medal Sync saves verified
+clips and library changes in the background and tries to finish the handoff
+during shutdown. If the library is still held and you know the owning PC has
+fully shut down, choose **Use last synced library** on the second PC and
+confirm. Clips and edits made after the last sync stay on the owning PC.
+If you can bring the owning PC online before switching, it can recover the
+unfinished session at sign-in when **Start Medal at sign-in** is enabled.
+You can also use **Retry finish** there with Medal closed.
+**Wait and open when ready** shows a window that names the PC that has the library,
 when it was last checked and whether the server can be reached. Medal opens by
 itself once that PC finishes its handoff, after the usual startup checks. Cancel,
 Windows shutdown or 15 minutes without a handoff stop the wait and withdraw the
@@ -366,7 +398,22 @@ message also appears in the panel instead of a dialog that would take focus.
 
 The panel and tray menu support keyboard access and native accessibility APIs.
 Background notices are coalesced in the panel without popups or taking focus
-from games. Closing the panel hides it. To exit Medal Sync, quit Medal normally,
+from games.
+
+The status app also shows a Windows notification at three moments, once each
+time the state changes: when this PC's finish reaches **Ready** ("Your clips are
+uploaded and verified. You can switch PCs."), when a finish stops and needs you
+(with the same reason the panel shows), and when a cloud copy or a cloud sign-in
+check starts needing attention. Waiting for storage never notifies, because it
+resolves by itself, and nothing is shown for the state the app finds when it
+starts. Clicking a notification opens the status panel; it offers no action of
+its own. Turn them off or on again with **Show notifications** in the tray menu.
+This is saved on this PC in `desktop-preferences.json`, apart from
+`config.json`, so changing it never disturbs a running finish. Windows Focus
+Assist and notification settings still apply, and a notification that cannot be
+shown changes nothing else.
+
+Closing the panel hides it. To exit Medal Sync, quit Medal normally,
 wait for Ready, then choose **Exit Medal Sync** in the panel or tray menu.
 Exit keeps the view open with guidance while supervision or a library operation
 is active. Reopen status at any time. Setup and uninstall require all Medal Sync
@@ -389,7 +436,7 @@ the reason on standard error.
 | --- | --- |
 | `format` | `1`. Later versions of format 1 only add fields; see [versions and schemas](versioning.md). |
 | `libraryId` | This PC's configured library. |
-| `storage` | `"reachable"` or `"unreachable"`; `message` explains the second. |
+| `storage` | `"reachable"`, `"unreachable"`, or `"not_checked"` while wizard library setup is pending; `message` explains pending setup or an outage. Pending setup exits 1 and never reports that it is safe to switch. |
 | `journal` | `null` when unreachable. Otherwise `state` (`CLEAN`, `STARTING`, `ACTIVE`, `DRAINING`, `PUBLISHING`, `RECOVERY_REQUIRED`), `owner` (display name or `null`), `ownedByThisPc`, `sessionId`, `committedGeneration`, `revision`, `updatedAt` and `reason`. |
 | `phase`, `title`, `nextAction` | The same phase, title and next step as the tray (`READY`, `STARTING`, `ACTIVE`, `UPLOADING`, `VERIFYING`, `WAITING`, `RECOVERY_NEEDED`, `UNKNOWN`, `WAITING_FOR_STORAGE`). A stale or unreadable progress feed is `UNKNOWN`, never `READY`. |
 | `safeToSwitch` | `true` only when the journal is `CLEAN` and the phase is `READY`. |
@@ -450,7 +497,8 @@ After a stopped aborted start, its control login and recovery receipt are
 retained under `aborted-starts/SESSION/` in this PC's resolved state folder.
 The session's cache stays at its original location, even when upload state is
 unknown; retained evidence is not a successful-upload receipt. Setup checks
-still refuse an active process, unfinished login or non-Ready journal. Run
+still refuse an active process, an unfinished login, or a session this PC
+holds; another PC's session does not stop setup on this PC. Run
 `finish` on the owning PC to recover an interrupted STARTING session without
 launching Medal; a failed stop or evidence write keeps ownership for retry.
 

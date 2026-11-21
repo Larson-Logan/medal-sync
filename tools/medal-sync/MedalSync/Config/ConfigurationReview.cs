@@ -30,6 +30,7 @@ internal sealed class ConfigurationReview
     {
         config.Validate();
         var review = new ConfigurationReview(state, config, newLibrary);
+        review.RequireUnchanged();
         if (review._previous is not null)
         {
             var existing = Json.Deserialize<MedalSyncConfig>(review._previous, "Existing configuration");
@@ -50,6 +51,7 @@ internal sealed class ConfigurationReview
     public string Text => $"Configuration location: {State.ConfigPath}\r\n"
         + $"{(ReplacesExisting ? "Change existing setup (identity retained)" : _newLibrary ? "New library (not initialized)" : "Join existing library (not enrolled)")}\r\n"
         + $"Library: {Config.LibraryId}; account: {Config.AccountId}\r\n"
+        + $"PC display name: {Config.DeviceLabel ?? "computer and user name"} (ownership ID unchanged)\r\n"
         + $"Storage mode: {Config.StorageMode}\r\nStorage: {Config.Remote}\r\nCoordination: {Config.CoordinationRoot}\r\n"
         + (Config.StorageMode == StorageMode.Cloud ? $"Google Drive journal ID: {Config.CloudJournalId} (reuse on every PC; local history cache is not ownership)\r\n" : "")
         + $"Capture: {Config.CaptureFolder} (drive {Config.Capture.Root})\r\nCache: {Config.CacheRoot}\r\n"
@@ -138,6 +140,13 @@ internal sealed class ConfigurationReview
         RequireOrdinaryPath(State.ConfigPath);
         RequireOrdinaryPath(Path.Combine(State.Root, "device.json"));
         RequireOrdinaryPath(State.BackupDirectory);
+        if (_previous is null)
+        {
+            string pending = LibrarySetupPending.PathFor(State);
+            RequireOrdinaryPath(pending);
+            if (Path.Exists(pending))
+                throw new UnsafeOperationException("A pending library setup (library-setup.json) already exists. Recover its matching config.json before reviewing a new setup.");
+        }
         RequireNoSessions(State);
         if (Fingerprint(State.ConfigPath) != (_previous is null ? null : Convert.ToHexString(SHA256.HashData(_previous)))
             || Fingerprint(Path.Combine(State.Root, "device.json")) != _device)

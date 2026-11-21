@@ -5,6 +5,7 @@ using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Library;
 using MedalSync.Platform;
+using MedalSync.Session;
 using MedalSync.Tests.Fixtures;
 
 namespace MedalSync.Tests;
@@ -46,6 +47,16 @@ public sealed class CliInputAndStatusTests : IDisposable
         Assert.Equal(2, result.Code);
         Assert.Contains(named, result.Error, StringComparison.Ordinal);
         Assert.Empty(result.Output);
+    }
+
+    // Launch and finish refusals for an interrupted enrollment tell people to add --rollback.
+    [Fact]
+    public void Parser_AcceptsTheEnrollmentRollbackFlag()
+    {
+        var result = Run("enroll", "recover", "--out", _fixture.PathFor("enroll"), "--rollback", "--rollback");
+        Assert.Equal(2, result.Code);
+        Assert.Contains("--rollback was given more than once", result.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain("Unknown option", result.Error, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -121,6 +132,25 @@ public sealed class CliInputAndStatusTests : IDisposable
         string db = _fixture.CreateLibrary("pc-" + Guid.NewGuid().ToString("N"));
         return CoordinationStore.Create(root, LibraryId, LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId),
             new(AssetManifest.CurrentFormat, [], []), First, SessionA, new("2643.583.1", "2643.3040.1"), Now);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void FinishReportsAnUnreachableJournalAsRetryable()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var config = StatusConfig(_fixture.PathFor("offline"));
+        var cause = Assert.Throws<StorageOfflineException>(() => SessionCommands.ReadSessionJournal(config));
+        var result = SessionCommands.DescribeJournalFailure("finish", cause);
+        Assert.Equal(3, result.Code);
+        Assert.Equal(SessionPhase.WaitingForStorage, result.Phase);
+        Assert.StartsWith("Waiting for storage", result.Message, StringComparison.Ordinal);
+        Assert.Contains("Run finish again", result.Message, StringComparison.Ordinal);
+
+        Directory.CreateDirectory(config.CoordinationRoot);
+        Assert.Throws<UnsafeOperationException>(() => SessionCommands.ReadSessionJournal(config));
+        var store = NewStore(config.LibraryCoordinationDirectory);
+        Assert.Equal(store.ReadJournal(), SessionCommands.ReadSessionJournal(config).Journal);
     }
 
     [SupportedOSPlatform("windows")]

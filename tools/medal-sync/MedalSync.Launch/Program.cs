@@ -10,7 +10,7 @@ internal static class Program
     public static int Main(string[] args)
     {
         if (!OperatingSystem.IsWindows()) return 2;
-        var ui = new WindowsLauncherUi();
+        var ui = new WindowsLauncherUi(ChooseHandoff);
         try
         {
             // Point startup at this copy as soon as it runs (for example the status view setup reopens),
@@ -44,5 +44,27 @@ internal static class Program
             ui.Show($"medal-sync stopped unexpectedly: {ex.Message}\n\nDetails are in the logs directory of your Medal Sync user data folder.");
             return 1;
         }
+    }
+
+    private static HandoffAction ChooseHandoff(HandoffWaitOffer offer)
+    {
+        // TaskDialog needs common controls v6; an ordinary launch reaches this without the tray or the wizard.
+        Application.EnableVisualStyles();
+        var wait = new TaskDialogButton("Wait and open when ready");
+        var useLastSync = new TaskDialogButton("Use last synced library");
+        var cancel = TaskDialogButton.Cancel;
+        var page = new TaskDialogPage
+        {
+            Caption = "Medal Sync",
+            Heading = "Another PC owns the library",
+            Text = offer.Message + (offer.Recovery is null ? "" : "\n\nIf the other PC is powered off, you can open the library from the last completed sync."),
+            DefaultButton = cancel,
+        };
+        page.Buttons.Add(wait);
+        if (offer.Recovery is not null) page.Buttons.Add(useLastSync);
+        page.Buttons.Add(cancel);
+        var answer = TaskDialog.ShowDialog(page);
+        if (answer == wait) return HandoffAction.Wait;
+        return answer == useLastSync ? HandoffAction.UseLastSync : HandoffAction.Cancel;
     }
 }

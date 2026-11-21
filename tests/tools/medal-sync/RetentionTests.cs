@@ -73,6 +73,30 @@ public sealed class RetentionTests : IDisposable
     private static RetentionPolicy Policy(int keep = 2) => new(keep, 90, 30);
 
     [Fact]
+    public void StaleRetentionRefusesApplyingAReviewedPlanBeforeAnyFolderIsRemoved()
+    {
+        LongHistory();
+        Generations.WriteRetention(new(1, 14, Enumerable.Range(0, 15).Reverse().Select(n => (long)n).ToArray(), []));
+        var plan = Retention().Plan(Policy());
+        Assert.NotEmpty(plan.Items);
+        string path = Path.Combine(Generations.Directory, "retention.json");
+        byte[] bytes = File.ReadAllBytes(path);
+        Generations.RetentionReader = new FreshCoordinationRead
+        {
+            ReadOpen = _ => (bytes, DateTime.UnixEpoch),
+            ReadListing = _ => DateTime.UnixEpoch.AddSeconds(1),
+            Sleep = _ => { },
+            PauseDirectory = _fixture.PathFor("retention-pauses"),
+        };
+
+        Assert.Throws<StaleCoordinationReadException>(() => Retention().Apply(plan));
+        Assert.Equal(bytes, File.ReadAllBytes(path));
+        Assert.All(Enumerable.Range(0, 15), g => Assert.True(Folder(g)));
+        Assert.Empty(Directory.GetDirectories(Generations.Directory, ".trash-*"));
+        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+    }
+
+    [Fact]
     public void Plan_KeepsTheHeadItsNewestAncestorsAndEachPcsLatestGeneration()
     {
         LongHistory();

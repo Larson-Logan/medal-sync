@@ -13,7 +13,7 @@ internal interface IMedalProcess
 
     /// <summary>
     /// True while Medal is recording a game. Medal's recorder runs whenever Medal is open, so this is read from
-    /// its replay buffer instead. Advisory: it only changes the status shown, never ownership or uploads.
+    /// its replay buffer instead. Advisory: it changes status and pauses optional idle sync, never releases ownership.
     /// </summary>
     bool IsRecording() => false;
 
@@ -64,11 +64,21 @@ internal interface IClipMount
 
     DrainVerdict Drain();
 
+    /// <summary>True only when the drive is stopped and this session has no cached files.</summary>
+    bool StoppedCacheIsEmpty(string session) => false;
+
     /// <summary>
     /// Applies the configured upload limit for recording, or for finishing uploads after Medal exits.
     /// Null when it is in place; otherwise a notice. Never throws: a limit only changes speed.
     /// </summary>
     string? UseUploadLimit(bool recording) => null;
+
+    /// <summary>
+    /// Releases held uploads when the drive holds Medal's replay buffer: everything but buffer segments while
+    /// recording, and everything once <paramref name="includeBuffer"/>. Null when nothing is held or the release
+    /// worked; otherwise a notice. Never throws: a failed release only delays uploads until the hold ends.
+    /// </summary>
+    string? ReleaseUploads(bool includeBuffer) => null;
 
     /// <summary>Stops gracefully. False when it is still running afterwards.</summary>
     bool Stop();
@@ -105,6 +115,34 @@ internal interface IAssetChecker
     /// <see cref="IOException"/> when it cannot be reached.
     /// </summary>
     void RequireServer();
+}
+
+/// <summary>
+/// Keeps the PC from sleeping on its idle timer while it holds work that blocks a handoff. Advisory: a hold that
+/// Windows refuses changes nothing about ownership or verification. Holds nest; dispose each one exactly once.
+/// </summary>
+internal interface IKeepAwake
+{
+    IDisposable Hold();
+}
+
+/// <summary>A hold that releases once, however often it is disposed.</summary>
+internal sealed class KeepAwakeHold(Action release) : IDisposable
+{
+    public static readonly IDisposable None = new KeepAwakeHold(() => { });
+    private int _released;
+
+    /// <summary>A hold from <paramref name="keepAwake"/>, or none. Never throws: a failed request only lets the PC sleep as before.</summary>
+    public static IDisposable Take(IKeepAwake? keepAwake)
+    {
+        try { return keepAwake?.Hold() ?? None; }
+        catch (Exception) { return None; }
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _released, 1) == 0) release();
+    }
 }
 
 internal interface IClock

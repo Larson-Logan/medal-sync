@@ -13,9 +13,10 @@ name: Beta release Medal Sync
 # to dev, and a promotion into main reuses this run's validation of the same
 # commit.
 #
-# Update checks never see betas: GitHub never marks a prerelease Latest, and
-# the updaters ignore prereleases and suffixed tags. A beta install is offered
-# the release it leads up to once that is published.
+# Stable-only update checks ignore betas. PCs with betaUpdates enabled see the
+# newest published beta or stable version. A beta install is offered the stable
+# release it leads up to once published; superseded beta releases are then
+# removed by release.yml, while their tags remain to preserve beta numbering.
 #
 # Only administrators and the medal-sync-release GitHub App may create v* tags
 # (see .github/rulesets/release-tags.json), so only the publish step uses a

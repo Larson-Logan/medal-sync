@@ -28,7 +28,7 @@ internal static class MediaRefreshCommands
         var store = CoordinationStore.Open(config);
         var refresh = new PersistentMediaRefresh(config, state, device, store, () =>
         {
-            if (Hashing.Sha256File(state.ConfigPath) != configFileDigest || state.ExistingDevice() != device)
+            if (Hashing.Sha256File(state.ConfigPath) != configFileDigest || state.ExistingDevice().DeviceId != device.DeviceId)
                 throw new UnsafeOperationException("Configuration or device identity changed during review/refresh. Ownership and recovery evidence are retained; restore the reviewed settings before retrying.");
             if (new MedalProcess(install).IsRunning() || Directory.Exists(config.DriveRoot.Display))
                 throw new UnsafeOperationException("Quit Medal normally and finish its mounted session before refreshing persistent media.");

@@ -7,8 +7,56 @@ using MedalSync.Util;
 
 internal static class ConfigurationWizardTests
 {
+    /// <summary>Sign in through a fake provider: a failed sign-in blocks saving that remote; a later success fills the credential file.</summary>
+    private static void SignIn(Action<bool, string> check)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MedalSyncWizardSignIn-" + Guid.NewGuid().ToString("N"));
+        var state = new LocalState(root);
+        bool succeed = false;
+        var calls = new List<(string Remote, CloudProvider? Provider, string? Config)>();
+        try
+        {
+            using var wizard = new WindowsConfigurationWizard(state, (_, _) => { }, () => new Guard(), signIn: (remote, provider, config, _) =>
+            {
+                calls.Add((remote, provider, config));
+                return succeed ? new SignInResult(true, "Signed in: synthetic.", @"C:\Private\synthetic-rclone.conf")
+                    : new SignInResult(false, "The sign-in did not pass the storage check: synthetic refusal. The credential file is unchanged.");
+            });
+            wizard.Show();
+            var fields = Field<Dictionary<string, TextBox>>(wizard, "_fields");
+            Field<ComboBox>(wizard, "_mode").SelectedIndex = 2;
+            fields["remote"].Text = "gdrive:MedalSync";
+            fields["account"].Text = "12345";
+            var signIn = Field<Button>(wizard, "_signInButton");
+            check(signIn.Visible && Hint(wizard, "signIn").Text.Contains("Testing status", StringComparison.Ordinal),
+                "The wizard offers Sign in with the Google OAuth client guidance");
+            Click(signIn);
+            Until(() => !Field<bool>(wizard, "_busy"));
+            check(calls.Single() == ("gdrive", CloudProvider.GoogleDrive, null), "Sign in uses the remote named in the storage field and the chosen provider");
+            check(Hint(wizard, "signIn").Text.Contains("unchanged", StringComparison.Ordinal) && fields["cloudConfig"].Text.Length == 0,
+                "A failed sign-in shows the check result and never fills the credential file");
+            Click(Field<Button>(wizard, "_next"));
+            Until(() => !Field<bool>(wizard, "_busy"));
+            check(!Field<Button>(wizard, "_save").Enabled && Field<Label>(wizard, "_message").Text.Contains("did not pass the storage check", StringComparison.Ordinal),
+                "The wizard never saves a configuration whose remote failed its sign-in check");
+            succeed = true;
+            Click(signIn);
+            Until(() => !Field<bool>(wizard, "_busy"));
+            check(fields["cloudConfig"].Text == @"C:\Private\synthetic-rclone.conf" && Hint(wizard, "signIn").Text.StartsWith("Signed in", StringComparison.Ordinal),
+                "A passing sign-in fills the provider credential file");
+            Click(Field<Button>(wizard, "_next"));
+            Until(() => !Field<bool>(wizard, "_busy"));
+            check(!Field<Label>(wizard, "_message").Text.Contains("did not pass the storage check", StringComparison.Ordinal),
+                "After signing in again, review no longer refuses that remote");
+            wizard.Close();
+            check(!Directory.Exists(root), "Signing in through the wizard writes no Medal Sync state by itself");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
     internal static void Run(Action<bool, string> check)
     {
+        SignIn(check);
         string root = Path.Combine(Path.GetTempPath(), "MedalSyncWizardTest-" + Guid.NewGuid().ToString("N"));
         var state = new LocalState(root);
         try
@@ -216,6 +264,17 @@ internal static class ConfigurationWizardTests
     private static Button? Action(object view, string key) => (Button?)RowFor(view, key).GetType().GetProperty("Action")!.GetValue(RowFor(view, key));
     private static Button? Browse(object view, string key) => Action(view, key) is { Tag: not null } button ? button : null;
     private sealed class Guard : IDisposable { public void Dispose() { } }
+    /// <summary>
+    /// Clicks like a user inside a message loop. Without Application.Run, DoEvents can drop the WinForms synchronization
+    /// context, so a later async handler would resume on the thread pool and race this test's checks.
+    /// </summary>
+    private static void Click(Button button)
+    {
+        if (SynchronizationContext.Current is not WindowsFormsSynchronizationContext)
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+        button.PerformClick();
+    }
+
     private static void Until(Func<bool> ready)
     {
         var deadline = DateTime.UtcNow.AddSeconds(10);

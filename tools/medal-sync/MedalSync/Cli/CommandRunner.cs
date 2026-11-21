@@ -10,13 +10,13 @@ namespace MedalSync.Cli;
 /// </summary>
 internal static class CommandRunner
 {
-    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--no-switch-request", "--help", "--new-library", "--spike" };
+    private static readonly HashSet<string> Flags = new(StringComparer.Ordinal) { "--json", "--apply", "--restore", "--accept-library-changes", "--accept-unknown-media", "--replace-local-library", "--no-switch-request", "--help", "--new-library", "--spike", "--rollback", "--uninstall" };
     private static readonly HashSet<string> Valued = new(StringComparer.Ordinal)
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
         "--from", "--to", "--limit", "--before", "--wait-for-server", "--wait-for-handoff", "--state-root", "--medal-link",
-        "--local-copy-root", "--cloud-remote", "--rclone-config",
-        "--storage-mode", "--cloud-journal-id",
+        "--local-copy-root", "--cloud-remote", "--rclone-config", "--provider",
+        "--storage-mode", "--cloud-journal-id", "--device-label",
         "--replica-conflicts",
         "--grace-days", "--history-older-than", "--older-than", "--keep", "--keep-days",
         "--account-id", "--cache-root", "--remote", "--coordination-root", "--library-id", "--capture-folder", "--rclone-path", "--sync-folder", "--sync-pattern", "--spike-config", "--server-ignore",
@@ -27,7 +27,7 @@ internal static class CommandRunner
 
         Read-only:
           version                                Print the Medal Sync version and supported Medal schema
-          setup check [--state-root DIR] [--out FILE]  Verify readiness for Windows setup; no library changes
+          setup check [--uninstall] [--state-root DIR] [--out FILE]  Verify readiness for Windows setup or removal
           config validate --config FILE          Validate a candidate config without reading Medal or the share
           inspect [--json]                       Inventory of this PC and anything that blocks setup
           compatibility [--json]                 Check installed Medal builds and schema without configuration
@@ -52,6 +52,7 @@ internal static class CommandRunner
           config create --account-id ID --cache-root DIR --remote PATH --out FILE
                         (--new-library | --library-id ID) [--spike] [--apply]
                         [--capture-folder M:\Clips] [--rclone-path FILE] [--sync-folder ID] [--sync-pattern PATTERN]
+                        [--device-label NAME]    Optional display name for this PC; ownership identity is unchanged
                         [--local-copy-root DIR] [--cloud-remote NAME:FOLDER --rclone-config FILE]
                         [--storage-mode server|local|cloud]  Cloud mode hands off through Google Drive, without SMB
                         [--cloud-journal-id ID]  Required in cloud mode; obtain once with storage cloud-id and reuse on every PC
@@ -60,14 +61,22 @@ internal static class CommandRunner
                                                  Preview/create a config; never overwrite an existing file
           init [--apply]                         Create the shared library from this PC (generation 0)
           storage init-primary [--apply]         Mark an empty primary folder or rclone remote for this library
+          storage sign-in --remote NAME [--provider drive|onedrive|dropbox] [--rclone-config FILE]
+                                                 Sign in to a cloud provider in the browser, or sign in again;
+                                                 saves only after the storage check passes
           storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]
                                                  Allocate a Google Drive journal ID for a new cloud library; creates no file
           replicate retry [--target NAME] [--apply]  Preview/retry pending optional cloud copies while Ready
+          prefetch [--apply]                     Preview/download clips another PC published into this PC's
+                                                 persistent local copy while idle; never takes ownership
           replica verify [--target NAME] [--apply]  Preview/read back cloud copies while Ready; never copies or deletes
           replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]
                                                  Review unreferenced files at an optional cloud copy
           replica prune --in FILE --apply        Move exactly those files to the copy's trash folder
           replica purge-trash --target NAME [--older-than D] [--apply]  Permanently delete old cloud trash
+          primary prune --out FILE [--grace-days N]  Review clips deleted in Medal that are still on primary storage
+          primary prune --in FILE --apply        Move exactly those files to primary storage's trash (every PC Ready)
+          primary purge-trash [--older-than D] [--apply]  Permanently delete old primary-storage trash
           retention --out FILE [--keep N] [--keep-days D] [--grace-days G]
                                                  Review old generations and recovery folders to remove
           retention --in FILE --apply            Remove exactly what that review listed (every PC Ready)
@@ -93,7 +102,7 @@ internal static class CommandRunner
     /// <summary>As <see cref="Run(string[], TextWriter, TextWriter)"/>; <paramref name="notify"/> receives a running session's messages.</summary>
     public static int Run(string[] args, TextWriter output, TextWriter error, Action<string>? notify,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, Session.SessionShutdown? shutdown = null,
-        Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait = null)
+        Func<HandoffWaitOffer, HandoffChoice>? offerHandoffWait = null, bool atSignIn = false)
     {
         try
         {
@@ -103,7 +112,7 @@ internal static class CommandRunner
                 output.WriteLine(Help);
                 return parsed.Words.Count == 0 && !args.Contains("--help") ? 2 : 0;
             }
-            return Dispatch(parsed, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait);
+            return Dispatch(parsed, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait, atSignIn);
         }
         catch (UsageException ex)
         {
@@ -123,7 +132,8 @@ internal static class CommandRunner
     }
 
     private static int Dispatch(Arguments args, TextWriter output, Action<string>? notify,
-        Func<LibraryChangeReview, bool>? reviewLibraryChanges, Session.SessionShutdown? shutdown, Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait)
+        Func<LibraryChangeReview, bool>? reviewLibraryChanges, Session.SessionShutdown? shutdown,
+        Func<HandoffWaitOffer, HandoffChoice>? offerHandoffWait, bool atSignIn)
     {
         string command = string.Join(' ', args.Words);
         // Read-only reports stay available while setup runs, which is often when help is needed.
@@ -159,15 +169,19 @@ internal static class CommandRunner
             "storage init-primary" => SessionCommands.InitPrimary(args, output),
             "storage check" => SessionCommands.CheckStorage(args, output),
             "storage cloud-id" => SessionCommands.CloudId(args, output),
+            "storage sign-in" => SignInCommands.Run(args, output),
             "replicate retry" => ReplicationCommands.Retry(args, output),
+            "prefetch" => PrefetchCommands.Run(args, output),
             "replica verify" => ReplicaCommands.Verify(args, output),
             "replica history" => ReplicaCommands.History(args, output),
             "replica prune" => ReplicaCommands.Prune(args, output),
             "replica purge-trash" => ReplicaCommands.PurgeTrash(args, output),
+            "primary prune" => PrimaryCommands.Prune(args, output),
+            "primary purge-trash" => PrimaryCommands.PurgeTrash(args, output),
             "retention" => RetentionCommands.Run(args, output),
             "enroll" => EnrollmentCommands.Run(args, output),
             "enroll recover" => EnrollmentCommands.Recover(args, output),
-            "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait),
+            "launch" => SessionCommands.Launch(args, output, notify, reviewLibraryChanges, shutdown, offerHandoffWait, atSignIn),
             "finish" => SessionCommands.Finish(args, output),
             "recover-start" => SessionCommands.RecoverStart(args, output),
             "refresh-media" => MediaRefreshCommands.Run(args, output),

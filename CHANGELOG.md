@@ -2,6 +2,98 @@
 
 ## Unreleased
 
+## 1.6.0 — 2026-11-21
+
+- Publish verified library changes while Medal stays open. If Windows shuts down before releasing ownership, a second PC can use the last synced library after confirming the first PC is powered off.
+- Sign in to Google Drive, OneDrive or Dropbox from the configuration wizard (**Cloud sign-in**) and sign in again from the status panel when the storage check reports an expired sign-in, without a terminal. `medal-sync storage sign-in` runs the bundled rclone on a private copy of the credential file and saves it only after the storage check passes; the wizard never saves a configuration whose remote failed (#253).
+- Download clips another PC published into this PC's persistent local copy while it is idle and does not own the library, newest first, so the next launch starts sooner. Files are staged, byte-checked against primary storage and the generation's recorded size, then moved in without replacing anything; input, a launch, Medal, low space or a newer generation stop it. `medal-sync prefetch` previews it; `replication.prefetchWhileIdle: false` turns it off (#254).
+- Add `primary prune` and `primary purge-trash`, a reviewed two-step cleanup of clips deleted in Medal that are still on primary storage (SMB, local or rclone). Files any kept generation references are protected, an unreadable generation refuses the review, apply moves files into a trash folder under the writer lock while every PC is Ready, and an unreachable primary exits 3 (#248).
+- Add `mount.recordingBufferHoldSeconds` for server mode without a persistent local copy: while a game records, Medal's replay-buffer segments stay on this PC until Medal deletes them, while saved clips still upload after the normal write-back delay. Everything is released when recording stops and before finish drains uploads (#201).
+- Show a Windows notification when this PC's finish reaches Ready, when a finish needs you, and when a cloud copy or sign-in check needs attention, once per state change. Clicking it opens the status panel; **Show notifications** in the tray menu turns them off (#247).
+- Keep the PC awake (system, not display) while a finish uploads and verifies, during idle sync and while `replicate retry --apply` transfers, so a PC left alone after quitting Medal does not sleep with unpublished clips. Released at Ready, on refusals, while waiting for storage and when Medal reopens. `keepAwakeWhileFinishing: false` turns it off (#246).
+- Cloud verification keeps its receipts when rclone refreshes an OAuth token (#221).
+- The clip-drive limit now throttles local and SMB write-back. It also caps reads of clips that are not cached (#222).
+- Windows uninstall asks you to restore Medal's startup entries before removing a launcher they still use (#239).
+
+- Launch keeps retrying an interrupted session's handoff. If Medal reopens during the drain, launch verifies the clip drive and resumes supervision (#214, #215).
+- Google Drive initialization can resume after a partial local write. A finish resuming publication skips generation numbers already used by interrupted cloud uploads (#217, #219).
+- A persistent-media refresh can retry an interrupted backup when the reviewed local file is still intact. Legacy startup recovery keeps the session login when its cache is inaccessible (#224, #225).
+
+- Launch waits when a switch request cannot be sent and ignores Google Drive switch requests dated more than five minutes ahead (#216, #220).
+- Launch and finish tell users when Google Drive sign-in needs attention. `finish` returns exit 3 when it cannot reach the journal. Google Drive rate limits are treated as temporary (#218, #223, #228).
+- The free-space monitor warns again if a disk becomes unreadable after briefly reconnecting (#226).
+- Enrollment and its recovery command no longer mistake a tray status check for another running operation (#229).
+- Tray guide, configuration and update failures open the status panel and stay visible through refreshes. Exit refusals clear when the library returns to Ready (#234).
+
+- `init` previews leave the device identity untouched. Maintenance also recognizes a pending library that an earlier preview left with an identity (#243).
+- The configuration wizard refuses an orphaned setup record before saving a new configuration. Damaged historical manifests no longer block its device-name advice (#242, #235).
+- The tray and `status --json` report pending Google Drive setup without polling Drive. The tray shows Waiting for storage when a journal read fails because storage is unreachable (#232, #233).
+- `relocate` copies and repoints keyboard overlays with their clips. If the Medal library changes during copying, relocation preserves the latest database and asks for a new review (#236, #237).
+- Windows setup refuses an older beta over a newer beta or its stable release and still allows repairs and upgrades (#241).
+
+- `enroll recover --rollback` is accepted again; it was refused as an unknown
+  option, so an interrupted enrollment could not be rolled back (#227).
+- Launch no longer leaves a copy of Medal's native backup database in
+  `Backups\native-identity` after every inspection. Copies kept by a failed
+  inspection, and those left by earlier versions, are pruned to the newest
+  three (#240).
+- Upload settled clips to primary storage and replicas while the owning PC is
+  idle, and prepare an uncommitted library checkpoint for finish to reuse.
+  The tray shows All clips uploaded; quit and shutdown reuse verified media
+  instead of copying it again. Recording and user activity pause idle work;
+  outages keep ownership and local clips for retry. Clip-drive uploads default
+  to 2 MiB/s while Medal runs (#212).
+- Setup, uninstall and Check for updates no longer refuse because another PC
+  holds the library. Setup changes only this PC's programs, so it now refuses
+  only an active process, a retained session login or a session this PC holds,
+  and still refuses when the journal cannot be read (#211).
+- When another PC's upload has not changed for 30 minutes, the status, launch
+  message and handoff wait window say that PC may be off, asleep or signed out,
+  and to turn it on and sign in so it finishes, instead of saying it is still
+  uploading. It keeps the library either way (#211).
+- Refuse out-of-date switch requests and generation retention records from
+  server storage. A stale request warns without interrupting recording;
+  history, numbering and retention wait for a fresh record (#194).
+- Download only missing cloud history generations and verify cached files
+  against Drive checksums. Failed downloads clean up their scratch folders,
+  and verification failures pause repeated status-view transfers (#195).
+
+- Remove published beta releases superseded by a stable release after stable
+  publication. Keep their Git tags so beta numbers stay increasing, and retain
+  every draft, stable release and beta of a newer version (#197).
+- Check for releases in the background at launch and reuse successful answers
+  for a day, so slow or offline update checks no longer delay opening Medal.
+  Explicit Check for updates still contacts GitHub directly (#198).
+- Setup, uninstall and Check for updates no longer refuse on a PC that saved
+  the configuration wizard but has not run `init` or `enroll` yet. Without a
+  device identity it cannot own the library; a retained session, recovery
+  evidence or session cache still refuses (#188).
+- Running `init --apply` again after an interrupted first attempt in server
+  or local mode now completes this PC's own unfinished library instead of
+  refusing a non-empty folder. A folder left by another PC, a different
+  library or an edited initialization is still refused unchanged, an existing
+  library marker is never replaced, and opening an unfinished library now says
+  so instead of suggesting the share is unreachable (#191).
+- A storage failure while marking a prepared session Active now gives the
+  start back in the same run (stopping the clip drive) and reports Waiting for
+  storage or Blocked, instead of exiting with the drive mounted. Failing to
+  remove this PC's own switch request no longer stops Medal from starting; the
+  request expires by itself (#192).
+- The release workflow tests run the bash steps with Git for Windows' bash and
+  never the WSL launcher; without a usable bash they are skipped locally and
+  fail in CI (#196).
+- Create or join a library from the configuration wizard after saving settings,
+  using the existing init/enroll previews and explicit confirmation. Skipped
+  setup can be resumed through Configure; interrupted ownership still shows
+  recovery status (#200).
+- Give each PC an optional display name in the wizard or `deviceLabel` setting.
+  Labels do not change its identity or the copied-profile guard. Status suggests
+  a label when another PC has published under the same name (#199).
+- Document how a persistent local copy keeps unreferenced replay-buffer files
+  off primary storage, including the disk-space trade-off and Medal's memory
+  buffer option (#201).
+- Decode Git text as UTF-8 when checking promotion changelog headings on Windows.
+
 ## 1.5.0 — 2026-11-14
 
 - The status view no longer says "Unknown / unreachable" on a PC that is not

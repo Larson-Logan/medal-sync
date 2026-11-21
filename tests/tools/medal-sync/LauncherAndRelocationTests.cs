@@ -1,9 +1,12 @@
 using System.Text;
+using System.Text.Json;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using MedalSync.Cli;
 using MedalSync.Library;
 using MedalSync.Platform;
 using MedalSync.Session;
+using MedalSync.Storage;
 using MedalSync.Tests.Fixtures;
 using MedalSync.Util;
 
@@ -37,7 +40,7 @@ public sealed class LauncherAndRelocationTests : IDisposable
 
         Assert.Equal(2, moves.Count);
         var cloud = Assert.Single(moves, m => m.ContentId == "cloud");
-        Assert.Equal("thumbnail_path", cloud.Column);
+        Assert.Equal("thumbnail_path", cloud.Field);
         Assert.Equal(@"M:\Clips\Thumbnails\cloud.jpg", cloud.To.Display);
         Assert.Equal(@"M:\Clips\Clips\b.mp4", Assert.Single(moves, m => m.ContentId == "mixed-case").To.Display);
     }
@@ -74,6 +77,85 @@ public sealed class LauncherAndRelocationTests : IDisposable
         var stale = moves.Select(m => m.ContentId == "cloud" ? m with { Original = @"D:\Clips\Thumbnails\other.jpg" } : m).ToList();
 
         Assert.Throws<UnsafeOperationException>(() => ReferenceRelocation.Apply(planned, stale));
+    }
+
+    [Fact]
+    public void Relocation_RebasesKeyboardOverlayAndKeepsOtherMetadata()
+    {
+        string db = _fixture.CreateLibrary("overlay");
+        MedalFixture.AddContent(db, "clip", video: @"D:\Clips\Clips\a.mp4", metadata:
+            """{"keyboardOverlayFilePath":"D:\\Clips\\Temp\\InputActions\\a.json","remoteContent":{"videoPath":"D:\\Clips\\Clips\\historic.mp4"}}""");
+        var snapshot = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+        var moves = ReferenceRelocation.Plan(snapshot, OldFolder, Capture);
+        Assert.Equal(2, moves.Count);
+        var overlay = Assert.Single(moves, m => m.Field == "metadata:$.keyboardOverlayFilePath");
+        Assert.Equal(@"D:\Clips\Temp\InputActions\a.json", overlay.From.Display);
+        Assert.Equal(@"M:\Clips\Temp\InputActions\a.json", overlay.To.Display);
+
+        var relocated = CountRebuilder.Rebuild(ReferenceRelocation.Apply(snapshot, moves), db);
+        LibraryRestorer.Restore(db, relocated, new RestoreOptions(MedalFixture.AccountId, _fixture.PathFor("overlay-backups"),
+            ExpectedCurrentDigest: snapshot.Digest()), DateTimeOffset.UtcNow);
+        var restored = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+        Assert.Equal(new[] { ("Clips/a.mp4", true), ("Temp/InputActions/a.json", false) }, ReplicationPlan.Media(restored, Capture));
+        var contents = restored.Table("contents");
+        var metadata = Assert.IsType<JsonbCell>(Assert.Single(contents.Rows)[contents.ColumnIndex("metadata")]);
+        using var document = JsonDocument.Parse(metadata.Json);
+        Assert.Equal(@"D:\Clips\Clips\historic.mp4", document.RootElement.GetProperty("remoteContent").GetProperty("videoPath").GetString());
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void Relocation_CopiesRequiredMediaWhenAnOptionalOverlayIsMissing()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        string db = _fixture.CreateLibrary("missing-overlay");
+        var from = WindowsPath.Parse(_fixture.PathFor("original-capture"));
+        var destination = WindowsPath.Parse(_fixture.PathFor("destination-capture"));
+        string video = from.Append("clip.mp4").Display;
+        string overlay = from.Append("overlay.json").Display;
+        MedalFixture.AddContent(db, "clip", video: video, metadata: JsonSerializer.Serialize(new { keyboardOverlayFilePath = overlay }));
+        var install = new MedalInstall(_fixture.PathFor("install"), db, MedalFixture.AccountId,
+            _fixture.PathFor("install", "Medal.exe"), new(null, null));
+        string backups = _fixture.PathFor("missing-overlay-backups");
+        var output = new StringWriter();
+        var original = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+
+        Assert.Throws<UnsafeOperationException>(() => LibraryCommands.RelocateLibrary(install, from, Capture, destination, backups, false, output));
+        Directory.CreateDirectory(from.Display);
+        File.WriteAllText(video, "required clip");
+        Directory.CreateDirectory(destination.Display);
+        string destinationOverlay = destination.Append("overlay.json").Display;
+        File.WriteAllText(destinationOverlay, "unverified overlay");
+
+        Assert.Equal(0, LibraryCommands.RelocateLibrary(install, from, Capture, destination, backups, false, output));
+        Assert.Contains("Applying clears their paths", output.ToString());
+        Assert.Equal(original.Digest(), LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId).Digest());
+        Assert.False(File.Exists(destination.Append("clip.mp4").Display));
+
+        Assert.Equal(0, LibraryCommands.RelocateLibrary(install, from, Capture, destination, backups, true, output));
+        var relocated = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+        Assert.Equal(("clip.mp4", true), Assert.Single(ReplicationPlan.Media(relocated, Capture)));
+        Assert.Equal("required clip", File.ReadAllText(destination.Append("clip.mp4").Display));
+        Assert.Equal("unverified overlay", File.ReadAllText(destinationOverlay));
+        string backup = Assert.Single(Directory.EnumerateFiles(backups, "*.db", SearchOption.AllDirectories));
+        Assert.Equal(original.Digest(), LibraryDatabase.ReadSnapshot(backup, MedalFixture.AccountId).Digest());
+    }
+
+    [Fact]
+    public void Relocation_RefusesToOverwriteAClipAddedDuringCopying()
+    {
+        string db = Library();
+        var snapshot = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+        var relocated = ReferenceRelocation.Apply(snapshot, ReferenceRelocation.Plan(snapshot, OldFolder, Capture));
+        MedalFixture.AddContent(db, "recorded-during-copy", video: @"D:\Clips\Clips\new.mp4");
+        var changed = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+        string backups = _fixture.PathFor("stale-backups");
+
+        var refusal = Assert.Throws<UnsafeOperationException>(() => LibraryRestorer.Restore(db, relocated,
+            new RestoreOptions(MedalFixture.AccountId, backups, KeepBackup: true, ExpectedCurrentDigest: snapshot.Digest()), DateTimeOffset.UtcNow));
+        Assert.Contains("changed since planning", refusal.Message);
+        Assert.Equal(changed.Digest(), LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId).Digest());
+        Assert.False(Directory.Exists(backups));
     }
 
     [Fact]

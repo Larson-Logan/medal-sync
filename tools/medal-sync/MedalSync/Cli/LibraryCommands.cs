@@ -156,7 +156,8 @@ internal static class LibraryCommands
         string backups = live
             ? Config.LocalState.ForCurrentUser().BackupDirectory
             : Path.Combine(Path.GetDirectoryName(path)!, "medal-sync-backups");
-        var result = LibraryRestorer.Restore(path, withCounts, new RestoreOptions(account, backups, KeepBackup: true), DateTimeOffset.UtcNow);
+        var result = LibraryRestorer.Restore(path, withCounts,
+            new RestoreOptions(account, backups, KeepBackup: true, ExpectedCurrentDigest: current.Digest()), DateTimeOffset.UtcNow);
         output.WriteLine($"Repaired {applied.Count} change(s); backup {result.BackupPath}. {Session.SessionCoordinator.KeptBackupNote}");
         return 0;
     }
@@ -188,37 +189,54 @@ internal static class LibraryCommands
         {
             throw new IncompatibleLibraryException($"Medal is signed in as account {install.AccountId}, but the configuration is for {config.AccountId}.");
         }
+        return RelocateLibrary(install, from, config.Capture, destination, state.BackupDirectory, apply, output);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    internal static int RelocateLibrary(MedalInstall install, WindowsPath from, WindowsPath capture, WindowsPath destination,
+        string backupDirectory, bool apply, TextWriter output)
+    {
         var snapshot = LibraryDatabase.ReadSnapshot(install.DatabasePath, install.AccountId);
-        var moves = ReferenceRelocation.Plan(snapshot, from, config.Capture);
+        var moves = ReferenceRelocation.Plan(snapshot, from, capture);
         var files = moves.GroupBy(m => m.From.Key, StringComparer.Ordinal)
-            .Select(g => (Local: g.First().From.Display, Server: g.First().From.Rebase(from, destination).Display))
+            .Select(g => (Key: g.Key, Local: g.First().From.Display, Server: g.First().From.Rebase(from, destination).Display,
+                Required: g.Any(move => move.Role == AssetRole.Required)))
             .ToList();
         var copies = new List<(string Local, string Server)>();
         var problems = new List<string>();
+        var missingOptional = new HashSet<string>(StringComparer.Ordinal);
         int present = 0;
         foreach (var file in files)
         {
-            if (!File.Exists(file.Local)) problems.Add($"{file.Local}: missing");
-            else if (!File.Exists(file.Server)) copies.Add(file);
+            if (!File.Exists(file.Local))
+            {
+                if (file.Required) problems.Add($"{file.Local}: missing");
+                else missingOptional.Add(file.Key);
+            }
+            else if (!File.Exists(file.Server)) copies.Add((file.Local, file.Server));
             else if (Hashing.Sha256File(file.Server) == Hashing.Sha256File(file.Local)) present++;
             else problems.Add($"{file.Server}: already exists with different content");
         }
         output.WriteLine($"{moves.Count} library path(s) under {from.Display} point to {files.Count} file(s): "
             + $"{copies.Count} to copy to {destination.Display}, {present} already there, {problems.Count} problem(s).");
         foreach (var line in problems.Take(10)) output.WriteLine("  " + line);
+        if (missingOptional.Count > 0)
+            output.WriteLine($"{missingOptional.Count} optional overlay file(s) are missing. Applying clears their paths from the library.");
         if (problems.Count > 0) throw new UnsafeOperationException("Nothing was changed; resolve the problems above first.");
         if (moves.Count == 0) return 0;
         if (!apply)
         {
-            output.WriteLine($"Preview only. With Medal quit, --apply copies the files and points the library at {config.Capture.Display}.");
+            output.WriteLine($"Preview only. With Medal quit, --apply copies the files and points the library at {capture.Display}.");
             return 0;
         }
         if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Quit Medal from its tray icon before relocating its files.");
         foreach (var (local, server) in copies) CopyVerified(local, server);
-        var relocated = ReferenceRelocation.Apply(snapshot, moves);
+        if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Medal started during copying. Quit Medal and review relocation again before changing its database.");
+        var relocated = ReferenceRelocation.Apply(snapshot, moves, missingOptional);
         var withCounts = CountRebuilder.Rebuild(relocated, install.DatabasePath);
-        var result = LibraryRestorer.Restore(install.DatabasePath, withCounts, new RestoreOptions(install.AccountId, state.BackupDirectory, KeepBackup: true), DateTimeOffset.UtcNow);
-        output.WriteLine($"Copied {copies.Count} file(s) and repointed {moves.Count} library path(s); backup {result.BackupPath}. "
+        var result = LibraryRestorer.Restore(install.DatabasePath, withCounts,
+            new RestoreOptions(install.AccountId, backupDirectory, KeepBackup: true, ExpectedCurrentDigest: snapshot.Digest()), DateTimeOffset.UtcNow);
+        output.WriteLine($"Copied {copies.Count} file(s) and updated {moves.Count} library path(s); backup {result.BackupPath}. "
             + $"{Session.SessionCoordinator.KeptBackupNote} The originals under {from.Display} are unchanged.");
         return 0;
     }

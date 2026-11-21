@@ -81,6 +81,45 @@ public sealed class NativeBackupTests : IDisposable
         Assert.False(backupId != 0 && backupId != MedalSchema.Scalar<long>(l, null, "PRAGMA application_id"));
     }
 
+    [Fact]
+    public void SuccessfulInspectionsLeaveNoPrivateCopiesBehind()
+    {
+        string local = _fixture.CreateLibrary("second"), zero = _fixture.CreateLibrary("zero"), remote = _fixture.CreateLibrary("first");
+        using (var db = MedalFixture.Open(zero)) MedalFixture.Execute(db, "PRAGMA journal_mode=DELETE");
+        using (var db = MedalFixture.Open(remote)) { MedalFixture.Execute(db, "PRAGMA application_id=222"); MedalFixture.Execute(db, "PRAGMA journal_mode=DELETE"); }
+        string backups = _fixture.PathFor("backups");
+        Assert.False(NativeBackupIdentity.Align(local, zero, backups, MedalFixture.AccountId));
+        Assert.True(NativeBackupIdentity.Align(local, remote, backups, MedalFixture.AccountId));
+        Assert.False(NativeBackupIdentity.Align(local, remote, backups, MedalFixture.AccountId));
+        Assert.Empty(Directory.GetFiles(backups, "native-source-*"));
+        Assert.Single(DatabaseBackup.List(backups, MedalFixture.AccountId));
+    }
+
+    [Fact]
+    public void CopiesLeftByEarlierInspectionsArePrunedToTheNewestFew()
+    {
+        string local = _fixture.CreateLibrary("second"), remote = _fixture.CreateLibrary("first");
+        using (var db = MedalFixture.Open(remote)) MedalFixture.Execute(db, "PRAGMA journal_mode=DELETE");
+        string backups = _fixture.PathFor("backups");
+        Directory.CreateDirectory(backups);
+        var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        for (int i = 0; i < 6; i++)
+        {
+            string leftover = Path.Combine(backups, $"native-source-{i:D32}.db");
+            File.WriteAllText(leftover, "synthetic leftover copy");
+            File.SetCreationTimeUtc(leftover, start.AddDays(i));
+            File.SetLastWriteTimeUtc(leftover, start.AddDays(-i)); // copies keep the source's write time
+        }
+        File.WriteAllText(Path.Combine(backups, $"native-source-{0:D32}.db-wal"), "synthetic sidecar");
+        string unrelated = Path.Combine(backups, "unrelated.db");
+        File.WriteAllText(unrelated, "not an inspection copy");
+        Assert.False(NativeBackupIdentity.Align(local, remote, backups, MedalFixture.AccountId));
+        var kept = Directory.GetFiles(backups, "native-source-*").Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(Enumerable.Range(6 - NativeBackupIdentity.KeptInspectionCopies, NativeBackupIdentity.KeptInspectionCopies)
+            .Select(i => $"native-source-{i:D32}.db"), kept);
+        Assert.True(File.Exists(unrelated));
+    }
+
     [Theory]
     [InlineData(".patch")]
     [InlineData(".patch.tmp")]

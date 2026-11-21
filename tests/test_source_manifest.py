@@ -33,6 +33,7 @@ class SourceManifestTests(unittest.TestCase):
         self.assertEqual(manifest.ALL, manifest.suites_for('tests/tools/medal-sync/Fixtures/MedalFixture.cs'))
         self.assertEqual(['unit'], manifest.suites_for('tests/tools/medal-sync/LibraryTests.cs'))
         self.assertEqual([], manifest.suites_for('docs/storage.md'))
+        self.assertEqual([], manifest.suites_for('docs/knowledge/architecture/session-lifecycle.md'))
 
     def test_committed_inventory_lists_only_known_suites(self):
         committed = json.loads((ROOT / 'public-source.json').read_text(encoding='utf-8'))

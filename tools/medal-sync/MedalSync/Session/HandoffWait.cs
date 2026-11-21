@@ -60,7 +60,8 @@ internal sealed record HandoffWait(TimeSpan Timeout, Func<bool>? Cancelled = nul
 /// What the waiting PC last saw. <paramref name="Fresh"/> is false when the latest check could not reach the journal,
 /// so <paramref name="Owner"/> and <paramref name="State"/> are only what was seen at <paramref name="SeenAt"/>.
 /// </summary>
-internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? State, DateTimeOffset? SeenAt, bool Fresh, TimeSpan Remaining)
+internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? State, DateTimeOffset? SeenAt, bool Fresh, TimeSpan Remaining,
+    DateTimeOffset? QuietSince = null)
 {
     public string Describe()
     {
@@ -70,9 +71,8 @@ internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? 
         if (Fresh)
         {
             if (seen is null) return "Another PC took the library first. Still waiting for it to hand off.";
-            return State is { } current && Ownership.IsFinishing(current)
-                ? $"{seen}. It hands off by itself once its uploads finish; this PC then opens Medal."
-                : $"{seen}. Quit Medal there; this PC opens Medal once the handoff is complete.";
+            if (QuietSince is { } since) return $"{seen}. {Ownership.QuietFinishMessage(Owner!.DisplayName, since)}";
+            return $"{seen}. {Ownership.HandoffAdvice(State)} This PC opens Medal once the library is Ready.";
         }
         return seen is null
             ? "The shared library's server cannot be reached. Still waiting; nothing was changed."
@@ -86,8 +86,9 @@ internal sealed record HandoffWaitUpdate(DeviceIdentity? Owner, OwnershipState? 
         string title = $"Waiting for {who} to hand off the library";
         string detail = (Fresh, State, SeenAt) switch
         {
-            (true, { } state, { } at) when Ownership.IsFinishing(state) => $"{who}: {Ownership.Describe(state)}, hands off by itself. Checked at {Clock(at)}.",
-            (true, { } state, { } at) => $"{who}: {Ownership.Describe(state)}, checked at {Clock(at)}.",
+            (true, _, _) when QuietSince is { } since =>
+                $"No change since {since.UtcDateTime:yyyy-MM-dd HH:mm} UTC. If that PC is off, turn it on and sign in.",
+            (true, { } state, { } at) => $"{Ownership.Describe(state)} at {Clock(at)}. If that PC is off, turn it on and sign in.",
             (true, _, _) => "Another PC took the library first; still waiting.",
             (false, { } state, { } at) => $"Server unreachable. Last seen {Ownership.Describe(state)} at {Clock(at)}; may be out of date.",
             _ => "Server unreachable; still waiting. Nothing was changed.",

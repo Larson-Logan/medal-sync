@@ -29,6 +29,7 @@ public sealed class RcloneControlTests
     [InlineData("vfs/refresh")]
     [InlineData("vfs/stats")]
     [InlineData("vfs/queue")]
+    [InlineData("vfs/queue-set-expiry")]
     public void SendsReviewedRequestsOnlyToAuthenticatedLoopback(string command)
     {
         using var control = new RcloneControl(53682, "synthetic", "synthetic", new Handler(request =>
@@ -122,7 +123,7 @@ public sealed class RcloneControlTests
         Assert.Null(limit.Apply(control, recording: false));
         Assert.Null(limit.Apply(control, recording: false));
         Assert.Null(limit.Apply(control, recording: true));
-        Assert.Equal(["{\"rate\":\"off\"}", "{\"rate\":\"5Mi:off\"}"], bodies);
+        Assert.Equal(["{\"rate\":\"off\"}", "{\"rate\":\"5Mi\"}"], bodies);
 
         // Attaching to a drive started elsewhere: its rate is unknown, so it is set once.
         limit.Reset();

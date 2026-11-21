@@ -17,6 +17,18 @@ public sealed class DesktopStatusTests
     private static ProgressEnvelope Report(SessionPhase phase) => new(1, Journal.LibraryId, Journal.AccountId,
         Me.DeviceId, Now, new(phase, "Synthetic next action", Session, 3, 4096, "cloud-backup"));
 
+    [Fact]
+    public void SyncedActiveStatusDoesNotClaimReadyAndExpiresWithTheHeartbeat()
+    {
+        var report = Report(SessionPhase.Active);
+        report = report with { Progress = report.Progress with { ClipsSynced = true } };
+        var status = DesktopStatus.Resolve(Journal, Me, report, true, Now);
+        Assert.Equal("All clips uploaded", status.Title);
+        Assert.Equal(SessionPhase.Active, status.Phase);
+        Assert.Equal(SessionPhase.Unknown, DesktopStatus.Resolve(Journal, Me, report, true, Now.AddSeconds(21)).Phase);
+        Assert.Equal(SessionPhase.RecoveryNeeded, DesktopStatus.Resolve(Journal, Me, report, false, Now).Phase);
+    }
+
     [Theory]
     [InlineData((int)SessionPhase.Starting)]
     [InlineData((int)SessionPhase.Active)]
@@ -151,14 +163,37 @@ public sealed class DesktopStatusTests
     public void AnotherPcThatIsOnlyUploadingIsNotDescribedAsNeedingMedalQuit()
     {
         var other = new DeviceIdentity(new string('d', 32), "Other PC");
-        Assert.StartsWith("Quit Medal and finish the handoff on Synthetic PC.", DesktopStatus.Resolve(Journal, other, null, false, Now).NextAction,
+        Assert.Contains("If Medal is open there, quit it from its tray icon.", DesktopStatus.Resolve(Journal, other, null, false, Now).NextAction,
             StringComparison.Ordinal);
         foreach (var state in new[] { OwnershipState.Draining, OwnershipState.Publishing })
         {
             var finishing = DesktopStatus.Resolve(Journal with { State = state }, other, null, false, Now);
             Assert.Equal(SessionPhase.Waiting, finishing.Phase);
-            Assert.Equal("Synthetic PC is finishing its uploads and hands off the library by itself. Open Medal here after it is Ready.", finishing.NextAction);
+            Assert.Contains("Keep that PC on while it finishes the handoff.", finishing.NextAction, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void AnotherPcFinishingQuietlyForLongIsDescribedAsPossiblyOff()
+    {
+        var other = new DeviceIdentity(new string('d', 32), "Other PC");
+        foreach (var state in new[] { OwnershipState.Draining, OwnershipState.Publishing })
+        {
+            var finishing = Journal with { State = state };
+            Assert.Contains("Keep that PC on while it finishes the handoff.",
+                DesktopStatus.Resolve(finishing, other, null, false, Now + Ownership.QuietFinish - TimeSpan.FromSeconds(1)).NextAction,
+                StringComparison.Ordinal);
+            var quiet = DesktopStatus.Resolve(finishing, other, null, false, Now + Ownership.QuietFinish);
+            Assert.Equal(SessionPhase.Waiting, quiet.Phase);
+            Assert.False(quiet.CanRetry);
+            Assert.Equal(Ownership.QuietFinishMessage("Synthetic PC", Now), quiet.NextAction);
+        }
+        // An Active journal has no heartbeat. Even an old timestamp cannot tell whether Medal is still open.
+        Assert.Contains("If Medal is open there, quit it from its tray icon.",
+            DesktopStatus.Resolve(Journal, other, null, false, Now + TimeSpan.FromDays(1)).NextAction, StringComparison.Ordinal);
+        Assert.Contains("Keep that PC on while it finishes the handoff.",
+            DesktopStatus.Resolve(Journal with { State = OwnershipState.Draining, UpdatedAt = Now + TimeSpan.FromHours(2) }, other, null, false, Now).NextAction,
+            StringComparison.Ordinal);
     }
 
     [Fact]

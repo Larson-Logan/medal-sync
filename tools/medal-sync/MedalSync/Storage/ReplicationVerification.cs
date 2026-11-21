@@ -6,7 +6,7 @@ namespace MedalSync.Storage;
 
 internal sealed record VerifiedMedia(string Path, long Bytes, DateTime ModifiedUtc);
 internal sealed record DestinationVerification(int Format, string Binding, string SnapshotDigest,
-    DateTimeOffset FullVerifiedAt, int PassesSinceFull, IReadOnlyList<VerifiedMedia> Files, string Integrity = "");
+    DateTimeOffset FullVerifiedAt, int PassesSinceFull, IReadOnlyList<VerifiedMedia> Files, string Integrity = "", bool IdleCheckpoint = false);
 
 /// <summary>Private per-destination evidence. Removing it before a pass makes interruption fall back to a full pass.</summary>
 internal sealed class ReplicationVerification(MedalSyncConfig config, LocalState state, string source, string destination,
@@ -15,22 +15,56 @@ internal sealed class ReplicationVerification(MedalSyncConfig config, LocalState
     private string Binding => Hashing.Sha256Hex(Json.Serialize(new
     {
         config.LibraryId, source, destination, config,
-        credentials = config.Replication?.RcloneConfigPath is { } path && File.Exists(Environment.ExpandEnvironmentVariables(path))
-            ? Hashing.Sha256File(Environment.ExpandEnvironmentVariables(path)) : null,
+        credentials = config.Replication?.RcloneConfigPath is { } path && !WindowsPath.TryParse(destination, out _, out _)
+            ? CredentialFingerprint(Environment.ExpandEnvironmentVariables(path)) : null,
     }));
+
+    private static string? CredentialFingerprint(string path)
+    {
+        // rclone can atomically rewrite the INI file when it refreshes OAuth. Bind to the remote
+        // configuration, including the presence of a token, without binding to its rotating contents.
+        var settings = new List<string>();
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            while (reader.ReadLine() is { } line)
+            {
+                line = line.Trim();
+                if (line.Length == 0 || line[0] is '#' or ';') continue;
+                if (line[0] == '[' && line[^1] == ']')
+                {
+                    settings.Add($"[{line[1..^1].Trim()}]");
+                    continue;
+                }
+                int separator = line.AsSpan().IndexOfAny('=', ':');
+                if (separator <= 0)
+                {
+                    settings.Add(line);
+                    continue;
+                }
+                string key = line[..separator].TrimEnd();
+                settings.Add(key is "token" or "\"token\"" or "`token`" or "\"\"\"token\"\"\""
+                    ? "token=" : key + "=" + line[(separator + 1)..].TrimStart());
+            }
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return null; }
+        return Hashing.Sha256Hex(Json.Serialize(settings));
+    }
 
     private string ReceiptPath => Path.Combine(state.Root, "replication", "destinations",
         Hashing.Sha256Hex(System.Text.Encoding.UTF8.GetBytes(destination)) + ".json");
 
     public void Run(Action<IReadOnlyList<string>, bool> transfer, Action<IReadOnlyList<string>> listing,
-        Action<int, long, bool> report, Action requireUnchanged)
+        Action<int, long, bool> report, Action requireUnchanged, bool idleCheckpoint = false)
     {
         string binding = Binding;
         var previous = Read(binding);
         Directory.CreateDirectory(Path.GetDirectoryName(ReceiptPath)!);
         File.Delete(ReceiptPath);
         var before = Identify();
-        bool full = previous is null || previous.PassesSinceFull >= config.Replication!.FullVerifyEveryHandoffs - 1
+        bool full = previous is null || !previous.IdleCheckpoint
+            && previous.PassesSinceFull >= config.Replication!.FullVerifyEveryHandoffs - 1
             || now - previous.FullVerifiedAt >= TimeSpan.FromDays(config.Replication!.FullVerifyEveryDays);
         var old = previous?.Files.ToDictionary(f => f.Path, StringComparer.Ordinal) ?? [];
         var delta = before.Where(f => full || !old.TryGetValue(f.Path, out var prior) || prior != f).ToArray();
@@ -44,7 +78,8 @@ internal sealed class ReplicationVerification(MedalSyncConfig config, LocalState
         if (!before.SequenceEqual(Identify()) || binding != Binding)
             throw new IOException("Media or replication configuration changed during verification; retry with Medal quit.");
         var receipt = new DestinationVerification(1, binding, snapshotDigest,
-            full ? now : previous!.FullVerifiedAt, full ? 0 : previous!.PassesSinceFull + 1, before);
+            full ? now : previous!.FullVerifiedAt, full ? 0 : previous!.PassesSinceFull + (idleCheckpoint ? 0 : 1), before,
+            IdleCheckpoint: idleCheckpoint);
         AtomicFile.Replace(ReceiptPath, Json.Serialize(receipt with { Integrity = Hashing.Sha256Hex(Json.Serialize(receipt)) }));
     }
 

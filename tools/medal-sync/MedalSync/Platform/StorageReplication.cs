@@ -13,7 +13,7 @@ namespace MedalSync.Platform;
 /// <param name="volumes">Describes the volume behind a folder; replaced in tests.</param>
 internal sealed class StorageReplication(MedalSyncConfig config, LocalState state, Action requireIdle,
     Action<IReadOnlyList<string>>? execute = null, Action<SessionProgress>? progress = null, IAssetChecker? primary = null,
-    Func<string, VolumeInfo?>? volumes = null) : IStorageReplication
+    Func<string, VolumeInfo?>? volumes = null, bool idle = false) : IStorageReplication
 {
     private readonly IFileProbe _probe = new FileSystemProbe();
     private readonly IAssetChecker _primary = primary ?? PrimaryStorage.Checker(config, state);
@@ -127,7 +127,11 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         return null;
     }
 
-    public ReplicationResult Publish(LibrarySnapshot snapshot)
+    public ReplicationResult Publish(LibrarySnapshot snapshot) => PublishCore(snapshot, null);
+
+    internal ReplicationResult PublishIdle(LibrarySnapshot snapshot, IReadOnlyList<string> files) => PublishCore(snapshot, files);
+
+    private ReplicationResult PublishCore(LibrarySnapshot snapshot, IReadOnlyList<string>? idleFiles)
     {
         _readBackFiles = 0; _readBackBytes = 0; _verifiedDestinations = 0;
         if (config.Replication is not { } replication) return ReplicationResult.None;
@@ -136,7 +140,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
         var source = config.MountedCapture;
         RequireMarker(source);
         RequireOrdinaryDirectory(source);
-        var files = ReplicationPlan.Files(snapshot, config.Capture, source, _probe);
+        var files = idleFiles ?? ReplicationPlan.Files(snapshot, config.Capture, source, _probe);
         bool version = replication.ConflictPolicy == ReplicaConflictPolicy.Version;
         if (replication.LocalCopyRoot is not null)
         {
@@ -176,11 +180,12 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
                 pending.Add(target.Name);
                 Report(SessionPhase.Verifying, $"Cloud copy '{target.Name}' is unavailable; it will be retried on the next finish.", target.Name);
             }
-            RecordPending([.. pending], DateTimeOffset.UtcNow);
+            if (!idle) RecordPending([.. pending], DateTimeOffset.UtcNow);
         }
         requireIdle();
         RequireMarker(source);
         RequirePrimary();
+        if (idle) return Result(deferred);
         Directory.CreateDirectory(Path.Combine(state.Root, "replication"));
         AtomicFile.Replace(Path.Combine(state.Root, "replication", "last-verified.json"), Json.Serialize(new
         {
@@ -299,7 +304,7 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
                 _readBackFiles += count; _readBackBytes += bytes;
                 detail = $"{(full ? "Full" : "Incremental")} verification: reading back {count} file(s), {bytes} bytes; checking remaining file sizes.";
                 Report(SessionPhase.Verifying, detail, replica);
-            }, requireIdle);
+            }, requireIdle, idleCheckpoint: idle);
         _verifiedDestinations++;
     }
 
@@ -339,7 +344,12 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
                         : (command == "copy" ? "Copying selected clips. " : "Checking selected clips. ") + detail, Replica: replica)); }
                 catch (Exception) { /* UI telemetry cannot interrupt required copies. */ }
                 var arguments = ReplicationPlan.Arguments(command, source, target, list, configFile,
-                    credentials ? config.Replication?.BandwidthLimitMiB : null, versionDirectory, sizeOnly);
+                    idle ? Math.Min(config.Replication?.BandwidthLimitMiB ?? 2, 2) : credentials ? config.Replication?.BandwidthLimitMiB : null,
+                    versionDirectory, sizeOnly).ToList();
+                if (idle)
+                {
+                    arguments[arguments.IndexOf("--transfers") + 1] = "1";
+                }
                 if (execute is not null) execute(arguments); else Execute(arguments);
             }
         }
@@ -347,7 +357,8 @@ internal sealed class StorageReplication(MedalSyncConfig config, LocalState stat
     }
 
     private void Execute(IReadOnlyList<string> arguments) =>
-        new RcloneRunner(config.ExpandedRclonePath).Run(arguments, TimeSpan.FromMinutes(config.Replication?.TimeoutMinutes ?? 240), requireIdle);
+        new RcloneRunner(config.ExpandedRclonePath).Run(arguments, TimeSpan.FromMinutes(config.Replication?.TimeoutMinutes ?? 240), requireIdle,
+            lowPriority: idle);
 
     private void RequireMarker(WindowsPath folder)
     {

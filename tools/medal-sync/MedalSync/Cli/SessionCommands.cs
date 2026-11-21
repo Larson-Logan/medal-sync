@@ -21,6 +21,12 @@ internal static class SessionCommands
 
     private static Context Load()
     {
+        var (state, config, install) = LoadEnvironment();
+        return new Context(state, config, install, state.Device(), new RotatingLog(state.LogDirectory));
+    }
+
+    private static (LocalState State, MedalSyncConfig Config, MedalInstall Install) LoadEnvironment()
+    {
         var state = LocalState.ForCurrentUser();
         var config = MedalSyncConfig.Load(state.ConfigPath);
         var install = MedalEnvironment.Locate();
@@ -28,7 +34,7 @@ internal static class SessionCommands
         {
             throw new IncompatibleLibraryException($"Medal is signed in as account {install.AccountId}, but medal-sync is set up for {config.AccountId}.");
         }
-        return new Context(state, config, install, state.Device(), new RotatingLog(state.LogDirectory));
+        return (state, config, install);
     }
 
     public static int Inspect(Arguments args, TextWriter output)
@@ -92,6 +98,9 @@ internal static class SessionCommands
         Func<bool>? supervisorRunning = null)
     {
         var now = DateTimeOffset.UtcNow;
+        var pending = LibrarySetupPending.Read(state, config);
+        if (pending?.AwaitsInitialization(state, config, supervisorRunning ?? AnotherInstanceRunning) == true)
+            return WritePendingSetup(config, pending, now, json, output);
         var cloudChecks = ReplicaCheckStatus.Read(state, config.LibraryId, now, config.Replication?.Targets ?? []);
         CoordinationStore store;
         OwnershipRecord journal;
@@ -101,7 +110,7 @@ internal static class SessionCommands
             store = CoordinationStore.Open(config);
             journal = store.ReadJournal();
         }
-        catch (IOException)
+        catch (IOException ex) when (ex is not StorageActionRequiredException)
         {
             const string waiting = "Waiting for storage: the shared library's server cannot be reached right now. Clips and any session stay on this PC.";
             if (json)
@@ -114,9 +123,16 @@ internal static class SessionCommands
             }
             return 3;
         }
+        if (pending is not null && journal.State == OwnershipState.Clean && !LibrarySetupPending.HasSession(state)
+            && !(supervisorRunning ?? AnotherInstanceRunning)())
+            return WritePendingSetup(config, pending, now, json, output);
+        string? nameAdvice = null;
+        try { nameAdvice = DeviceNameAdvice.Read(config, state, store); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException) { /* Advisory only. */ }
         if (json)
         {
             var desktop = DesktopStatus.Read(state, config.LibraryId, journal, device, (supervisorRunning ?? AnotherInstanceRunning)(), now, cloudChecks);
+            if (nameAdvice is not null) desktop = desktop with { NextAction = desktop.NextAction + " " + nameAdvice };
             var report = StatusReport.Reached(config.LibraryId, journal, device, desktop, store.PendingRequests(now), store.StaleRequests(now),
                 StorageReplication.Pending(state, config.LibraryId), StatusReport.ReadLastVerifiedAt(state.Root, config.LibraryId), now)
                 with { ReplicaRetry = ReplicaRetryStatus.Read(state, config.LibraryId, now), CloudCopies = cloudChecks };
@@ -124,6 +140,7 @@ internal static class SessionCommands
             return 0;
         }
         output.WriteLine(StatusText.For(journal, device ?? DesktopStatus.NoDevice, Directory.Exists(config.DriveRoot.Display)));
+        if (nameAdvice is not null) output.WriteLine(nameAdvice);
         foreach (var request in store.PendingRequests(now)) output.WriteLine($"Waiting to switch: {request.Device.DisplayName} since {request.RequestedAt:yyyy-MM-dd HH:mm} UTC.");
         foreach (var request in store.StaleRequests(now))
             output.WriteLine($"Old switch request from {request.Device.DisplayName} ({request.RequestedAt:yyyy-MM-dd HH:mm} UTC) is ignored; the next session removes it.");
@@ -135,6 +152,16 @@ internal static class SessionCommands
         foreach (var item in StorageCheckReport.Outstanding(state, config.LibraryId))
             output.WriteLine($"Storage needs attention: {item.Detail} Run 'medal-sync storage check' after fixing it.");
         return 0;
+    }
+
+    private static int WritePendingSetup(MedalSyncConfig config, LibrarySetupPending pending, DateTimeOffset now, bool json, TextWriter output)
+    {
+        var setup = DesktopStatus.SetupPending(pending, now);
+        if (json)
+            output.WriteLine((StatusReport.Offline(config.LibraryId, setup.NextAction, [], null, now) with
+            { Phase = setup.Phase, Title = setup.Title, NextAction = setup.NextAction, Storage = "not_checked" }).ToJson());
+        else output.WriteLine(setup.Title + ": " + setup.NextAction);
+        return 1;
     }
 
     /// <summary>
@@ -220,13 +247,19 @@ internal static class SessionCommands
     {
         bool apply = args.Flag("--apply");
         args.RequireAllUsed();
-        var context = Load();
+        var (state, config, install) = LoadEnvironment();
         using var instance = SingleInstance();
-        if (new MedalProcess(context.Install).IsRunning()) throw new UnsafeOperationException("Quit Medal from its tray icon first.");
-        var snapshot = LibraryDatabase.ReadSnapshot(context.Install.DatabasePath, context.Install.AccountId);
-        if (context.Config.StorageMode == StorageMode.Cloud)
-            return InitCloud(context, snapshot, apply, output);
-        var checker = PrimaryStorage.Checker(context.Config, context.State);
+        return InitLibrary(state, config, install, apply, output);
+    }
+
+    internal static int InitLibrary(LocalState state, MedalSyncConfig config, MedalInstall install, bool apply, TextWriter output)
+    {
+        if (!apply) _ = ExistingDeviceOrNull(state);
+        if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Quit Medal from its tray icon first.");
+        var snapshot = LibraryDatabase.ReadSnapshot(install.DatabasePath, install.AccountId);
+        if (config.StorageMode == StorageMode.Cloud)
+            return InitCloud(state, config, install, snapshot, apply, output);
+        var checker = PrimaryStorage.Checker(config, state);
         var onServer = checker.OnServer(snapshot);
         var blocking = onServer.Blocking.ToList();
         output.WriteLine($"Library: {LibraryCommands.Counts(snapshot)}; {onServer.Items.Count} file references, {blocking.Count} not usable on the server.");
@@ -237,15 +270,17 @@ internal static class SessionCommands
         }
         if (!apply)
         {
-            output.WriteLine($"Preview only. With --apply this creates {context.Config.LibraryCoordinationDirectory} and the storage marker.");
+            output.WriteLine($"Preview only. With --apply this creates {config.LibraryCoordinationDirectory} and the storage marker.");
             return 0;
         }
+        var device = state.Device();
         if (checker is RcloneAssetChecker remote) remote.Initialize(allowExistingMedia: true);
-        else StorageIdentity.Initialize(context.Config.ServerCapture.Display, context.Config.LibraryId);
-        CoordinationStore.Create(context.Config, snapshot, AssetManifest.From(onServer),
-            context.Device, SessionCoordinator.NewId(), context.Install.Versions, DateTimeOffset.UtcNow);
-        context.Log.Write($"init: generation 0 created from {LibraryCommands.Counts(snapshot)}");
+        else StorageIdentity.Initialize(config.ServerCapture.Display, config.LibraryId);
+        CoordinationStore.Create(config, snapshot, AssetManifest.From(onServer),
+            device, SessionCoordinator.NewId(), install.Versions, DateTimeOffset.UtcNow);
+        new RotatingLog(state.LogDirectory).Write($"init: generation 0 created from {LibraryCommands.Counts(snapshot)}");
         output.WriteLine("Shared library created as generation 0.");
+        LibrarySetupPending.Read(state, config)?.Complete(state, config);
         return 0;
     }
 
@@ -259,23 +294,24 @@ internal static class SessionCommands
         return 0;
     }
 
-    private static int InitCloud(Context context, LibrarySnapshot snapshot, bool apply, TextWriter output)
+    private static int InitCloud(LocalState state, MedalSyncConfig config, MedalInstall install, LibrarySnapshot snapshot, bool apply, TextWriter output)
     {
-        var config = context.Config;
         var report = new ShareAssetChecker(config.Capture, config.MountedCapture, config.LibraryId, new FileSystemProbe()).OnServer(snapshot);
         if (report.Blocking.Any()) throw new UnsafeOperationException("Cloud initialization requires all referenced media in the persistent local copy. Preview 'relocate --from ORIGINAL_FOLDER' first.");
         output.WriteLine($"Google Drive library {config.LibraryId}; journal {config.CloudJournalId}; {report.Items.Count} media references.");
         if (!apply) { output.WriteLine("Preview only. --apply uploads and verifies local media and generation 0, then creates the Drive ownership journal. No SMB server is required."); return 0; }
         if (GoogleDriveJournal.For(config).Exists()) throw new UnsafeOperationException("The Drive journal already exists. Join or recover that library; it was not reinitialized.");
-        var checker = new RcloneAssetChecker(config, context.State);
+        var device = state.Device();
+        var checker = new RcloneAssetChecker(config, state);
         checker.Initialize(allowExistingMedia: true);
         StorageIdentity.Initialize(config.MountedCapture.Display, config.LibraryId);
-        new StorageReplication(config with { Replication = config.Replication! with { ConflictPolicy = ReplicaConflictPolicy.Stop } }, context.State, () =>
+        new StorageReplication(config with { Replication = config.Replication! with { ConflictPolicy = ReplicaConflictPolicy.Stop } }, state, () =>
         {
-            if (new MedalProcess(context.Install).IsRunning()) throw new UnsafeOperationException("Quit Medal before initializing cloud storage.");
+            if (new MedalProcess(install).IsRunning()) throw new UnsafeOperationException("Quit Medal before initializing cloud storage.");
         }, primary: checker).Publish(snapshot);
-        CoordinationStore.Create(config, snapshot, AssetManifest.From(report), context.Device, SessionCoordinator.NewId(), context.Install.Versions, DateTimeOffset.UtcNow);
+        CoordinationStore.Create(config, snapshot, AssetManifest.From(report), device, SessionCoordinator.NewId(), install.Versions, DateTimeOffset.UtcNow);
         output.WriteLine("Google Drive library created. Reuse this library ID and cloud journal ID on the other PC; keep its own device identity.");
+        LibrarySetupPending.Read(state, config)?.Complete(state, config);
         return 0;
     }
 
@@ -286,7 +322,7 @@ internal static class SessionCommands
     /// </summary>
     public static int Launch(Arguments args, TextWriter output, Action<string>? notify = null,
         Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
-        Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait = null)
+        Func<HandoffWaitOffer, HandoffChoice>? offerHandoffWait = null, bool atSignIn = false)
     {
         bool replaceLocal = args.Flag("--replace-local-library");
         var wait = WaitSeconds(args.Value("--wait-for-server"));
@@ -309,29 +345,29 @@ internal static class SessionCommands
             context.Log.Write($"launch: the server was still unreachable after {wait.TotalSeconds:0} s");
         }
         if (shutdown.Ending) return 3;
-        if (context.Config.StorageMode != StorageMode.Cloud && !Directory.Exists(context.Config.CoordinationRoot)) return WaitForStorage(context, output, status);
+        if (context.Config.StorageMode != StorageMode.Cloud && !Directory.Exists(context.Config.CoordinationRoot))
+            return ReportJournalFailure(context, output, status, "launch");
         GuardStartup(context);
-        SessionCoordinator coordinator;
         CoordinationStore store;
-        RcloneClipMount mount;
         OwnershipRecord journal;
         try
         {
-            (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report,
-                StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null, askOwnerToSwitch: !quiet);
-            journal = store.ReadJournal();
+            (store, journal) = ReadSessionJournal(context.Config, shutdown.RequireTime);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // The share dropped between the check and the journal read.
-            return WaitForStorage(context, output, status);
+            return ReportJournalFailure(context, output, status, "launch", ex);
         }
+        var (coordinator, mount) = Coordinator(context, store, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report,
+            StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null, askOwnerToSwitch: !quiet);
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
-        var outcome = LaunchOrWait(context, output, coordinator, handoff, shutdown, offerHandoffWait);
+        var outcome = LaunchOrWait(context, output, coordinator, handoff, shutdown, offerHandoffWait, atSignIn);
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
         // Recording can go ahead, but the user should learn now, not after the session, that the handoff will need them.
         if (outcome.Warning is { } warning && !shutdown.SuppressUi) Notify(notify, warning);
-        if (outcome.Status is not (LaunchStatus.Started or LaunchStatus.AlreadyRunning)) return outcome.Status == LaunchStatus.Waiting ? 3 : 1;
+        if (outcome.Status == LaunchStatus.RecoveredPreviousSession) return 0;
+        if (outcome.Status is not (LaunchStatus.Started or LaunchStatus.AlreadyRunning or LaunchStatus.FinishingPreviousSession))
+            return outcome.Status == LaunchStatus.Waiting ? 3 : 1;
         // A recovered, already-running session must pass the coordinator's drive
         // and ownership checks before it receives a link.
         if (outcome.Status == LaunchStatus.AlreadyRunning && link is not null
@@ -350,7 +386,7 @@ internal static class SessionCommands
             {
                 Report(context, output, m);
                 if (!shutdown.SuppressUi) Notify(notify, m);
-            }, cancel.Token);
+            }, cancel.Token, outcome.PendingFinish);
         }
         if (!shutdown.Ending) GuardStartup(context);
         Report(context, output, $"finish: {finished.Status}: {finished.Message}");
@@ -365,7 +401,7 @@ internal static class SessionCommands
     /// found the library owned elsewhere. Otherwise this is the unchanged immediate launch. Ctrl+C stops a wait.
     /// </summary>
     private static LaunchOutcome LaunchOrWait(Context context, TextWriter output, SessionCoordinator coordinator, TimeSpan? handoff,
-        SessionShutdown shutdown, Func<HandoffWaitOffer, IHandoffWaitView?>? offerHandoffWait)
+        SessionShutdown shutdown, Func<HandoffWaitOffer, HandoffChoice>? offerHandoffWait, bool atSignIn)
     {
         if (handoff is { } timeout)
         {
@@ -373,15 +409,22 @@ internal static class SessionCommands
             return WaitWithCtrlC(cancelled => coordinator.LaunchWhenReleased(new HandoffWait(timeout, cancelled, update =>
             {
                 // One line per change, not per check.
-                var key = (update.Owner, update.State, update.Fresh);
+                var key = (update.Owner, update.State, update.Fresh, update.QuietSince);
                 if (key.Equals(last)) return;
                 last = key;
                 Report(context, output, "launch: waiting: " + update.Describe());
             })));
         }
-        var outcome = coordinator.Launch();
+        var outcome = coordinator.Launch(atSignIn);
         if (outcome.Wait != LaunchWait.OwnedElsewhere || offerHandoffWait is null || shutdown.SuppressUi) return outcome;
-        var view = offerHandoffWait(new HandoffWaitOffer(outcome.Message, OfferedHandoffWait));
+        var recovery = outcome.Journal is { } journal && SessionCoordinator.CanUseLastSync(journal) ? journal : null;
+        var choice = offerHandoffWait(new HandoffWaitOffer(outcome.Message, OfferedHandoffWait, recovery));
+        var view = choice.View;
+        if (choice.UseLastSync && recovery is not null && !shutdown.SuppressUi)
+        {
+            view?.Dispose();
+            return coordinator.UseLastSync(recovery);
+        }
         if (view is null || shutdown.SuppressUi)
         {
             view?.Dispose();
@@ -494,16 +537,24 @@ internal static class SessionCommands
         using var retry = ReplicaRetryInterlock.Launch();
         using var sessionEnd = new WindowsSessionEnd(shutdown, context.Log.Write);
         using var status = new DesktopStatusPublisher(context.State, context.Config.LibraryId, context.Config.AccountId, context.Device.DeviceId);
-        var (coordinator, store, mount) = Coordinator(context, accept, shutdown: shutdown, progress: status.Report);
-        var journal = store.ReadJournal();
+        CoordinationStore store;
+        OwnershipRecord journal;
+        try { (store, journal) = ReadSessionJournal(context.Config, shutdown.RequireTime); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ReportJournalFailure(context, output, status, "finish", ex);
+        }
         if (journal.Owner?.DeviceId != context.Device.DeviceId)
         {
             output.WriteLine("This PC has no unfinished session.");
             return 0;
         }
+        var (coordinator, mount) = Coordinator(context, store, accept, shutdown: shutdown, progress: status.Report);
         mount.Attach(journal.SessionId!);
         var finished = coordinator.Finish(journal.SessionId!);
         Report(context, output, $"finish: {finished.Status}: {finished.Message}");
+        if (finished.Status is FinishStatus.Published or FinishStatus.Unchanged)
+            LibrarySetupPending.Read(context.State, context.Config)?.Complete(context.State, context.Config);
         return finished.Status is FinishStatus.Published or FinishStatus.Unchanged ? 0 : finished.Status == FinishStatus.Pending ? 3 : 1;
     }
 
@@ -523,7 +574,7 @@ internal static class SessionCommands
         var store = CoordinationStore.Open(config);
         var recovery = new AbortedStartRecovery(config, state, store, () =>
         {
-            if (Hashing.Sha256File(state.ConfigPath) != fingerprint || state.ExistingDevice() != device)
+            if (Hashing.Sha256File(state.ConfigPath) != fingerprint || state.ExistingDevice().DeviceId != device.DeviceId)
                 throw new UnsafeOperationException("Configuration or device identity changed; review recovery again.");
             if (new MedalProcess(install).IsRunning() || Directory.Exists(config.DriveRoot.Display))
                 throw new UnsafeOperationException("Quit Medal normally and stop its clip drive through session recovery before recovering an orphan login.");
@@ -630,12 +681,11 @@ internal static class SessionCommands
         return new SpacePressureMonitor(folders, warning, critical, StorageVolume.Describe, bitrate);
     }
 
-    private static (SessionCoordinator, CoordinationStore, RcloneClipMount) Coordinator(Context context, bool acceptChanges,
+    private static (SessionCoordinator, RcloneClipMount) Coordinator(Context context, CoordinationStore store, bool acceptChanges,
         bool replaceLocal = false, Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
         string? launchLink = null, Action<SessionProgress>? progress = null, Func<LaunchPreflight>? preflight = null, bool askOwnerToSwitch = true)
     {
         var clock = new SystemClock();
-        var store = CoordinationStore.Open(context.Config, () => shutdown?.RequireTime());
         double bitrate;
         using (var connection = LibraryDatabase.OpenReadOnly(context.Install.DatabasePath))
         {
@@ -646,6 +696,8 @@ internal static class SessionCommands
         var library = new SqliteLocalLibrary(context.Install.DatabasePath, context.Install.AccountId, context.State.BackupDirectory, clock,
             context.Config.StorageMode == StorageMode.Cloud ? context.Config.CaptureFolder : null);
         var checker = PrimaryStorage.Checker(context.Config, context.State, () => shutdown?.RequireTime());
+        var idle = new WindowsIdle();
+        var idleMedia = new IdleMediaSync(context.Config, context.State, clock);
         var options = new SessionOptions(context.Device, context.Config.Capture, context.Install.Versions,
             TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(5), acceptChanges, replaceLocal)
         {
@@ -666,8 +718,24 @@ internal static class SessionCommands
                 shutdown?.RequireTime();
                 if (new MedalProcess(context.Install).IsRunning())
                     throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
-            }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress, SpaceMonitor(context.Config, bitrate), preflight), store, mount);
+            }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress, SpaceMonitor(context.Config, bitrate), preflight,
+            idle.IsIdle, idleMedia.Sync, guard => PrimaryStorage.Checker(context.Config, context.State, guard), KeepAwake(context)), mount);
     }
+
+    /// <summary>
+    /// The process-wide keep-awake request, or null when <c>keepAwakeWhileFinishing</c> is false. Its handle closes
+    /// with the process; every hold is released as soon as its work ends.
+    /// </summary>
+    private static IKeepAwake? KeepAwake(Context context) => KeepAwake(context.Config, context.Log.Write);
+
+    internal static IKeepAwake? KeepAwake(MedalSyncConfig config, Action<string> log)
+    {
+        if (config.KeepAwakeWhileFinishing == false) return null;
+        lock (KeepAwakeGate) return _keepAwake ??= new WindowsKeepAwake(log);
+    }
+
+    private static readonly object KeepAwakeGate = new();
+    private static WindowsKeepAwake? _keepAwake;
 
     /// <summary>
     /// Runs before ownership is taken. Never throws: a check that cannot run is logged and launch continues,
@@ -720,13 +788,29 @@ internal static class SessionCommands
         return directory;
     }
 
-    /// <summary>An outage is a wait, never an error: nothing was acquired or changed.</summary>
-    private static int WaitForStorage(Context context, TextWriter output, DesktopStatusPublisher status)
+    internal static (CoordinationStore Store, OwnershipRecord Journal) ReadSessionJournal(MedalSyncConfig config, Action? requireTime = null)
     {
-        status.Report(new SessionProgress(SessionPhase.WaitingForStorage,
-            "Waiting for storage: the shared library's server cannot be reached. Open Medal again once it is back.", IsOutcome: true));
-        Report(context, output, "launch: Waiting: the shared library's server cannot be reached right now; nothing was changed.");
-        return 3;
+        if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot))
+            throw new StorageOfflineException("The shared library's server cannot be reached right now.");
+        var store = CoordinationStore.Open(config, requireTime);
+        return (store, store.ReadJournal());
+    }
+
+    private static int ReportJournalFailure(Context context, TextWriter output, DesktopStatusPublisher status, string command, Exception? cause = null)
+    {
+        var (phase, message, code) = DescribeJournalFailure(command, cause);
+        status.Report(new SessionProgress(phase, message, IsOutcome: true));
+        Report(context, output, $"{command}: {(code == 3 ? "Waiting" : "Blocked")}: {message}");
+        return code;
+    }
+
+    internal static (SessionPhase Phase, string Message, int Code) DescribeJournalFailure(string command, Exception? cause)
+    {
+        if (cause is StorageActionRequiredException action)
+            return (SessionPhase.RecoveryNeeded, $"Action needed before {command}: {action.Message}", 1);
+        string retry = command == "finish" ? "Run finish again once storage is back." : "Open Medal again once storage is back.";
+        string detail = cause is StaleCoordinationReadException stale ? stale.Message : "The shared library's server cannot be reached right now.";
+        return (SessionPhase.WaitingForStorage, $"Waiting for storage: {detail} {retry}", 3);
     }
 
     private static void Report(Context context, TextWriter output, string message)

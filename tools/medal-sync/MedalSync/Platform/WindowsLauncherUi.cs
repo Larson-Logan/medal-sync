@@ -9,7 +9,7 @@ namespace MedalSync.Platform;
 
 /// <summary>Explicit Windows dialogs and passive notices for the independent status view.</summary>
 [SupportedOSPlatform("windows")]
-internal sealed class WindowsLauncherUi : ILauncherUi
+internal sealed class WindowsLauncherUi(Func<HandoffWaitOffer, HandoffAction>? chooseHandoff = null) : ILauncherUi
 {
     private const string Title = "Medal Sync";
     private const uint IconWarning = 0x30;
@@ -27,17 +27,24 @@ internal sealed class WindowsLauncherUi : ILauncherUi
     public bool OfferConfiguration(string message) => Confirm(message);
 
     /// <summary>No is the default: waiting, and later opening Medal by itself, needs an explicit Yes.</summary>
-    public IHandoffWaitView? OfferHandoffWait(HandoffWaitOffer offer)
+    public HandoffChoice OfferHandoffWait(HandoffWaitOffer offer)
     {
-        if (!Confirm($"{offer.Message}\n\nWait here and open Medal automatically once the other PC hands off the library? "
-            + $"Medal Sync keeps checking for up to {Session.HandoffWaitUpdate.Duration(offer.Timeout)}, and you can cancel at any time."))
-            return null;
-        try { return new WindowsHandoffWaitView(offer.Timeout, Show); }
+        var action = chooseHandoff?.Invoke(offer) ?? (Confirm($"{offer.Message}\n\nWait here and open Medal automatically once the other PC hands off the library? "
+            + $"Medal Sync keeps checking for up to {Session.HandoffWaitUpdate.Duration(offer.Timeout)}, and you can cancel at any time.")
+            ? HandoffAction.Wait : HandoffAction.Cancel);
+        if (action == HandoffAction.UseLastSync && offer.Recovery is { } journal)
+        {
+            string owner = journal.Owner!.DisplayName;
+            return new(UseLastSync: Confirm($"Has {owner} fully shut down? A sleeping or disconnected PC can resume writing.\n\n"
+                + $"Medal will open here from shared generation {journal.CommittedGeneration}. Clips and edits that had yet to sync stay on {owner}."));
+        }
+        if (action != HandoffAction.Wait) return new();
+        try { return new(new WindowsHandoffWaitView(offer.Timeout, Show)); }
         catch (Exception ex) when (ex is COMException or InvalidCastException or InvalidComObjectException or MarshalDirectiveException or TypeLoadException)
         {
             // Without a visible Cancel there is no wait.
             Show("The waiting window could not be shown, so Medal Sync is not waiting. Open Medal again after the other PC reaches Ready.");
-            return null;
+            return new();
         }
     }
 

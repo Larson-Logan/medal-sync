@@ -17,6 +17,10 @@ internal sealed record HandoffRequest(int Format, DeviceIdentity Device, string 
 
     /// <summary>After this, a request no longer prompts the owner: the PC that asked stopped waiting long ago, or no longer exists.</summary>
     public static readonly TimeSpan Lifetime = TimeSpan.FromHours(6);
+
+    private static readonly TimeSpan CloudClockSkew = TimeSpan.FromMinutes(5);
+
+    public bool IsFreshInCloud(DateTimeOffset now) => now - RequestedAt < Lifetime && RequestedAt - now <= CloudClockSkew;
 }
 
 /// <summary>
@@ -68,10 +72,16 @@ internal sealed partial class CoordinationStore
 
     public GenerationStore Generations { get; }
 
+    /// <summary>Discover cloud attempts before allocating an idle checkpoint, just as BeginPublish does at finish.</summary>
+    internal void RefreshGenerationNumbers(Action? check = null) => cloud?.RefreshGenerationNumbers(check);
+
     private string JournalPath => Path.Combine(Root, "journal.json");
 
     /// <summary>Refuses a stale copy of the journal that Windows serves from a cached open; replaced in tests.</summary>
     internal FreshCoordinationRead JournalReader { get; set; } = FreshCoordinationRead.Default;
+
+    /// <summary>Requests are replaced independently of the journal and use their own per-path read pauses.</summary>
+    internal FreshCoordinationRead RequestReader { get; set; } = FreshCoordinationRead.Default;
 
     private string LockPath => Path.Combine(Root, "writer.lock");
 
@@ -79,12 +89,13 @@ internal sealed partial class CoordinationStore
 
     public static bool IsValidId(string? value) => value is not null && IdPattern().IsMatch(value);
 
-    /// <summary>False when the journal cannot be seen, which distinguishes an outage from a refusal.</summary>
+    /// <summary>False for an outage. A provider that refuses access still counts as reachable.</summary>
     public bool IsReachable()
     {
         if (cloud is not null)
         {
             try { _ = cloud.Read(); return true; }
+            catch (StorageActionRequiredException) { return true; }
             catch (IOException) { return false; }
         }
         try { return File.Exists(JournalPath); }
@@ -97,6 +108,9 @@ internal sealed partial class CoordinationStore
         string marker = Path.Combine(root, "library.json");
         if (!File.Exists(marker))
         {
+            if (IsUnfinishedInit(root))
+                throw new UnsafeOperationException(
+                    $"'{root}' holds an unfinished library initialization and no library marker. Run 'medal-sync init --apply' again on the PC that started it to complete it; nothing was started.");
             throw new UnsafeOperationException(
                 $"No Medal library marker at '{root}'. The server share may be unreachable; nothing was started.");
         }
@@ -111,27 +125,133 @@ internal sealed partial class CoordinationStore
 
     /// <summary>
     /// Creates a new shared library from a reviewed snapshot as generation 0.
-    /// Refuses if anything already exists at <paramref name="root"/>.
+    /// Refuses if anything already exists at <paramref name="root"/>, except this device's own unfinished
+    /// initialization of the same reviewed snapshot, which it completes. A library marker is never replaced.
     /// </summary>
     public static CoordinationStore Create(string root, string libraryId, LibrarySnapshot initial, AssetManifest assets,
-        DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now)
+        DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now) =>
+        Create(root, libraryId, initial, assets, device, session, medal, now, beforeLock: null);
+
+    /// <param name="beforeLock">Test seam: runs after the first check, before the writer lock, as another PC's init could.</param>
+    internal static CoordinationStore Create(string root, string libraryId, LibrarySnapshot initial, AssetManifest assets,
+        DeviceIdentity device, string session, MedalVersions medal, DateTimeOffset now, Action? beforeLock)
     {
         if (!IsValidId(libraryId)) throw new ArgumentException("A library ID is 32 lowercase hex characters.", nameof(libraryId));
-        if (Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any())
+        string marker = Path.Combine(root, "library.json");
+        bool resume = Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any();
+        if (resume && (File.Exists(marker) || !IsUnfinishedInit(root)))
         {
             throw new UnsafeOperationException($"'{root}' is not empty. An existing library is never reinitialized.");
         }
+        beforeLock?.Invoke();
         Directory.CreateDirectory(root);
-        var identity = new LibraryIdentity(LibraryIdentity.CurrentFormat, libraryId, initial.AccountId, now, device);
-        var store = new CoordinationStore(root, identity);
-        using (store.AcquireWriterLock(TimeSpan.FromSeconds(5)))
+        var bootstrap = new CoordinationStore(root, new LibraryIdentity(LibraryIdentity.CurrentFormat, libraryId, initial.AccountId, now, device));
+        LibraryIdentity identity;
+        using (bootstrap.AcquireWriterLock(TimeSpan.FromSeconds(5)))
         {
-            store.Generations.Publish(0, null, session, device, initial, assets, medal, now);
-            AtomicFile.CreateNew(store.JournalPath, Json.Serialize(Ownership.Initial(libraryId, initial.AccountId, now)));
-            AtomicFile.CreateNew(Path.Combine(root, "library.json"), Json.Serialize(identity));
+            // Always checked again under the lock, even when the folder looked empty above: another PC's init can fill
+            // it in between. Only the lock itself or this device's exact bootstrap of the same reviewed library is accepted.
+            DateTimeOffset createdAt = bootstrap.ResumableCreatedAt(initial, assets, device, now);
+            if (!bootstrap.Generations.Exists(0)) bootstrap.Generations.Publish(0, null, session, device, initial, assets, medal, createdAt);
+            byte[] journal = Json.Serialize(Ownership.Initial(libraryId, initial.AccountId, createdAt));
+            // An earlier version wrote the journal in place, so an interruption can leave a truncated copy of these bytes.
+            if (!File.Exists(bootstrap.JournalPath)) CreateAtomically(bootstrap.JournalPath, journal);
+            else if (!File.ReadAllBytes(bootstrap.JournalPath).AsSpan().SequenceEqual(journal)) AtomicFile.Replace(bootstrap.JournalPath, journal);
+            identity = new LibraryIdentity(LibraryIdentity.CurrentFormat, libraryId, initial.AccountId, createdAt, device);
+            CreateAtomically(marker, Json.Serialize(identity));
         }
-        return store;
+        return new CoordinationStore(root, identity);
     }
+
+    /// <summary>
+    /// True when <paramref name="root"/> holds only what an interrupted <see cref="Create(string, string, LibrarySnapshot, AssetManifest, DeviceIdentity, string, MedalVersions, DateTimeOffset)"/>
+    /// can leave: the writer lock, generation 0 or its staging folders, the initial journal and temporary files, and no library marker.
+    /// </summary>
+    internal static bool IsUnfinishedInit(string root)
+    {
+        try
+        {
+            if (!Directory.Exists(root) || File.Exists(Path.Combine(root, "library.json"))) return false;
+            bool any = false;
+            foreach (string entry in Directory.EnumerateFileSystemEntries(root))
+            {
+                any = true;
+                string name = Path.GetFileName(entry);
+                bool known = name switch
+                {
+                    "writer.lock" or "journal.json" => File.Exists(entry),
+                    "generations" => IsInitGenerationDirectory(entry),
+                    _ => File.Exists(entry) && TemporaryMarkerName().IsMatch(name),
+                };
+                if (!known) return false;
+            }
+            return any;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    internal static bool IsInitGenerationDirectory(string path) =>
+        IsOrdinaryDirectory(path) && Directory.EnumerateFileSystemEntries(path)
+            .All(entry => IsOrdinaryDirectory(entry) && UnfinishedGenerationName().IsMatch(Path.GetFileName(entry)));
+
+    private static bool IsOrdinaryDirectory(string path) => Directory.Exists(path)
+        && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0;
+
+    /// <summary>
+    /// The creation time of this device's unfinished bootstrap of exactly <paramref name="initial"/> and <paramref name="assets"/>,
+    /// or <paramref name="now"/> when generation 0 was never published. Anything else refuses.
+    /// </summary>
+    private DateTimeOffset ResumableCreatedAt(LibrarySnapshot initial, AssetManifest assets, DeviceIdentity device, DateTimeOffset now)
+    {
+        const string differs = "The unfinished library initialization in '{0}' was not started by this PC from the same reviewed library. Preserve it and recover before retrying; it was not changed.";
+        if (!IsUnfinishedInit(Root)) throw new UnsafeOperationException($"'{Root}' is not empty. An existing library is never reinitialized.");
+        DateTimeOffset createdAt = now;
+        if (Generations.Exists(0))
+        {
+            GenerationContent original;
+            try { original = Generations.Read(0); }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException)
+            {
+                throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root) + " Generation 0 is incomplete or damaged: " + ex.Message);
+            }
+            if (original.Manifest.Device.DeviceId != device.DeviceId || original.Manifest.ParentGeneration is not null
+                || original.Snapshot.Digest() != initial.Digest()
+                || !Json.Serialize(original.Assets).AsSpan().SequenceEqual(Json.Serialize(assets)))
+                throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root));
+            createdAt = original.Manifest.CreatedAt;
+        }
+        else if (File.Exists(JournalPath))
+        {
+            throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root) + " It has a journal but no generation 0.");
+        }
+        if (File.Exists(JournalPath))
+        {
+            byte[] expected = Json.Serialize(Ownership.Initial(Identity.LibraryId, initial.AccountId, createdAt));
+            byte[] existing = File.ReadAllBytes(JournalPath);
+            if (existing.Length > expected.Length || !expected.AsSpan(0, existing.Length).SequenceEqual(existing))
+                throw new UnsafeOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture, differs, Root) + " Its journal is not the initial one.");
+        }
+        return createdAt;
+    }
+
+    /// <summary>Writes a complete file under a temporary name, then moves it into place without ever replacing one.</summary>
+    private static void CreateAtomically(string path, byte[] bytes)
+    {
+        string temp = Path.Combine(Path.GetDirectoryName(path)!, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        AtomicFile.CreateNew(temp, bytes);
+        try { File.Move(temp, path, overwrite: false); }
+        catch
+        {
+            try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            throw;
+        }
+    }
+
+    [GeneratedRegex(@"\A(?:0000000000|\.staging-0000000000-[0-9a-f]{32})\z")]
+    private static partial Regex UnfinishedGenerationName();
+
+    [GeneratedRegex(@"\A\.(?:journal|library)\.json\.[0-9a-f]{32}\.tmp\z")]
+    private static partial Regex TemporaryMarkerName();
 
     public OwnershipRecord ReadJournal()
     {
@@ -151,9 +271,9 @@ internal sealed partial class CoordinationStore
     }
 
     /// <summary>Applies one transition under the writer lock, checking the revision it was based on.</summary>
-    public OwnershipRecord Update(Func<OwnershipRecord, OwnershipRecord> transition, TimeSpan lockTimeout)
+    public OwnershipRecord Update(Func<OwnershipRecord, OwnershipRecord> transition, TimeSpan lockTimeout, Action? check = null)
     {
-        if (cloud is not null) return cloud.Update(transition);
+        if (cloud is not null) return cloud.Update(transition, check);
         using var _ = AcquireWriterLock(lockTimeout);
         var current = ReadJournal();
         var next = transition(current);
@@ -166,6 +286,7 @@ internal sealed partial class CoordinationStore
         {
             throw new InvalidDataException($"Generation {next.CommittedGeneration} must be published before it is committed.");
         }
+        check?.Invoke();
         AtomicFile.Replace(JournalPath, Json.Serialize(next));
         var written = ReadJournal();
         if (written != next) throw new IOException("The ownership journal did not read back as written.");
@@ -211,11 +332,12 @@ internal sealed partial class CoordinationStore
     public IReadOnlyList<HandoffRequest> StaleRequests(DateTimeOffset now) => ReadRequests().Where(r => !IsFresh(r, now)).Select(r => r.Request).ToList();
 
     /// <summary>
-    /// Both the requesting PC's clock and the share's file time must say the request is recent, so a PC whose
-    /// clock runs ahead cannot keep an old request alive. A time in the future counts as recent.
+    /// Share requests use the file time as well as the requesting PC's clock. Drive requests use the requesting
+    /// PC's clock with a bounded allowance for skew, because a journal update can contain several requests.
     /// </summary>
-    private static bool IsFresh((HandoffRequest Request, DateTimeOffset WrittenAt) stored, DateTimeOffset now) =>
-        now - stored.Request.RequestedAt < HandoffRequest.Lifetime && now - stored.WrittenAt < HandoffRequest.Lifetime;
+    private bool IsFresh((HandoffRequest Request, DateTimeOffset WrittenAt) stored, DateTimeOffset now) => cloud is not null
+        ? stored.Request.IsFreshInCloud(now)
+        : now - stored.Request.RequestedAt < HandoffRequest.Lifetime && now - stored.WrittenAt < HandoffRequest.Lifetime;
 
     private List<(HandoffRequest Request, DateTimeOffset WrittenAt)> ReadRequests()
     {
@@ -228,7 +350,7 @@ internal sealed partial class CoordinationStore
             if (!IsValidId(name)) continue;
             try
             {
-                var request = Json.ReadFile<HandoffRequest>(file, "Handoff request");
+                var request = Json.Deserialize<HandoffRequest>(RequestReader.Read(file, "switch request"), $"'{file}': Handoff request");
                 if (request.Device?.DeviceId == name && request.Device.DisplayName is not null && IsValidId(request.RequestId))
                     requests.Add((request, new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero)));
             }
@@ -251,9 +373,9 @@ internal sealed partial class CoordinationStore
     /// </summary>
     public bool RemoveStaleRequest(HandoffRequest stale)
     {
-        // Cloud requests are pruned under CAS whenever requests change; never remove a newer request by name.
-        if (cloud is not null) return false;
-        return RemoveExactRequest(stale);
+        if (cloud is null) return RemoveExactRequest(stale);
+        try { return cloud.Withdraw(stale); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MedalSyncException) { return false; }
     }
 
     /// <summary>

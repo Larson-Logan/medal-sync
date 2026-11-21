@@ -24,7 +24,7 @@ internal sealed record MountConfig(
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? SpaceWarningGiB { get; init; }
 
-    /// <summary>Optional upload limit, in MiB/s, for the clip drive while Medal runs. Null is unlimited.</summary>
+    /// <summary>Upload limit, in MiB/s, for the clip drive while Medal runs. When absent, 2 MiB/s.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? BandwidthLimitMiB { get; init; }
 
@@ -32,8 +32,20 @@ internal sealed record MountConfig(
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? FinishBandwidthLimitMiB { get; init; }
 
+    /// <summary>
+    /// Optional, in seconds: while recording, hold Medal's replay-buffer segments on this PC this long instead of
+    /// uploading them after <see cref="WriteBackSeconds"/>. Medal deletes them long before, which drops them from the
+    /// upload queue. Every other file is released after the normal delay. Only used when the drive serves primary
+    /// storage directly (server mode without a persistent local copy).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? RecordingBufferHoldSeconds { get; init; }
+
+    public const int MinimumBufferHoldSeconds = 60;
+    public const int MaximumBufferHoldSeconds = 3600;
+
     /// <summary>The configured upload limit while recording, or while finishing uploads.</summary>
-    public int? UploadLimitMiB(bool recording) => recording ? BandwidthLimitMiB : FinishBandwidthLimitMiB;
+    public int? UploadLimitMiB(bool recording) => recording ? BandwidthLimitMiB ?? 2 : FinishBandwidthLimitMiB;
 }
 
 /// <summary>A Syncthing folder that overlaps the clip destination and must ignore it.</summary>
@@ -77,7 +89,25 @@ internal sealed record MedalSyncConfig(
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool BetaUpdates { get; init; }
 
+    /// <summary>Optional display text for this PC. Never part of its ownership identity.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeviceLabel { get; init; }
+
+    /// <summary>
+    /// Whether this PC asks Windows not to sleep on its idle timer while a finish, idle sync or cloud retry is
+    /// transferring and verifying. Absent means on; left out of the file unless set, so older versions still load it.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? KeepAwakeWhileFinishing { get; init; }
+
     public string MountRemote => Replication?.LocalCopyRoot ?? Remote;
+
+    /// <summary>
+    /// The replay-buffer hold for a drive started for recording, or null: none configured, or the drive serves a
+    /// persistent local folder, where buffer segments never reach primary storage anyway.
+    /// </summary>
+    public TimeSpan? BufferHold(bool forRecording) =>
+        forRecording && Mount.RecordingBufferHoldSeconds is { } hold && PersistentMediaRoot is null ? TimeSpan.FromSeconds(hold) : null;
 
     /// <summary>The persistent clip collection on this PC: <c>localCopyRoot</c>, or local mode's storage folder. Null when recordings only pass through the cache.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -120,7 +150,7 @@ internal sealed record MedalSyncConfig(
     /// <summary>The clip drive's settings. A drive started only to finish uploads uses the finishing upload limit.</summary>
     public MountSettings MountSettings(string session, string logFile, bool forRecording = true) => new(
         MountRemote, Capture.Root[0], SessionCacheDirectory(session),
-        TimeSpan.FromSeconds(Mount.WriteBackSeconds), (long)Mount.CacheMaxGiB << 30, (long)Mount.MinFreeGiB << 30,
+        BufferHold(forRecording) ?? TimeSpan.FromSeconds(Mount.WriteBackSeconds), (long)Mount.CacheMaxGiB << 30, (long)Mount.MinFreeGiB << 30,
         TimeSpan.FromSeconds(Mount.CacheMaxAgeSeconds), TimeSpan.FromSeconds(Mount.CachePollSeconds),
         TimeSpan.FromHours(Mount.DirCacheHours), Mount.Transfers, Mount.ControlPort, "Medal Clips", logFile)
     {
@@ -193,6 +223,10 @@ internal sealed record MedalSyncConfig(
         {
             problems.Add("cacheRoot must be a local SSD folder, not the share or the virtual drive");
         }
+        if (DeviceLabel is not null && (string.IsNullOrWhiteSpace(DeviceLabel) || DeviceLabel.Length > 64
+            || DeviceLabel.Any(c => char.IsControl(c) || char.IsSurrogate(c) || char.GetUnicodeCategory(c) is
+                System.Globalization.UnicodeCategory.Format or System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator)))
+            problems.Add("deviceLabel must be 1-64 printable characters on one line");
         if (string.IsNullOrWhiteSpace(RclonePath)) problems.Add("rclonePath is required");
         if (Mount is null) problems.Add("mount settings are required");
         else if (Mount.DirCacheHours < 1 || Mount.DirCacheHours > TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerHour)
@@ -200,7 +234,10 @@ internal sealed record MedalSyncConfig(
         if (Mount?.SpaceWarningGiB is { } warning && (warning <= Mount.MinFreeGiB || warning > 1_000_000))
             problems.Add("mount.spaceWarningGiB must be more than mount.minFreeGiB and at most 1000000");
         if (Mount?.BandwidthLimitMiB is < MountPlan.MinimumBandwidthMiB or > MountPlan.MaximumBandwidthMiB)
-            problems.Add("mount.bandwidthLimitMiB must be 1 to 10000, or null for unlimited");
+            problems.Add("mount.bandwidthLimitMiB must be 1 to 10000, or null for the 2 MiB/s default");
+        if (Mount?.RecordingBufferHoldSeconds is { } bufferHold
+            && (bufferHold is < MountConfig.MinimumBufferHoldSeconds or > MountConfig.MaximumBufferHoldSeconds || bufferHold <= Mount.WriteBackSeconds))
+            problems.Add("mount.recordingBufferHoldSeconds must be 60 to 3600 and more than mount.writeBackSeconds, or null to upload buffer segments like other files");
         if (Mount?.FinishBandwidthLimitMiB is < MountPlan.MinimumBandwidthMiB or > MountPlan.MaximumBandwidthMiB)
             problems.Add("mount.finishBandwidthLimitMiB must be 1 to 10000, or null for unlimited");
         if (SyncExclusions is null) problems.Add("syncExclusions must be an array");
@@ -220,7 +257,11 @@ internal sealed record MedalSyncConfig(
         {
             try
             {
-                MountPlan.Validate(MountSettings(new string('0', 32), WindowsPath.Parse(CacheRoot).Append("rclone.log").Display));
+                // Both drives this configuration starts: the recording one (which may hold buffer segments) and the one
+                // that only finishes or recovers uploads, which always uses the normal write-back delay.
+                string log = WindowsPath.Parse(CacheRoot).Append("rclone.log").Display;
+                MountPlan.Validate(MountSettings(new string('0', 32), log));
+                MountPlan.Validate(MountSettings(new string('0', 32), log, forRecording: false));
             }
             catch (ArgumentException ex)
             {

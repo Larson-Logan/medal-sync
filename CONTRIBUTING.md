@@ -17,8 +17,8 @@ Follow [security reporting](SECURITY.md) for vulnerabilities and the
 
 ## Set up a checkout
 
-Use Windows, PowerShell 7, the .NET SDK pinned in global.json, Node 24 and
-Python 3.11+. Fork the repository if you do not have write access, clone your
+Use Windows, PowerShell 7, Git for Windows, the .NET SDK pinned in global.json,
+Node 24 and Python 3.11+. Fork the repository if you do not have write access, clone your
 fork, and create a branch from current `dev`. Use one branch per focused change.
 
 `dev` is the default branch, where all work lands first once the checks its

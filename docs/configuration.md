@@ -51,6 +51,8 @@ Ready-made examples, with placeholder values:
 | `syncExclusions` | `[]` | Syncthing folders that overlap the clip folder and must ignore it. Each entry is `{ "folderId": "ID", "pattern": "/Videos/Clips" }`, with one rooted folder pattern and no wildcards. `inspect` reports whether each ignore rule is in place. Most setups leave this empty. |
 | `replication` | Absent | Optional persistent local copy and cloud copies. See below. |
 | `betaUpdates` | Absent (`false`) | `true` lets this PC's update checks offer [betas](versioning.md#betas) built from `dev` as well as releases, whichever is newer. Betas are less tested than releases. Set it back to `false`, or remove it, to return to releases only: the next release at or above your beta is offered as usual. Earlier Medal Sync versions refuse a file with this field. |
+| `keepAwakeWhileFinishing` | Absent (`true`) | While this PC holds work that blocks a handoff (uploads and verification after Medal exits, an idle sync pass, or `replicate retry --apply`), Medal Sync asks Windows not to sleep on its idle timer. Only the system stays awake, not the display, and manual sleep, shutdown, lid and battery policies still apply. `powercfg /requests` lists the request under `SYSTEM`. Set `false` to let the PC sleep on its normal power plan. Omitted unless set; earlier Medal Sync versions refuse a file with this field. |
+| `deviceLabel` | Absent | Optional PC display name, such as `Desk PC` or `Living room`: 1–64 printable characters on one line. Set it in the wizard or with `config create --device-label NAME`. Other PCs see it in new ownership, request and history records; earlier records keep their original names. It never changes the device ID or the computer/user check in `device.json`. Omitted unless set, so older versions can still load configurations without it; remove this field before downgrading. |
 
 ## `mount`: the clip drive
 
@@ -68,8 +70,9 @@ The defaults suit most PCs.
 | `dirCacheHours` | `1000` | At least 1 | How long folder listings are cached (`--dir-cache-time`). |
 | `transfers` | `2` | 1 to 8 | Uploads run in parallel (`--transfers`). |
 | `controlPort` | `53684` | 1024 to 65535 | Local port for rclone's control API, on 127.0.0.1 only. `config create --spike` uses `53683`. Avoid `53682` (browser sign-in) and `5572` (rclone's default control API). |
-| `bandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Upload limit in MiB/s while Medal runs. See [limit upload speed while recording](storage.md#limit-upload-speed-while-recording). |
-| `finishBandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Upload limit in MiB/s after Medal exits, while uploads finish. |
+| `bandwidthLimitMiB` | `null` (2 MiB/s) | 1 to 10000 | Clip-drive transfer limit in MiB/s while Medal runs. See [limit upload speed while recording](storage.md#limit-upload-speed-while-recording). |
+| `finishBandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Clip-drive transfer limit in MiB/s after Medal exits, while uploads finish. |
+| `recordingBufferHoldSeconds` | `null` (off) | 60 to 3600, above `writeBackSeconds` | Server mode without a persistent local copy only: while a game records, Medal's replay-buffer segments wait this long on this PC instead of uploading, and every other file still uploads after `writeBackSeconds`. See [keep replay-buffer traffic off the server](storage.md#keep-replay-buffer-traffic-off-the-server). Omitted unless set; earlier versions refuse a file with this field. |
 
 Older setups may use `53682`. rclone's [browser sign-in server](https://github.com/rclone/rclone/blob/v1.75.2/lib/oauthutil/oauthutil.go)
 needs that port for `rclone config` and `rclone config reconnect`, so a clip drive
@@ -96,9 +99,10 @@ cache. See the [storage guide](storage.md) for how each choice behaves.
 | `targets` | `[]` | At most 8 | Cloud copies; see below. |
 | `conflictPolicy` | `"STOP"` | `"STOP"` or `"VERSION"` | What to do when a destination already has a different file. `"STOP"` refuses; `"VERSION"` moves the old file into `.medal-sync-history/` first. See [verification, conflicts and recovery](storage.md#verification-conflicts-and-recovery). |
 | `timeoutMinutes` | `240` | 1 to 1440 | Time limit for each copy or verification command. |
-| `fullVerifyEveryHandoffs` | `1` | 1 to 100 | Verify all media bytes every N replication passes per destination. `1` keeps always-full verification; larger values opt into incremental checks between full passes. Retries also count as passes. |
+| `fullVerifyEveryHandoffs` | `1` | 1 to 100 | Verify all media bytes every N replication passes per destination. A due full check may run during idle; finish reuses that evidence once. Idle repeats do not consume the interval. Larger values opt into incremental checks between full passes. Retries outside idle also count as passes. |
 | `fullVerifyEveryDays` | `7` | 1 to 30 | Maximum age in days of a full verification when incremental checks are enabled. Missing, invalid or failed receipts always force a full pass sooner. |
-| `bandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Transfer limit in MiB/s for copies to rclone remotes: cloud targets and an rclone primary. Copies to an SMB share are not limited. |
+| `bandwidthLimitMiB` | `null` (unlimited at finish) | 1 to 10000 | Transfer limit in MiB/s for copies to rclone remotes at finish. Idle replication to any destination, including SMB, uses at most 2 MiB/s or this limit if lower. |
+| `prefetchWhileIdle` | Absent (on) | `true` or `false` | With `localCopyRoot`, an idle PC that does not own the library downloads clips another PC published into its local copy, so its next launch starts sooner. `false` turns it off. See [download new clips in the background](storage.md#download-new-clips-in-the-background). Omitted unless set; earlier versions refuse a file with this field. |
 | `credentialCheck` | `"WARN"` | `"WARN"` or `"REFUSE"` | What launch does when an rclone primary or a required target fails its sign-in check. `"WARN"` starts Medal with a notice; `"REFUSE"` keeps Medal closed and the library Ready. Optional targets and outages only ever produce a notice. See [check sign-in before recording](storage.md#check-sign-in-before-recording). |
 
 Each entry in `targets`:

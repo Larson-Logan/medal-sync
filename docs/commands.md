@@ -63,7 +63,7 @@ shows it too.
 | `medal-sync-launch.exe` | Checks storage and ownership, starts Medal, supervises the session and hands off after Medal exits. Waits up to 20 seconds for the server. Offers the configuration wizard when Medal Sync is not set up. |
 | `medal-sync-launch.exe --at-sign-in` | The same, as used by Medal's startup entry. Waits up to 2 minutes for the server, and exits quietly when Medal Sync is not set up. When another PC owns the library it sends no switch request, so that PC is not interrupted. |
 | `medal-sync-launch.exe medal://...` | Opens a Medal link through the same checks, or passes it to the running session. |
-| `medal-sync-launch.exe --configure` | Opens the configuration wizard. |
+| `medal-sync-launch.exe --configure` | Opens configuration or resumes pending library setup. After saving a new configuration, offers the existing init/enroll preview and a separate explicit confirmation. |
 | `medal-sync-launch.exe --status` | Opens the status panel. |
 | `medal-sync-launch.exe --tray` | Starts the status icon without opening the panel. |
 | `medal-sync startup [--apply \| --restore]` | Previews, turns on or turns off starting Medal through Medal Sync at sign-in (the tray menu's **Start Medal at sign-in**). Turning it on needs a configuration and saves Medal's original entries first. See [getting started](getting-started.md). |
@@ -80,8 +80,9 @@ shows it too.
 | `config validate --config FILE` | Checks a configuration file's syntax and paths. It does not contact Medal or storage. |
 | `capacity --bitrate MBPS --hours H --free-gb GB [--reserve-gb GB]` | Works out whether a session of `H` hours at `MBPS` megabits per second fits in `GB` gigabytes of free space, keeping a reserve (default 20 GiB). Exit 1 means it does not fit. |
 | `mount-plan` | Prints the rclone mount command Medal Sync will use, without credentials. |
+| `storage sign-in --remote NAME [--provider drive\|onedrive\|dropbox] [--rclone-config FILE]` | Creates the named rclone remote (with `--provider`) or signs it in again, through the provider's page in the default browser. Works on a private copy of the credential file and replaces it only after the storage check passes for that remote; a sign-in cancelled at any point before that, or a failed one, changes nothing. Defaults to the configured `replication.rcloneConfigPath`, otherwise a private file in Medal Sync's state folder. Refuses while a session or another sign-in runs on this PC, and holds the session lock until it finishes, so no session starts meanwhile. Exit 1 when not signed in. |
 | `storage check [--json]` | Checks every rclone remote in the configuration (an rclone primary and each cloud target): the credential file exists and opens without a prompt, and one short listing or marker read succeeds. Reports each as OK, offline, sign in again, configuration problem, folder missing, marker missing or another library, with the next step. Never writes to a destination. Exit 1 means one needs you; exit 3 means the only problem is an outage. See [check sign-in before recording](storage.md#check-sign-in-before-recording). |
-| `setup check [--state-root DIR] [--out FILE]` | Checks that programs can be installed or removed now: nothing running, no unfinished session and a Ready library. Setup runs this for you. |
+| `setup check [--uninstall] [--state-root DIR] [--out FILE]` | Checks that programs are stopped and the library is Ready. `--uninstall` also checks that Medal's startup entries do not point to the installed launcher. Setup runs this for you. |
 
 ## Check the library (read-only)
 
@@ -108,11 +109,15 @@ library, for example a copy.
 | `enroll --out DIR [--apply]` | Adds this PC to an existing library. The preview writes a review of the merged library to `DIR`; apply uses that exact review. With an rclone primary, files go to the persistent local copy and apply ends by running `finish`, which uploads, verifies and publishes; exit 3 means the primary is unreachable (see [enroll into an rclone primary](storage.md#enroll-a-pc-with-existing-clips-into-an-rclone-primary)). |
 | `enroll recover --out DIR [--rollback] [--apply]` | Handles two cases. See [enrollment recovery](#enrollment-recovery). |
 | `storage init-primary [--apply]` | Marks a new, empty primary folder or rclone remote for this library, so you can [switch primaries](storage.md#switch-primaries). Needs `replication.localCopyRoot` and a Ready library. |
+| `prefetch [--apply]` | Previews, or with `--apply` downloads, the clips the newest committed generation references that this PC's persistent local copy lacks, newest first, while this PC is idle and does not own the library. Never takes ownership or replaces a local file. The status app runs it in the background. Exit 3 when it stopped early. See [download new clips in the background](storage.md#download-new-clips-in-the-background). |
 | `replicate retry [--target NAME] [--apply]` | Previews pending optional cloud copies of the committed generation while Ready. `--apply` copies and verifies from this PC's persistent copy, otherwise primary storage, without taking ownership. Launch, shutdown or a changed journal/configuration cancels unfinished work. Exit 3 means canceled or still pending. See [retry cloud copies](storage.md#retry-cloud-copies-while-ready). |
 | `replica verify [--target NAME] [--apply]` | Previews, then reads back every file of the committed generation at each cloud copy while Ready. Never copies, replaces or deletes. Exit 1 means missing or different files, 3 incomplete. See [check cloud copies](storage.md#check-cloud-copies-on-demand). |
 | `replica history [--target NAME] [--json]` | Shows past checks per cloud copy: counts only, the last complete and last passing result. Read-only. |
 | `replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]` | Reviews unreferenced media and, if asked, old version history at an optional or required cloud copy. Writes a private review file; referenced files are protected. |
 | `replica prune --in FILE --apply` | Moves exactly the reviewed files into the copy's `.medal-sync-trash` folder. Refuses if anything changed since the review. A required copy loses this PC's incremental receipt so its next handoff reads every referenced file back. See [clean up a cloud copy](storage.md#clean-up-a-cloud-copy). |
+| `primary prune --out FILE [--grace-days N]` | Reviews clips deleted in Medal that are still on primary storage: clip media no kept generation references, older than the grace period (default 14 days). Any unreadable generation refuses the review. See [clean up deleted clips on primary storage](storage.md#clean-up-deleted-clips-on-primary-storage). |
+| `primary prune --in FILE --apply` | With every PC Ready and the writer lock held, moves exactly the reviewed files into `.medal-sync-trash` on primary storage. Refuses if anything changed since the review; deletes nothing. Exit 3 when primary storage is unreachable. |
+| `primary purge-trash [--older-than D] [--apply]` | Permanently deletes primary-storage trash batches whose files were moved at least `D` days ago (default 7). |
 | `replica purge-trash --target NAME [--older-than D] [--apply]` | Lists only the trash subtree once at an optional or required copy. With `--apply`, permanently deletes exactly the batches marked `deleting`, whose files were moved at least `D` days ago (default 7). A nonempty required-copy purge drops this PC's incremental receipt too. |
 | `retention --out FILE [--keep N] [--keep-days D] [--grace-days G]` | Reviews old generations and this PC's old recovery folders to remove. Read-only. |
 | `retention --in FILE --apply` | Removes exactly the reviewed folders while every PC stays Ready. See [retention](storage.md#retention). |
@@ -130,6 +135,7 @@ library, for example a copy.
 | `--cloud-journal-id ID` | Required in cloud mode. Allocate once with `storage cloud-id`; use the same ID on every PC. |
 | `--capture-folder PATH` | Folder Medal records into on the clip drive. Default `M:\Clips`. |
 | `--rclone-path FILE` | rclone executable. Defaults to the bundled copy beside `medal-sync.exe`. |
+| `--device-label NAME` | Optional display name for this PC, up to 64 printable characters on one line. Keeps its device ID and copied-profile guard unchanged. |
 | `--local-copy-root DIR` | Keep a persistent local copy of the collection. |
 | `--cloud-remote NAME:FOLDER` | Add one cloud copy. Needs `--rclone-config`. Add more in the JSON. |
 | `--rclone-config FILE` | rclone credential file for cloud copies or an rclone primary. |
@@ -192,7 +198,7 @@ Read [recovery rules](getting-started.md#recovery-rules) before using these.
 | `refresh-media --out FILE` | Reviews differences between the persistent local copy and primary storage. See [review and refresh persistent local media](storage.md#review-and-refresh-persistent-local-media). |
 | `refresh-media --in FILE --apply [--accept-unknown-media]` | Applies that exact review, keeping a backup of every replaced file. |
 | `repair --checkpoint FILE [--db DB] [--apply]` | Puts back clips Medal dropped since a snapshot, when their files still exist. Takes a database backup first and keeps it until a reviewed retention removes it. |
-| `relocate --from DIR [--config FILE] [--apply]` | Copies library files left outside the capture folder to the server's clip folder, verifies them and repoints the library. The originals stay. SMB primary only. |
+| `relocate --from DIR [--config FILE] [--apply]` | Copies library files left outside the capture folder to the server's clip folder, verifies them and repoints the library. Missing optional overlays are reported in the preview and their paths are cleared on apply. The originals and a database backup are kept. Works with an SMB primary, or with Google Drive before `init --apply` creates the Drive journal, when files go to the persistent local copy; it refuses once that journal exists. |
 | `abandon --session ID --reason TEXT [--apply]` | Gives up a session whose PC is lost and returns the library to the last published generation. Unpublished clips stay on that PC and must be reconciled by hand. |
 
 ## Test mounting before using live data

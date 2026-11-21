@@ -96,6 +96,8 @@ includes .NET and rclone, and offers the WinFsp driver.
    setting before saving. [Getting started](docs/getting-started.md) walks
    through creating or joining a library, and includes a prompt for letting an
    AI coding agent prepare the configuration with you.
+   After saving, the wizard offers the library preview and a separate
+   confirmation to create or join it. Quit Medal before this step.
 4. **Record.** Launch Medal through Medal Sync. After you quit Medal, wait for
    **Ready** before switching PCs, updating or uninstalling.
 
@@ -142,9 +144,11 @@ See the [storage guide](docs/storage.md).
 - **Serial handoff only.** One PC owns the library at a time. Server modes use
   an SMB coordination share; Google Drive cloud mode uses conditional API
   updates. Local storage only does not hand off between PCs.
-- **No deletion sync.** Deleting a clip is not propagated to other copies.
-  Cloud copies keep older files. Destination conflicts stop by default;
-  optional versioned updates keep the previous file before replacing it.
+- **No automatic deletion sync.** Deleting a clip is not propagated to other
+  copies by itself. Primary storage and cloud copies keep the files until you
+  run a reviewed cleanup (`primary prune`, `replica prune`). Destination
+  conflicts stop by default; optional versioned updates keep the previous file
+  before replacing it.
 - **Private data stays private.** Provider credentials, Medal logins and full
   Medal databases are never copied to shared storage or cloud copies. Cloud
   mode stores normalized library snapshots and history in the private Drive folder.
@@ -155,7 +159,7 @@ See the [storage guide](docs/storage.md).
 
 ## Development
 
-You'll need Windows, PowerShell 7, the .NET SDK pinned in
+You'll need Windows, PowerShell 7, Git for Windows, the .NET SDK pinned in
 [global.json](global.json), Node 24 and Python 3.11+. Tests use synthetic
 databases and isolated scratch folders; no credentials or real Medal library
 are needed.

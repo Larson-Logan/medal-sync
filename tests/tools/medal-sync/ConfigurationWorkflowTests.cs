@@ -70,6 +70,15 @@ public sealed class ConfigurationWorkflowTests : IDisposable
     }
 
     [Fact]
+    public void ConfigurationCommandCanSetAPcLabelWithoutCreatingADeviceIdentity()
+    {
+        var result = Run([.. Options(), "--new-library", "--device-label", "Desk PC", "--apply"]);
+        Assert.Equal(0, result.Code);
+        Assert.Equal("Desk PC", MedalSyncConfig.Load(_fixture.PathFor("config.json")).DeviceLabel);
+        Assert.False(File.Exists(_fixture.PathFor("device.json")));
+    }
+
+    [Fact]
     public void SpikeRequiresItsOwnRemoteAndControlPort()
     {
         Assert.Equal(2, Run([.. Options(), "--new-library", "--spike", "--apply"]).Code);
