@@ -14,7 +14,7 @@ sources:
   - id: recovery-rules
     resource: https://github.com/Larson-Logan/medal-sync/blob/dev/docs/getting-started.md
     title: Getting started, recovery rules
-generated: { by: "claude-code/claude-opus-5-5", at: "2026-11-20T03:47:39Z" }
+generated: { by: "codex/gpt-6", at: "2026-11-21T07:00:00Z" }
 status: draft
 ---
 
@@ -42,6 +42,12 @@ finish; finish can resume from it.
 
 # Launch
 
+If this PC still owns its previous session, launch attempts to finish it
+first. When the attempt needs a retry, launch returns
+`FinishingPreviousSession` and the supervisor continues the handoff. If
+Medal reopens, Medal Sync checks that this PC still owns the active session and
+that the drive is healthy before resuming normal supervision.[^session-code]
+
 1. A read-only preflight (`LaunchPreflight`) runs before ownership is taken. A
    `Refusal` keeps Medal closed and the library Ready; a `Warning` starts Medal
    with a passive notice.
@@ -54,9 +60,8 @@ finish; finish can resume from it.
    journal to `Clean` (`Ownership.AbortStart`), keeping the aborted start's
    evidence on this PC. If the drive cannot be confirmed stopped, ownership and
    the cache stay on this PC so a later launch can retry the cleanup.
-5. The result is a `LaunchOutcome` with `LaunchStatus` `Started`,
-   `AlreadyRunning`, `Waiting` (another PC owns the library, see `HandoffWait`)
-   or `Blocked`.
+5. The other launch results are `Started`, `AlreadyRunning`, `Waiting`
+   and `Blocked`.
 
 # Supervise and idle sync
 
@@ -119,3 +124,4 @@ at the next sign-in.
 
 [^storage-guide]: Storage choices, background sync and shutdown
 [^recovery-rules]: Getting started, recovery rules
+[^session-code]: SessionCoordinator and related session types

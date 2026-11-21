@@ -82,8 +82,11 @@ The **release tags** ruleset restricts creation, updates and deletion of
 GitHub App, which the release workflow uses to publish a release for every
 merge to `main`. Rulesets cannot exempt `github-actions[bot]`, and GitHub
 accepts the app as a bypass actor only while it is installed on this
-repository, so install it before running the ruleset script. The release and
-closed-PR branch cleanup jobs have contents-write permission. Branch cleanup
+repository, so install it before running the ruleset script. Release planning
+uses a contents-write workflow token to see drafts. The publish step uses a
+contents-write app token. The `cleanup-betas` job uses a contents-write
+workflow token to delete superseded beta release records and preserves their
+tags. Closed-PR branch cleanup also has contents-write permission. It
 runs trusted default-branch code, preserves long-lived/protected branches, and
 uses an atomic Git lease to refuse deletion after a concurrent push. It cannot
 bypass the release tag ruleset. Preserve published version tags
