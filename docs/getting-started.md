@@ -382,7 +382,22 @@ message also appears in the panel instead of a dialog that would take focus.
 
 The panel and tray menu support keyboard access and native accessibility APIs.
 Background notices are coalesced in the panel without popups or taking focus
-from games. Closing the panel hides it. To exit Medal Sync, quit Medal normally,
+from games.
+
+The status app also shows a Windows notification at three moments, once each
+time the state changes: when this PC's finish reaches **Ready** ("Your clips are
+uploaded and verified. You can switch PCs."), when a finish stops and needs you
+(with the same reason the panel shows), and when a cloud copy or a cloud sign-in
+check starts needing attention. Waiting for storage never notifies, because it
+resolves by itself, and nothing is shown for the state the app finds when it
+starts. Clicking a notification opens the status panel; it offers no action of
+its own. Turn them off or on again with **Show notifications** in the tray menu.
+This is saved on this PC in `desktop-preferences.json`, apart from
+`config.json`, so changing it never disturbs a running finish. Windows Focus
+Assist and notification settings still apply, and a notification that cannot be
+shown changes nothing else.
+
+Closing the panel hides it. To exit Medal Sync, quit Medal normally,
 wait for Ready, then choose **Exit Medal Sync** in the panel or tray menu.
 Exit keeps the view open with guidance while supervision or a library operation
 is active. Reopen status at any time. Setup and uninstall require all Medal Sync
