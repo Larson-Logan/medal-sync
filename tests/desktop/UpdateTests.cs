@@ -129,7 +129,7 @@ internal static class UpdateTests
                 {
                     using var view = new WindowsTrayStatus(false,
                         () => new DesktopStatus(SessionPhase.Ready, "Synthetic Ready", DateTimeOffset.UtcNow),
-                        eventName, operationRunning: () => false, readNotifications: () => false);
+                        eventName, operationRunning: () => false, readNotifications: () => false, prefetchDue: () => false);
                     started.Set();
                     Application.Run(view);
                 }

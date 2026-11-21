@@ -22,6 +22,39 @@ dedicated storage root, for example `E:\MedalLibrary`; with capture folder
 either folder in a provider's desktop sync folder. Provider access uses rclone
 directly. Allow disk space for the collection, cache and new recordings.
 
+## Download new clips in the background
+
+With a persistent local copy (`replication.localCopyRoot`, required for cloud
+mode and rclone primaries), a PC must have every referenced clip on its own
+disk before Medal can start there. After a long session on the other PC, that
+download would otherwise happen while you wait to start a game.
+
+While this PC is idle and does not own the library, the status app starts
+`medal-sync prefetch --apply` about every ten minutes. It downloads the clips
+the newest committed generation references and this PC lacks, newest first:
+
+- It runs only while the library is Ready or another PC holds it, under the
+  same rules as idle sync: no input for a minute, CPU use below 20 percent,
+  Medal not running, idle priority and at most 2 MiB/s (or a lower
+  `replication.bandwidthLimitMiB`).
+- It reads only a committed generation that passes verification, and only
+  files that generation recorded as present on primary storage.
+- Files are downloaded into `.medal-sync-prefetch` beside the capture folder in
+  the local copy, byte-compared with primary storage and checked against the
+  size the generation recorded, then moved into place. A file already in the
+  local copy is never replaced. Prefetch refuses a capture folder inside
+  `.medal-sync-prefetch` (or the reverse), because it empties that folder.
+- Input, Medal starting, a launch on this PC, shutdown, setup, a configuration
+  change, a newer generation and low space (the `mount.minFreeGiB` reserve) stop
+  it. A partial download stays in the staging folder and is discarded; nothing
+  partial ever reaches the local copy.
+- It never takes ownership, writes to the journal or deletes library media.
+  Launch still hydrates and verifies as before; prefetch only shortens it.
+
+Run `medal-sync prefetch` to preview what is missing. Set
+[`replication.prefetchWhileIdle`](configuration.md#replication-local-copy-and-cloud-copies)
+to `false` to turn it off.
+
 ## Background sync and shutdown
 
 While this PC owns an **Active** session, Medal Sync checks for idle work every
@@ -370,7 +403,9 @@ To keep them, merge them with `enroll` instead
 Launch restores only library tables, backs up the database, and updates the
 capture-folder setting to the configured virtual drive when necessary; other
 device settings and sign-ins remain on that PC. Missing clips hydrate and
-verify before Medal starts. Quit Medal normally and wait for **Ready** before
+verify before Medal starts; an idle PC usually has them already, see
+[download new clips in the background](#download-new-clips-in-the-background).
+Quit Medal normally and wait for **Ready** before
 switching. Finish verifies media, uploads and reads back the new generation,
 then conditionally releases ownership. An outage or uncertain acknowledgement
 keeps ownership and local media for recovery on the same PC. Drive must be

@@ -54,6 +54,7 @@ internal static class Program
             TestReplicaAuditAndPrune(rclone);
             TestCloudPrimary(rclone);
             TestPrimaryPrune(rclone);
+            TestIdlePrefetch(rclone);
             CloudEnrollment.Run(rclone, Check);
             CloudHandoff.Run(rclone, Check, testMount: args.Contains("--mount"));
             TestInterruptedTransfer(rclone);
@@ -447,6 +448,45 @@ internal static class Program
         new StorageReplication(second, new(fixture.PathFor("second-state")), () => { }).Prepare(snapshot);
         Check(File.ReadAllText(second.MountedCapture.Append("clip.mp4").Display) == "synthetic primary media",
             "a second local collection hydrates missing bytes from the real named primary");
+    }
+
+    /// <summary>PC A published new clips to a named rclone primary; idle PC B prefetches them and its next launch downloads nothing.</summary>
+    private static void TestIdlePrefetch(string rclone)
+    {
+        using var fixture = new MedalFixture();
+        var config = Config(fixture, rclone) with
+        {
+            StorageMode = StorageMode.Server, Remote = "onedrive:Primary",
+            Replication = new(fixture.PathFor("second-persistent"), Remotes(fixture), []),
+        };
+        var state = new LocalState(fixture.PathFor("second-state"));
+        new RcloneAssetChecker(config, state).Initialize(false);
+        string primary = fixture.PathFor("onedrive", "Primary", "Clips");
+        File.WriteAllText(Path.Combine(primary, "older #1.mp4"), "clip this PC already has");
+        File.WriteAllText(Path.Combine(primary, "new [clip].mp4"), "clip the other PC recorded");
+        Directory.CreateDirectory(config.MountedCapture.Display);
+        File.WriteAllText(config.MountedCapture.Append(MedalSyncConfig.StorageMarker).Display, config.LibraryId);
+        File.WriteAllText(config.MountedCapture.Append("older #1.mp4").Display, "clip this PC already has");
+        string db = fixture.CreateLibrary("published");
+        foreach (string name in new[] { "older #1", "new [clip]" })
+            MedalFixture.AddContent(db, name, video: config.Capture.Append(name + ".mp4").Display);
+        var snapshot = LibraryDatabase.ReadSnapshot(db, config.AccountId);
+        var manifest = new AssetManifest(1, new[] { "older #1.mp4", "new [clip].mp4" }.Select(name =>
+        {
+            var file = new FileInfo(Path.Combine(primary, name));
+            return new AssetEntry(config.Capture.Append(name).Display, file.Length, file.LastWriteTimeUtc);
+        }).ToArray(), []);
+        var otherPc = new DeviceIdentity(new string('d', 32), "Synthetic other PC");
+        var store = CoordinationStore.Create(config.LibraryCoordinationDirectory, config.LibraryId, snapshot, manifest, otherPc,
+            new string('e', 32), Versions, DateTimeOffset.UtcNow);
+        var before = store.ReadJournal();
+        var result = new MediaPrefetch(config, state, store, new DeviceIdentity(new string('f', 32), "Synthetic idle PC"), () => { }).Run();
+        Check(result.Downloaded == 1 && result.Remaining == 0 && File.ReadAllText(config.MountedCapture.Append("new [clip].mp4").Display) == "clip the other PC recorded",
+            "real rclone prefetch downloads and byte-checks only the clip this idle PC lacks");
+        Check(!Directory.Exists(Path.Combine(config.Replication!.LocalCopyRoot!, MediaPrefetch.StagingFolder)) && store.ReadJournal() == before,
+            "prefetch leaves no staging folder and never changes the journal");
+        new StorageReplication(config, state, () => { }, _ => throw new InvalidOperationException("Launch must not download anything.")).Prepare(snapshot);
+        Check(true, "the next launch on the prefetched PC downloads nothing");
     }
 
     private static void TestPrimaryPrune(string rclone)

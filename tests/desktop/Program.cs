@@ -41,6 +41,8 @@ internal static class Program
         bool operationRunning = true;
         bool failStart = true;
         var signIns = new List<string>();
+        bool prefetchDue = false;
+        int prefetches = 0;
         var notifications = new List<DesktopNotification>();
         var savedNotifications = new List<bool>();
         using var view = new WindowsTrayStatus(true, Read, @"Local\MedalSync.DesktopTest." + Guid.NewGuid().ToString("N"),
@@ -48,6 +50,7 @@ internal static class Program
             () => { cloudRetries++; return cloudRetryTask; },
             _ => { if (failStart) throw new System.ComponentModel.Win32Exception(); },
             notifications.Add, () => true, savedNotifications.Add,
+            () => prefetchDue, () => { prefetches++; return null; },
             remote => { signIns.Add(remote); return Task.FromResult(new CloudRetryCommandResult(0, "", "")); });
 
         var panel = Field<Form>(view, "_panel");
@@ -75,6 +78,19 @@ internal static class Program
         lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
         Until(view, () => status.Text.Contains("Next action: Synthetic recording\r\n", StringComparison.Ordinal));
         Check(icon.Text == "Medal Sync: Recording" && ReferenceEquals(icon.Icon, icons.For(SessionPhase.Active)), "Only a recording session shows the red recording dot");
+        Check(prefetches == 0, "Background prefetch never starts before its first interval or while not due");
+        SetField(view, "_nextPrefetch", DateTime.MinValue);
+        prefetchDue = true;
+        Until(view, () => true);
+        Check(prefetches == 0, "Background prefetch never starts while this PC holds an active session");
+        lock (gate) current = new(SessionPhase.Waiting, "Synthetic other PC", DateTimeOffset.UtcNow);
+        Until(view, () => prefetches == 1);
+        Until(view, () => status.Text.Contains("Synthetic other PC", StringComparison.Ordinal));
+        Check(prefetches == 1, "An idle PC starts one background prefetch per interval while another PC holds the library");
+        prefetchDue = false;
+        // Back to this PC's own session: Waiting above told the notifier that nothing of this PC's is finishing.
+        lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
+        Until(view, () => status.Text.Contains("Next action: Synthetic recording\r\n", StringComparison.Ordinal));
         Check(!ReferenceEquals(icons.For(SessionPhase.Active, recording: false), icons.For(SessionPhase.Active)), "Medal open without a game has its own dot");
         CheckIcons(icons, panel);
         var signInAgain = Field<Button>(view, "_signInAgain");
@@ -221,6 +237,8 @@ internal static class Program
         }
     }
 
+    private static void SetField(object view, string name, object value) =>
+        view.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(view, value);
     private static T Field<T>(object view, string name) => (T)view.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(view)!;
     [DllImport("user32.dll", ExactSpelling = true)]
     private static extern IntPtr SendMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
