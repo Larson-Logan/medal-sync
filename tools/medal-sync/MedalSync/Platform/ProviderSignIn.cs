@@ -17,7 +17,7 @@ internal sealed record SignInResult(bool Succeeded, string Message, string? Conf
 /// </summary>
 internal sealed partial class ProviderSignIn(string rclonePath, LocalState state,
     Func<IReadOnlyList<string>, CancellationToken, string>? run = null,
-    Func<string, string, (StorageCheckResult Result, string Detail)>? check = null)
+    Func<string, string, CancellationToken, (StorageCheckResult Result, string Detail)>? check = null)
 {
     /// <summary>How long the user has to finish signing in on the provider's page.</summary>
     internal static readonly TimeSpan SignInTimeout = TimeSpan.FromMinutes(10);
@@ -103,7 +103,9 @@ internal sealed partial class ProviderSignIn(string rclonePath, LocalState state
             cancel.ThrowIfCancellationRequested();
             if (RemoteTypes(work).GetValueOrDefault(remoteName) != type)
                 return new(false, $"rclone did not finish setting up '{remoteName}'. The credential file is unchanged; try again.");
-            var (result, detail) = (check ?? Check)(remoteName + ":", work);
+            var (result, detail) = (check ?? Check)(remoteName + ":", work, cancel);
+            // A cancel during the check (up to its call timeout) must still keep the credential file as it was.
+            cancel.ThrowIfCancellationRequested();
             if (result != StorageCheckResult.Ok)
                 return new(false, $"The sign-in did not pass the storage check: {detail} The credential file is unchanged.");
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
@@ -128,6 +130,7 @@ internal sealed partial class ProviderSignIn(string rclonePath, LocalState state
     private string Run(IReadOnlyList<string> arguments, CancellationToken cancel) =>
         new RcloneRunner(rclonePath).Run(arguments, SignInTimeout, cancel.ThrowIfCancellationRequested);
 
-    private (StorageCheckResult, string) Check(string destination, string credentials) =>
-        StorageCheck.CheckSignIn(destination, credentials, arguments => new RcloneRunner(rclonePath).Run(arguments, StorageCheck.CallTimeout, captureOutput: true));
+    private (StorageCheckResult, string) Check(string destination, string credentials, CancellationToken cancel) =>
+        StorageCheck.CheckSignIn(destination, credentials, arguments => new RcloneRunner(rclonePath)
+            .Run(arguments, StorageCheck.CallTimeout, cancel.ThrowIfCancellationRequested, captureOutput: true));
 }

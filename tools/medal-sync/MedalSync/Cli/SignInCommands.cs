@@ -22,7 +22,7 @@ internal static class SignInCommands
         CloudProvider? provider = providerName is null ? null : Provider(providerName);
         var state = LocalState.ForCurrentUser();
         var config = File.Exists(state.ConfigPath) ? MedalSyncConfig.Load(state.ConfigPath) : null;
-        RequireNoSession(config);
+        using var instance = HoldNoSession(config);
         configFile ??= config?.Replication?.RcloneConfigPath;
         string rclone = rclonePath ?? config?.ExpandedRclonePath ?? ConfigCommands.DefaultRclonePath();
         if (!File.Exists(Environment.ExpandEnvironmentVariables(rclone))) throw new UnsafeOperationException($"rclone is not installed at '{rclone}'.");
@@ -58,12 +58,24 @@ internal static class SignInCommands
 
     /// <summary>
     /// rclone's sign-in page answers on its own local port, which an older clip drive may use (#102), and a running
-    /// session must keep its credential file stable, so sign-in waits until no session runs on this PC.
+    /// session must keep its credential file stable, so sign-in runs only when no session runs on this PC. The returned
+    /// instance lock is held on the calling thread until the credential file is replaced or left alone: no session can
+    /// start, and no second sign-in can copy the same file, in the meantime.
     /// </summary>
-    internal static void RequireNoSession(MedalSyncConfig? config)
+    internal static IDisposable HoldNoSession(MedalSyncConfig? config)
     {
-        if (SessionCommands.AnotherInstanceRunning() || config is not null && Directory.Exists(config.DriveRoot.Display))
-            throw new UnsafeOperationException("Sign in once Medal is closed and this PC's session has finished (Ready). "
-                + "The clip drive is still running, and rclone's sign-in page needs its local port.");
+        IDisposable instance;
+        try { instance = SessionCommands.SingleInstance(); }
+        catch (UnsafeOperationException) { throw SessionRunning(); }
+        if (config is not null && Directory.Exists(config.DriveRoot.Display))
+        {
+            instance.Dispose();
+            throw SessionRunning();
+        }
+        return instance;
     }
+
+    private static UnsafeOperationException SessionRunning() => new("Sign in once Medal is closed and this PC's session has "
+        + "finished (Ready), and no other sign-in is running. The clip drive needs a stable credential file, and rclone's "
+        + "sign-in page needs its local port.");
 }

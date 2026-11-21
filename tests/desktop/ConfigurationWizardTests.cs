@@ -30,21 +30,21 @@ internal static class ConfigurationWizardTests
             var signIn = Field<Button>(wizard, "_signInButton");
             check(signIn.Visible && Hint(wizard, "signIn").Text.Contains("Testing status", StringComparison.Ordinal),
                 "The wizard offers Sign in with the Google OAuth client guidance");
-            signIn.PerformClick();
+            Click(signIn);
             Until(() => !Field<bool>(wizard, "_busy"));
             check(calls.Single() == ("gdrive", CloudProvider.GoogleDrive, null), "Sign in uses the remote named in the storage field and the chosen provider");
             check(Hint(wizard, "signIn").Text.Contains("unchanged", StringComparison.Ordinal) && fields["cloudConfig"].Text.Length == 0,
                 "A failed sign-in shows the check result and never fills the credential file");
-            Field<Button>(wizard, "_next").PerformClick();
+            Click(Field<Button>(wizard, "_next"));
             Until(() => !Field<bool>(wizard, "_busy"));
             check(!Field<Button>(wizard, "_save").Enabled && Field<Label>(wizard, "_message").Text.Contains("did not pass the storage check", StringComparison.Ordinal),
                 "The wizard never saves a configuration whose remote failed its sign-in check");
             succeed = true;
-            signIn.PerformClick();
+            Click(signIn);
             Until(() => !Field<bool>(wizard, "_busy"));
             check(fields["cloudConfig"].Text == @"C:\Private\synthetic-rclone.conf" && Hint(wizard, "signIn").Text.StartsWith("Signed in", StringComparison.Ordinal),
                 "A passing sign-in fills the provider credential file");
-            Field<Button>(wizard, "_next").PerformClick();
+            Click(Field<Button>(wizard, "_next"));
             Until(() => !Field<bool>(wizard, "_busy"));
             check(!Field<Label>(wizard, "_message").Text.Contains("did not pass the storage check", StringComparison.Ordinal),
                 "After signing in again, review no longer refuses that remote");
@@ -264,6 +264,17 @@ internal static class ConfigurationWizardTests
     private static Button? Action(object view, string key) => (Button?)RowFor(view, key).GetType().GetProperty("Action")!.GetValue(RowFor(view, key));
     private static Button? Browse(object view, string key) => Action(view, key) is { Tag: not null } button ? button : null;
     private sealed class Guard : IDisposable { public void Dispose() { } }
+    /// <summary>
+    /// Clicks like a user inside a message loop. Without Application.Run, DoEvents can drop the WinForms synchronization
+    /// context, so a later async handler would resume on the thread pool and race this test's checks.
+    /// </summary>
+    private static void Click(Button button)
+    {
+        if (SynchronizationContext.Current is not WindowsFormsSynchronizationContext)
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+        button.PerformClick();
+    }
+
     private static void Until(Func<bool> ready)
     {
         var deadline = DateTime.UtcNow.AddSeconds(10);

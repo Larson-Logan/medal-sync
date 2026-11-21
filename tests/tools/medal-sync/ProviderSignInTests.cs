@@ -14,6 +14,7 @@ public sealed class ProviderSignInTests : IDisposable
     private Action<IReadOnlyList<string>, string, CancellationToken>? _rclone;
     private (StorageCheckResult, string) _check = (StorageCheckResult.Ok, "Remote gdrive: accepted rclone's sign-in.");
     private readonly List<string> _checkedWith = [];
+    private Action? _duringCheck;
 
     public ProviderSignInTests() => _state = new LocalState(_fixture.PathFor("state"));
 
@@ -30,7 +31,7 @@ public sealed class ProviderSignInTests : IDisposable
             File.AppendAllText(work, $"\n[{arguments[2]}]\ntype = {arguments[3]}\ntoken = {{\"access_token\":\"{Token}\"}}\n");
         else File.WriteAllText(work, File.ReadAllText(work).Replace("expired", Token, StringComparison.Ordinal));
         return "";
-    }, (remote, credentials) => { _checkedWith.Add(remote + "|" + credentials); return _check; });
+    }, (remote, credentials, _) => { _checkedWith.Add(remote + "|" + credentials); _duringCheck?.Invoke(); return _check; });
 
     private string Existing(string text)
     {
@@ -74,6 +75,7 @@ public sealed class ProviderSignInTests : IDisposable
     [InlineData("cancel")]
     [InlineData("failure")]
     [InlineData("check")]
+    [InlineData("cancel-during-check")]
     [InlineData("incomplete")]
     public void ACancelledFailedOrUncheckedSignInLeavesTheCredentialFileUnchanged(string outcome)
     {
@@ -88,6 +90,7 @@ public sealed class ProviderSignInTests : IDisposable
             _ => null,
         };
         if (outcome == "check") _check = (StorageCheckResult.SignInRequired, "The provider refused rclone's sign-in.");
+        if (outcome == "cancel-during-check") _duringCheck = cancel.Cancel; // The check itself still reports Ok.
 
         var result = SignIn().SignIn("gdrive", null, path, cancel.Token);
 

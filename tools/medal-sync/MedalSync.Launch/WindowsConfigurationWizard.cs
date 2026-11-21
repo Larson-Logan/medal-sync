@@ -458,7 +458,8 @@ internal sealed class WindowsConfigurationWizard : Form
 
     private SignInResult SignInWithRclone(string remote, CloudProvider? provider, string? configPath, CancellationToken cancel)
     {
-        SignInCommands.RequireNoSession(_existing);
+        // Runs on one worker thread from start to end, which the instance lock (a mutex) requires.
+        using var instance = SignInCommands.HoldNoSession(_existing);
         string rclone = Environment.ExpandEnvironmentVariables(_fields["rclone"].Text.Trim());
         if (!File.Exists(rclone)) throw new UnsafeOperationException("The rclone executable is missing. Select the bundled rclone.exe before signing in.");
         return new ProviderSignIn(rclone, _state).SignIn(remote, provider, configPath, cancel);
