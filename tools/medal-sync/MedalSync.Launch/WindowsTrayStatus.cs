@@ -38,6 +38,10 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private string? _finishFailure;
     private string? _exitFailure;
     private string? _actionFailure;
+    private readonly Button _signInAgain;
+    private readonly Func<string, Task<CloudRetryCommandResult>> _runSignIn;
+    private bool _signingIn;
+    private string? _signInResult;
 
     public static int Run(bool show)
     {
@@ -92,8 +96,10 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 
     internal WindowsTrayStatus(bool show, Func<DesktopStatus>? readStatus = null, string eventName = OpenEventName,
         Func<Task<FinishCommandResult>>? runFinish = null, Func<bool>? operationRunning = null,
-        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null, Action<ProcessStartInfo>? startProcess = null)
+        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null, Action<ProcessStartInfo>? startProcess = null,
+        Func<string, Task<CloudRetryCommandResult>>? runSignIn = null)
     {
+        _runSignIn = runSignIn ?? RunSignIn;
         _readStatus = readStatus ?? SessionCommands.ReadDesktopStatus;
         _runFinish = runFinish ?? RunFinish;
         _runCloudRetry = runCloudRetry ?? RunCloudRetry;
@@ -126,6 +132,9 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         _retryCloud = new Button { Text = "Retry &cloud copies", AccessibleName = "Retry pending cloud copies while Ready", AutoSize = true, Enabled = false };
         _retryCloud.Click += async (_, _) => await RetryCloudCopies();
         buttons.Controls.Add(_retryCloud);
+        _signInAgain = new Button { Text = "Sign &in again", AccessibleName = "Sign in to cloud storage again in your browser", AutoSize = true, Visible = false, Enabled = false };
+        _signInAgain.Click += async (_, _) => await SignInAgain();
+        buttons.Controls.Add(_signInAgain);
         var guide = new Button { Text = "Setup &guide", AutoSize = true };
         guide.Click += (_, _) => OpenGuide();
         buttons.Controls.Add(guide);
@@ -193,6 +202,8 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         if (status.Phase == SessionPhase.Ready && !_finishing && !_retryingCloud) _exitFailure = null;
         _retry.Enabled = !_finishing && !_retryingCloud && status.CanRetry;
         _retryCloud.Enabled = !_finishing && !_retryingCloud && status.Phase == SessionPhase.Ready && status.CanRetryCloudCopies;
+        _signInAgain.Visible = status.SignInRemote is not null || _signingIn;
+        _signInAgain.Enabled = !_signingIn && !_finishing && !_retryingCloud && CanSignIn(status);
         _icon.Text = "Medal Sync: " + status.Title;
         var icon = _icons.For(status.Phase, status.Recording);
         if (!ReferenceEquals(_icon.Icon, icon)) _icon.Icon = icon;
@@ -210,6 +221,10 @@ internal sealed class WindowsTrayStatus : ApplicationContext
             + (lastResult is null ? "" : $"\r\n\r\nLast finish result: {lastResult}")
             + (_retryingCloud ? "\r\n\r\nCloud retry: Running. Unfinished copies remain pending."
                 : _cloudRetryResult is null ? "" : $"\r\n\r\nLast cloud retry result: {_cloudRetryResult}")
+            + (_signingIn ? "\r\n\r\nSign-in: finish signing in in your browser. The credential file changes only after a storage check passes."
+                : _signInResult is not null ? $"\r\n\r\nSign-in: {_signInResult}"
+                : status.SignInRemote is not null && !CanSignIn(status) ? "\r\n\r\nSign in again is available once Medal is quit and this PC's session has finished."
+                : "")
             + (_exitFailure is null ? "" : $"\r\n\r\nExit: {_exitFailure}")
             + (_actionFailure is null ? "" : $"\r\n\r\n{_actionFailure}")
             + (status.Notice is null ? "" : $"\r\n\r\nLatest notice: {status.Notice}");
@@ -277,6 +292,37 @@ internal sealed class WindowsTrayStatus : ApplicationContext
             _cloudRetryResult = "Could not start cloud retry. Copies remain pending; check the installation and retry while Ready.";
         }
         finally { _retryingCloud = false; _nextRead = default; }
+    }
+
+    /// <summary>rclone's sign-in page needs its local port and a stable credential file, so no session may run here.</summary>
+    private static bool CanSignIn(DesktopStatus status) => status.SignInRemote is not null && status.Phase is SessionPhase.Ready or SessionPhase.Waiting;
+
+    private async Task SignInAgain()
+    {
+        var status = _last.At(DateTimeOffset.UtcNow);
+        if (_ending || _signingIn || _finishing || _retryingCloud || !CanSignIn(status)) return;
+        _signingIn = true;
+        _signInResult = null;
+        _signInAgain.Enabled = false;
+        RenderStatus(status);
+        try
+        {
+            var result = await _runSignIn(status.SignInRemote!);
+            _signInResult = result.ExitCode == 0
+                ? "Signed in again; the storage check passed."
+                : "Not signed in. " + (string.IsNullOrWhiteSpace(result.Error) ? result.Output.Trim() : result.Error.Trim());
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
+        {
+            _signInResult = "Sign-in could not start. Check the installation and try again.";
+        }
+        finally { _signingIn = false; _nextRead = default; }
+    }
+
+    private static async Task<CloudRetryCommandResult> RunSignIn(string remote)
+    {
+        var result = await RunCommand("storage", "sign-in", "--remote", remote);
+        return new(result.ExitCode, result.Output, result.Error);
     }
 
     private static async Task<CloudRetryCommandResult> RunCloudRetry()

@@ -703,7 +703,9 @@ medal-sync storage check
 
 For an rclone primary it reads the library marker; for each cloud target it
 lists the configured folder one level deep. Each remote is reported as OK,
-offline, *sign in again* (with the `rclone config reconnect` command to run),
+offline, *sign in again* (with the command to run; the status panel also
+offers **Sign in again**, which runs `medal-sync storage sign-in --remote NAME`
+once this PC has no session),
 a configuration problem (missing credential file, or one that asks for a
 password or does not define the remote), folder missing, marker missing, or
 another library's folder. A missing target folder is fine: the next finish

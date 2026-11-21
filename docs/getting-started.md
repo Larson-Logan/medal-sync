@@ -223,7 +223,20 @@ keeping a name without a prefix keeps its saved requirement. Review lists each
 requirement and calls out changed requirements and added or removed targets.
 Local mode needs no persistent-copy field because its primary storage
 already stays on this PC. Cloud credentials remain in the separate local rclone
-configuration file; authorize providers explicitly with `rclone config` first.
+configuration file. To create one without a terminal, choose the provider
+(Google Drive, OneDrive or Dropbox) and a remote name in **Cloud sign-in**, then
+**Sign in**: the provider's page opens in your browser, and after you sign in
+Medal Sync runs the storage check for that remote. Only a passing check saves
+the sign-in, into the **Provider credential file** you chose or, when that is
+empty, into a private file in Medal Sync's state folder, which then fills the
+field. Medal Sync never sees, shows or logs the token. A cancelled or failed
+sign-in leaves the credential file unchanged, and the wizard refuses to save a
+configuration that uses a remote whose sign-in failed. Sign-in is unavailable
+while a session runs on this PC, because rclone's sign-in page needs its local
+port. For Google Drive, consider
+[your own OAuth client](https://rclone.org/drive/#making-your-own-client-id); a
+client left in *Testing* status expires every sign-in after seven days. The
+documented `rclone config` flow keeps working.
 
 Create the dedicated storage, coordination and cache folders before reviewing.
 The wizard checks path rules, Medal compatibility/account, folder availability,

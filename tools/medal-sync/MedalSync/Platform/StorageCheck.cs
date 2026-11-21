@@ -241,6 +241,16 @@ internal static class StorageCheck
             : $"{where} accepted rclone's sign-in; it holds no copy of this library yet. The next finish creates one.");
     }
 
+    /// <summary>The read-only check of one remote's sign-in, as run after signing in: list the remote's top folders.</summary>
+    public static (StorageCheckResult Result, string Detail) CheckSignIn(string remote, string credentials, Func<IReadOnlyList<string>, string> run)
+    {
+        string where = $"Remote {remote}";
+        try { run(Common("lsf", credentials, remote, "--max-depth", "1", "--dirs-only")); }
+        catch (RcloneFailedException ex) { return Classify(ex, where, remote, credentials); }
+        catch (OperationCanceledException) { return Stopped(where); }
+        return (StorageCheckResult.Ok, $"{where} accepted rclone's sign-in.");
+    }
+
     private static (StorageCheckResult, string) Classify(RcloneFailedException ex, string where, string destination, string credentials)
     {
         if (RcloneFailure.IsTransient(ex)) return (StorageCheckResult.Offline, $"{where} cannot be reached right now.");

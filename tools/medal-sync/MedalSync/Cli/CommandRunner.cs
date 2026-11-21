@@ -15,7 +15,7 @@ internal static class CommandRunner
     {
         "--out", "--in", "--db", "--checkpoint", "--session", "--reason", "--hours", "--free-gb", "--bitrate", "--reserve-gb", "--config", "--target",
         "--from", "--to", "--limit", "--before", "--wait-for-server", "--wait-for-handoff", "--state-root", "--medal-link",
-        "--local-copy-root", "--cloud-remote", "--rclone-config",
+        "--local-copy-root", "--cloud-remote", "--rclone-config", "--provider",
         "--storage-mode", "--cloud-journal-id", "--device-label",
         "--replica-conflicts",
         "--grace-days", "--history-older-than", "--older-than", "--keep", "--keep-days",
@@ -61,6 +61,9 @@ internal static class CommandRunner
                                                  Preview/create a config; never overwrite an existing file
           init [--apply]                         Create the shared library from this PC (generation 0)
           storage init-primary [--apply]         Mark an empty primary folder or rclone remote for this library
+          storage sign-in --remote NAME [--provider drive|onedrive|dropbox] [--rclone-config FILE]
+                                                 Sign in to a cloud provider in the browser, or sign in again;
+                                                 saves only after the storage check passes
           storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]
                                                  Allocate a Google Drive journal ID for a new cloud library; creates no file
           replicate retry [--target NAME] [--apply]  Preview/retry pending optional cloud copies while Ready
@@ -160,6 +163,7 @@ internal static class CommandRunner
             "storage init-primary" => SessionCommands.InitPrimary(args, output),
             "storage check" => SessionCommands.CheckStorage(args, output),
             "storage cloud-id" => SessionCommands.CloudId(args, output),
+            "storage sign-in" => SignInCommands.Run(args, output),
             "replicate retry" => ReplicationCommands.Retry(args, output),
             "replica verify" => ReplicaCommands.Verify(args, output),
             "replica history" => ReplicaCommands.History(args, output),

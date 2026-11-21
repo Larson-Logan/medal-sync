@@ -40,10 +40,12 @@ internal static class Program
         }
         bool operationRunning = true;
         bool failStart = true;
+        var signIns = new List<string>();
         using var view = new WindowsTrayStatus(true, Read, @"Local\MedalSync.DesktopTest." + Guid.NewGuid().ToString("N"),
             () => { finishes++; return Task.FromResult(finishResult); }, () => operationRunning,
             () => { cloudRetries++; return cloudRetryTask; },
-            _ => { if (failStart) throw new System.ComponentModel.Win32Exception(); });
+            _ => { if (failStart) throw new System.ComponentModel.Win32Exception(); },
+            remote => { signIns.Add(remote); return Task.FromResult(new CloudRetryCommandResult(0, "", "")); });
         var panel = Field<Form>(view, "_panel");
         var status = Field<TextBox>(view, "_status");
         var retry = Field<Button>(view, "_retry");
@@ -69,6 +71,18 @@ internal static class Program
         Check(icon.Text == "Medal Sync: Recording" && ReferenceEquals(icon.Icon, icons.For(SessionPhase.Active)), "Only a recording session shows the red recording dot");
         Check(!ReferenceEquals(icons.For(SessionPhase.Active, recording: false), icons.For(SessionPhase.Active)), "Medal open without a game has its own dot");
         CheckIcons(icons, panel);
+        var signInAgain = Field<Button>(view, "_signInAgain");
+        lock (gate) current = new(SessionPhase.Active, "Synthetic open session", DateTimeOffset.UtcNow) { SignInRemote = "gdrive" };
+        Until(view, () => status.Text.Contains("Synthetic open session", StringComparison.Ordinal));
+        Check(signInAgain.Visible && !signInAgain.Enabled && status.Text.Contains("once Medal is quit", StringComparison.Ordinal),
+            "Sign in again waits for the session to finish and says why");
+        lock (gate) current = new(SessionPhase.Ready, "Synthetic expired sign-in", DateTimeOffset.UtcNow) { SignInRemote = "gdrive" };
+        Until(view, () => signInAgain.Enabled);
+        signInAgain.PerformClick();
+        Until(view, () => status.Text.Contains("Signed in again", StringComparison.Ordinal));
+        Check(signIns.SequenceEqual(["gdrive"]), "Sign in again reconnects exactly the remote the storage check named");
+        lock (gate) current = new(SessionPhase.Ready, "Synthetic signed in", DateTimeOffset.UtcNow);
+        Until(view, () => !signInAgain.Visible);
         Check(status.ReadOnly && status.TabStop && status.AccessibleName!.Contains("next action", StringComparison.Ordinal), "Status supports keyboard and accessibility APIs");
         Check(panel.CancelButton is Button, "Escape closes the panel");
         Check(icon.BalloonTipText.Length == 0, "Background status never shows a balloon");
