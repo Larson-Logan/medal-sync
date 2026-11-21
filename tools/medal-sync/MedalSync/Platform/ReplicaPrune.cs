@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using MedalSync.Config;
 using MedalSync.Coordination;
+using MedalSync.Library;
 using MedalSync.Storage;
 using MedalSync.Util;
 
@@ -33,9 +34,16 @@ internal sealed record ReplicaTrashBatch(string Name, DateTimeOffset? CreatedAt,
 /// old trash. Referenced files, recent files (by modification time) and files referenced by a recent uncommitted
 /// generation are never planned. Version history is a separate opt-in category. The library database is never touched.
 /// </summary>
+/// <remarks>
+/// With <paramref name="primary"/>, the destination is the capture folder on primary storage instead of a cloud copy,
+/// and the rules are stricter: every generation still kept protects the files it references (a PC can restore any of
+/// them), an unreadable generation refuses the whole review, and Medal's <c>Temp</c> folder is left alone.
+/// </remarks>
 internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, CoordinationStore store, Action requireIdle,
-    IReplicaRemote remote, Func<DateTimeOffset>? clock = null)
+    IReplicaRemote remote, Func<DateTimeOffset>? clock = null, bool primary = false)
 {
+    /// <summary>The target a primary-storage review records. A configured copy's name cannot contain a space.</summary>
+    public const string PrimaryTarget = "primary storage";
     public const string TrashRoot = ".medal-sync-trash";
     public const string HistoryRoot = ".medal-sync-history";
     /// <summary>An empty file in a trash batch named after when files were moved into it: <c>.medal-sync-moved-yyyyMMddTHHmmssfffZ</c>.</summary>
@@ -59,7 +67,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         var target = Target(targetName);
         var journal = RequireReady();
         var generation = store.Generations.Read(journal.CommittedGeneration);
-        string destination = ReplicationPlan.Destination(target, config.LibraryId);
+        string destination = target.Path;
         var now = Now;
         var protectedPaths = Protected(generation.Snapshot, journal.CommittedGeneration, now - TimeSpan.FromDays(graceDays));
         var listing = Live(remote.List(destination));
@@ -78,7 +86,10 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
                 continue;
             }
             bool ours = MediaExtensions.Contains(System.IO.Path.GetExtension(file.Path)) && !file.Path.Equals(MedalSyncConfig.StorageMarker, StringComparison.OrdinalIgnoreCase)
-                && !parts.Any(p => p.Equals("Databases", StringComparison.OrdinalIgnoreCase));
+                && !parts.Any(p => p.Equals("Databases", StringComparison.OrdinalIgnoreCase))
+                // Medal's replay buffer and working files, and Medal Sync's own files, are never library media.
+                && !(primary && (parts[0].Equals("Temp", StringComparison.OrdinalIgnoreCase)
+                    || parts.Any(p => p.StartsWith(".medal-sync", StringComparison.OrdinalIgnoreCase))));
             if (!ours) { leftAlone++; continue; }
             if (protectedPaths.Contains(file.Path) || file.ModTime > now - TimeSpan.FromDays(graceDays)) continue;
             files.Add(new(file.Path, file.Size, file.ModTime, Unreferenced));
@@ -101,7 +112,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         requireIdle();
         var target = Target(plan.Target);
         var journal = RequireReady();
-        string destination = ReplicationPlan.Destination(target, config.LibraryId);
+        string destination = target.Path;
         if (plan.LibraryId != config.LibraryId || plan.Destination != destination || plan.Required != target.Required)
             throw new UnsafeOperationException("The cleanup plan belongs to another library or destination, or the copy's requirement changed; preview again.");
         var generation = store.Generations.Read(journal.CommittedGeneration);
@@ -141,7 +152,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
     {
         requireIdle();
         var target = Target(targetName);
-        var files = remote.List(ReplicationPlan.Destination(target, config.LibraryId).TrimEnd('/') + "/" + TrashRoot);
+        var files = remote.List(target.Path.TrimEnd('/') + "/" + TrashRoot);
         return files.Where(f => f.Path.Split('/').Length > 1)
             .GroupBy(f => f.Path.Split('/')[0], StringComparer.Ordinal)
             .Select(g =>
@@ -175,31 +186,42 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
         foreach (var batch in due)
         {
             requireIdle();
-            remote.Purge(ReplicationPlan.Destination(target, config.LibraryId), TrashRoot + "/" + batch.Name);
+            remote.Purge(target.Path, TrashRoot + "/" + batch.Name);
         }
         return due;
     }
 
-    private ReplicaTarget Target(string name)
+    private sealed record PruneDestination(string Name, string Path, bool Required);
+
+    private PruneDestination Target(string name)
     {
+        if (primary)
+        {
+            if (name != PrimaryTarget) throw new UnsafeOperationException("This review is for a cloud copy; use 'medal-sync replica prune'.");
+            // Primary storage is always required: every PC restores its clips from there.
+            return new(PrimaryTarget, config.PrimaryCapture, true);
+        }
         var target = config.Replication?.Targets.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-            ?? throw new UnsafeOperationException("--target must name a configured cloud copy.");
-        return target;
+            ?? throw new UnsafeOperationException(name == PrimaryTarget
+                ? "This review is for primary storage; use 'medal-sync primary prune'." : "--target must name a configured cloud copy.");
+        return new(target.Name, ReplicationPlan.Destination(target, config.LibraryId), target.Required);
     }
 
-    private void DistrustRequired(ReplicaTarget target)
+    private void DistrustRequired(PruneDestination target)
     {
         if (!target.Required) return;
         // Drop this PC's receipt before any move/delete, including an interrupted apply.
         // The next handoff on this PC must read every referenced file back.
-        new ReplicationVerification(config, state, "", ReplicationPlan.Destination(target, config.LibraryId), "", [], Now).Invalidate();
+        new ReplicationVerification(config, state, "", target.Path, "", [], Now).Invalidate();
     }
 
     private OwnershipRecord RequireReady()
     {
         var journal = store.ReadJournal();
         if (journal.State != OwnershipState.Clean)
-            throw new UnsafeOperationException("Cleaning up a cloud copy requires a Ready library. Finish or recover the current session first.");
+            throw new UnsafeOperationException(primary
+                ? "Cleaning up primary storage requires every PC to be Ready. Finish or recover the current session first."
+                : "Cleaning up a cloud copy requires a Ready library. Finish or recover the current session first.");
         return journal;
     }
 
@@ -209,7 +231,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
     /// </summary>
     private HashSet<string> Protected(Library.LibrarySnapshot committed, long head, DateTimeOffset since)
     {
-        var paths = ReplicationPlan.Media(committed, config.Capture).Select(m => m.Relative).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var paths = References(committed).ToHashSet(StringComparer.OrdinalIgnoreCase);
         HashSet<long> ancestry;
         try { ancestry = store.Generations.Chain(head).Select(c => c.Generation).ToHashSet(); }
         catch (Exception ex) when (ex is InvalidDataException or IOException)
@@ -217,23 +239,38 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
             throw new UnsafeOperationException($"The committed history cannot be followed ({ex.Message}), so unfinished switches cannot be ruled out; nothing was planned. "
                 + "Run 'medal-sync history list' to see where it breaks.");
         }
-        foreach (long number in store.Generations.Numbered().Where(n => !ancestry.Contains(n)))
+        // Every PC restores from primary storage, so any generation still kept protects its files there, committed or
+        // not and however old. A replica only needs the committed head and recent unfinished switches.
+        foreach (long number in store.Generations.Numbered().Where(n => primary ? n != head : !ancestry.Contains(n)))
         {
             try
             {
                 var later = store.Generations.Read(number);
-                if (later.Manifest.CreatedAt < since) continue;
-                foreach (var media in ReplicationPlan.Media(later.Snapshot, config.Capture)) paths.Add(media.Relative);
+                if (!primary && later.Manifest.CreatedAt < since) continue;
+                foreach (string relative in References(later.Snapshot)) paths.Add(relative);
             }
             catch (Exception ex) when (ex is InvalidDataException or IOException or MedalSyncException)
             {
                 // An unreadable attempt that may be recent cannot be proven unrelated, so nothing is planned while it is there.
                 string folder = Path.Combine(store.Generations.Directory, GenerationStore.Name(number));
-                if (Directory.GetLastWriteTimeUtc(folder) < since.UtcDateTime) continue;
-                throw new UnsafeOperationException($"Uncommitted generation {number} cannot be read, so its files cannot be ruled out; nothing was planned. ({ex.Message})");
+                if (!primary && Directory.GetLastWriteTimeUtc(folder) < since.UtcDateTime) continue;
+                throw new UnsafeOperationException($"Generation {number} cannot be read, so its files cannot be ruled out; nothing was planned. ({ex.Message})");
             }
         }
         return paths;
+    }
+
+    /// <summary>
+    /// The capture-relative files a generation refers to. Copies leave out metadata fields Medal Sync does not recognize,
+    /// but a path such a field names inside the capture folder is not proven unused, so primary cleanup keeps it too.
+    /// </summary>
+    private IEnumerable<string> References(LibrarySnapshot snapshot)
+    {
+        foreach (var media in ReplicationPlan.Media(snapshot, config.Capture)) yield return media.Relative;
+        if (!primary) yield break;
+        foreach (var reference in AssetInventory.Collect(snapshot).Where(r => r.Role == AssetRole.Unrecognized))
+            if (WindowsPath.TryParse(reference.Path, out var path, out _) && path.IsWithin(config.Capture) && !path.Equals(config.Capture))
+                yield return string.Join('/', path.Segments.Skip(config.Capture.Segments.Count));
     }
 
     /// <summary>
@@ -309,14 +346,20 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
     {
         var text = new StringBuilder();
         long bytes = plan.Files.Sum(f => f.Size);
-        text.AppendLine(CultureInfo.InvariantCulture, $"Cloud copy '{plan.Target}' ({plan.Destination}) against committed generation {plan.Generation}: {plan.Listed} file(s) listed.");
-        if (plan.Required) text.AppendLine("This copy is required. Referenced files are not touched; this PC's next handoff reads every referenced file back.");
+        bool isPrimary = plan.Target == PrimaryTarget;
+        string what = isPrimary ? "Primary storage" : $"Cloud copy '{plan.Target}'";
+        text.AppendLine(CultureInfo.InvariantCulture, $"{what} ({plan.Destination}) against committed generation {plan.Generation}: {plan.Listed} file(s) listed.");
+        if (isPrimary) text.AppendLine("Every PC must stay Ready while this applies. Referenced files are not touched; this PC's next handoff reads every referenced file back.");
+        else if (plan.Required) text.AppendLine("This copy is required. Referenced files are not touched; this PC's next handoff reads every referenced file back.");
         foreach (var group in plan.Files.GroupBy(f => f.Category).OrderBy(g => g.Key, StringComparer.Ordinal))
             text.AppendLine(CultureInfo.InvariantCulture, $"  {group.Key}: {group.Count()} file(s), {StorageVolume.Gb(group.Sum(f => f.Size))}");
         string history = plan.HistoryOlderThanDays is { } d
             ? string.Create(CultureInfo.InvariantCulture, $"; version history newer than {d} day(s).")
             : "; all version history (add --history-older-than DAYS to include it).";
-        text.AppendLine(CultureInfo.InvariantCulture, $"Kept: every referenced file, files changed in the last {plan.GraceDays} day(s) and files of recent unfinished switches{history}");
+        if (isPrimary)
+            text.AppendLine(CultureInfo.InvariantCulture, $"Kept: every file a kept generation references, files changed in the last {plan.GraceDays} day(s), Medal's Temp folder and Medal Sync's own files.");
+        else
+            text.AppendLine(CultureInfo.InvariantCulture, $"Kept: every referenced file, files changed in the last {plan.GraceDays} day(s) and files of recent unfinished switches{history}");
         if (plan.LeftAlone > 0) text.AppendLine(CultureInfo.InvariantCulture, $"Left alone: {plan.LeftAlone} file(s) that are not clip media or not dated history.");
         text.Append(CultureInfo.InvariantCulture, $"Apply moves these {plan.Files.Count} file(s) ({StorageVolume.Gb(bytes)}) into {plan.TrashFolder}/ at the destination; nothing is deleted until you purge the trash.");
         return text.ToString();
