@@ -323,8 +323,11 @@ merged there by hand:
    ```
 
 2. On Windows, run `winget validate` on the version folder, then test it on a
-   clean Windows VM with `winget install --manifest` for both `--scope machine`
-   and `--scope user`.
+   clean Windows VM with `winget install --manifest`, once with no `--scope`
+   (per-user setup, with WinFsp installed first as a dependency) and once with
+   `--scope machine`. Windows Sandbox and `Tools/SandboxTest.ps1` from
+   winget-pkgs work for this. Do not test `--scope user`: winget then needs a
+   per-user WinFsp installer, which WinFsp does not publish.
 3. Copy the `manifests` folder into a fork of `microsoft/winget-pkgs` and open
    a pull request. Answer the review until it is merged.
 4. Create a classic GitHub token with only the `public_repo` scope on the
