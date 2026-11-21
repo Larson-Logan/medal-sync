@@ -144,6 +144,8 @@ public sealed class StartupIntegrationTests : IDisposable
         protocol.SetValue(null, StartupEntries.ProtocolCommand(portable));
         MakeShortcut(shortcut, portable);
         MakeShortcut(Path.Combine(_desktop, "Medal Sync.lnk"), _launcher); // Removed by native setup.
+        MakeShortcut(Path.Combine(_desktop, "Medal Sync Status.lnk"), _launcher);
+        MakeShortcut(Path.Combine(_desktop, "Check for Medal Sync updates - Copy.lnk"), _launcher);
         startup.RequireDetachedForUninstall();
 
         run.SetValue(StartupEntries.RunValue, StartupEntries.RunCommand(_launcher));
