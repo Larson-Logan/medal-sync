@@ -265,6 +265,42 @@ public sealed class MediaPrefetchTests : IDisposable
     }
 
     [Fact]
+    public void AStagingFolderThatOverlapsTheCaptureFolderIsRefusedBeforeAnythingIsRemoved()
+    {
+        Clip("new", 10);
+        Publish();
+        var overlap = new MedalSyncConfig(1, _config.LibraryId, MedalFixture.AccountId, _config.CoordinationRoot, _config.Remote,
+            @"M:\.medal-sync-prefetch\Clips", _config.CacheRoot, @"C:\Tools\rclone.exe", _config.Mount, 4, []) { Replication = _config.Replication };
+        string kept = overlap.MountedCapture.Append("kept.mp4").Display;
+        Directory.CreateDirectory(overlap.MountedCapture.Display);
+        File.WriteAllText(overlap.MountedCapture.Append(MedalSyncConfig.StorageMarker).Display, overlap.LibraryId);
+        File.WriteAllText(kept, "an existing clip");
+        var prefetch = new MediaPrefetch(overlap, _state, _store, _thisPc, () => { }, Rclone, _ => _volume);
+
+        Assert.Throws<UnsafeOperationException>(() => prefetch.Run());
+
+        Assert.Equal("an existing clip", File.ReadAllText(kept));
+        Assert.Empty(_commands);
+    }
+
+    [Theory]
+    [InlineData(null, "2Mi")]
+    [InlineData(1, "1Mi")]
+    [InlineData(500, "2Mi")]
+    public void PrefetchNeverUsesMoreThanTheBackgroundLimit(int? configured, string expected)
+    {
+        var limited = _config with { Replication = _config.Replication! with { BandwidthLimitMiB = configured } };
+        Clip("new", 10);
+        Publish();
+        var limits = new List<string>();
+        _onCommand = arguments => limits.Add(arguments[arguments.ToList().IndexOf("--bwlimit") + 1]);
+
+        new MediaPrefetch(limited, _state, _store, _thisPc, () => { }, Rclone, _ => _volume).Run();
+
+        Assert.Equal([expected, expected], limits);
+    }
+
+    [Fact]
     public void PrefetchIsOnWithALocalCopyUnlessTurnedOff()
     {
         Assert.True(MediaPrefetch.Enabled(_config));

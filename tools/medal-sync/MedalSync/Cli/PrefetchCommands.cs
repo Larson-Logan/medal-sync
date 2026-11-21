@@ -39,13 +39,14 @@ internal static class PrefetchCommands
         }
         try
         {
-            var store = CoordinationStore.Open(config);
             if (apply)
             {
                 // The CPU check needs two samples; the first one only sets a baseline.
                 _ = idle.IsIdle();
                 Thread.Sleep(TimeSpan.FromSeconds(2.2));
             }
+            // In cloud mode the guard also stops journal and history requests, so a launch never waits on a stalled one.
+            var store = CoordinationStore.Open(config, Guard);
             var prefetch = new MediaPrefetch(config, state, store, device, Guard);
             if (!apply)
             {

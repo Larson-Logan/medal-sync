@@ -42,7 +42,8 @@ the newest committed generation references and this PC lacks, newest first:
 - Files are downloaded into `.medal-sync-prefetch` beside the capture folder in
   the local copy, byte-compared with primary storage and checked against the
   size the generation recorded, then moved into place. A file already in the
-  local copy is never replaced.
+  local copy is never replaced. Prefetch refuses a capture folder inside
+  `.medal-sync-prefetch` (or the reverse), because it empties that folder.
 - Input, Medal starting, a launch on this PC, shutdown, setup, a configuration
   change, a newer generation and low space (the `mount.minFreeGiB` reserve) stop
   it. A partial download stays in the staging folder and is discarded; nothing

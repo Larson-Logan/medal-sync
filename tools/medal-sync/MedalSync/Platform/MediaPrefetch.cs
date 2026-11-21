@@ -25,6 +25,9 @@ internal sealed class MediaPrefetch(MedalSyncConfig config, LocalState state, Co
     public const string StagingFolder = ".medal-sync-prefetch";
     internal const int BatchFiles = 20;
     internal const long BatchBytes = 2L << 30;
+
+    /// <summary>Prefetch never uses more than this, even when <c>replication.bandwidthLimitMiB</c> allows foreground copies more.</summary>
+    internal const int BackgroundLimitMiB = 2;
     private readonly IFileProbe _probe = new FileSystemProbe();
     private readonly Func<string, VolumeInfo?> _volumes = volumes ?? StorageVolume.Describe;
 
@@ -39,6 +42,7 @@ internal sealed class MediaPrefetch(MedalSyncConfig config, LocalState state, Co
     /// <summary>What a run would download now, newest first, without downloading anything.</summary>
     public (long Generation, IReadOnlyList<(string Relative, long Size)> Files) Plan()
     {
+        RequireSeparateStaging();
         requireIdle();
         var journal = RequireNotOwned();
         // Read verifies the generation's files against its manifest; a generation that fails is never prefetched from.
@@ -150,7 +154,7 @@ internal sealed class MediaPrefetch(MedalSyncConfig config, LocalState state, Co
         try
         {
             File.WriteAllLines(list, files, new System.Text.UTF8Encoding(false));
-            int limit = config.Replication?.BandwidthLimitMiB ?? 2;
+            int limit = Math.Min(config.Replication?.BandwidthLimitMiB ?? BackgroundLimitMiB, BackgroundLimitMiB);
             foreach (string command in new[] { "copy", "check" })
             {
                 requireIdle();
@@ -196,8 +200,21 @@ internal sealed class MediaPrefetch(MedalSyncConfig config, LocalState state, Co
         return bytes <= volume.FreeBytes - reserve;
     }
 
+    /// <summary>
+    /// Staging is deleted recursively, so it must never contain the local capture folder (a capture folder such as
+    /// <c>M:\.medal-sync-prefetch\Clips</c>) nor lie inside it.
+    /// </summary>
+    private void RequireSeparateStaging()
+    {
+        var staging = WindowsPath.Parse(Staging);
+        if (config.MountedCapture.IsWithin(staging) || staging.IsWithin(config.MountedCapture))
+            throw new UnsafeOperationException($"Prefetch stages downloads in '{Staging}', which overlaps the persistent local copy's "
+                + "capture folder. Choose a capture folder outside it; nothing was downloaded or removed.");
+    }
+
     private void Discard()
     {
+        RequireSeparateStaging();
         if (!Directory.Exists(Staging)) return;
         RequireOrdinary(Staging);
         Directory.Delete(Staging, recursive: true);
