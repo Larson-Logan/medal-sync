@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using MedalSync.Config;
 using MedalSync.Coordination;
+using MedalSync.Library;
 using MedalSync.Storage;
 using MedalSync.Util;
 
@@ -230,7 +231,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
     /// </summary>
     private HashSet<string> Protected(Library.LibrarySnapshot committed, long head, DateTimeOffset since)
     {
-        var paths = ReplicationPlan.Media(committed, config.Capture).Select(m => m.Relative).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var paths = References(committed).ToHashSet(StringComparer.OrdinalIgnoreCase);
         HashSet<long> ancestry;
         try { ancestry = store.Generations.Chain(head).Select(c => c.Generation).ToHashSet(); }
         catch (Exception ex) when (ex is InvalidDataException or IOException)
@@ -246,7 +247,7 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
             {
                 var later = store.Generations.Read(number);
                 if (!primary && later.Manifest.CreatedAt < since) continue;
-                foreach (var media in ReplicationPlan.Media(later.Snapshot, config.Capture)) paths.Add(media.Relative);
+                foreach (string relative in References(later.Snapshot)) paths.Add(relative);
             }
             catch (Exception ex) when (ex is InvalidDataException or IOException or MedalSyncException)
             {
@@ -257,6 +258,19 @@ internal sealed class ReplicaPrune(MedalSyncConfig config, LocalState state, Coo
             }
         }
         return paths;
+    }
+
+    /// <summary>
+    /// The capture-relative files a generation refers to. Copies leave out metadata fields Medal Sync does not recognize,
+    /// but a path such a field names inside the capture folder is not proven unused, so primary cleanup keeps it too.
+    /// </summary>
+    private IEnumerable<string> References(LibrarySnapshot snapshot)
+    {
+        foreach (var media in ReplicationPlan.Media(snapshot, config.Capture)) yield return media.Relative;
+        if (!primary) yield break;
+        foreach (var reference in AssetInventory.Collect(snapshot).Where(r => r.Role == AssetRole.Unrecognized))
+            if (WindowsPath.TryParse(reference.Path, out var path, out _) && path.IsWithin(config.Capture) && !path.Equals(config.Capture))
+                yield return string.Join('/', path.Segments.Skip(config.Capture.Segments.Count));
     }
 
     /// <summary>

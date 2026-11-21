@@ -156,6 +156,20 @@ public sealed class PrimaryPruneTests : IDisposable
     }
 
     [Fact]
+    public void AFileNamedOnlyByAnUnrecognizedMetadataFieldIsNeverPlanned()
+    {
+        Clutter();
+        MedalFixture.AddContent(_db, "plugin", video: @"M:\Clips\two.mp4",
+            metadata: "{\"title\":\"Synthetic clip\",\"plugin\":{\"cache\":\"M:\\\\Clips\\\\deleted.mp4\"}}");
+        Commit(_now.AddDays(-80));
+
+        var plan = Prune().Plan(ReplicaPrune.PrimaryTarget);
+
+        Assert.DoesNotContain(plan.Files, f => f.Path == "deleted.mp4");
+        Assert.Contains(plan.Files, f => f.Path == "Thumbnails/deleted.jpg");
+    }
+
+    [Fact]
     public void AnOldUncommittedAttemptStillProtectsItsFiles()
     {
         Clutter();
