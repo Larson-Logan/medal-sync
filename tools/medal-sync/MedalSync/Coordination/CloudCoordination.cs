@@ -60,10 +60,20 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
     private string Run(string command, params string[] rest) => run([command, .. rest, "--config",
         Environment.ExpandEnvironmentVariables(config.Replication!.RcloneConfigPath!), "--retries", "1", "--low-level-retries", "2", "--contimeout", "10s", "--timeout", "60s"]);
 
+    private StorageActionRequiredException StorageRefusal(RcloneFailedException cause) => new(
+        RcloneFailure.Describe(cause, "Google Drive coordination storage", config.Remote,
+            Environment.ExpandEnvironmentVariables(config.Replication!.RcloneConfigPath!)), cause);
+
     private string StorageFolder(bool refresh = false)
     {
         if (!refresh && storageFolderId is not null) return storageFolderId;
-        using var json = JsonDocument.Parse(Run("lsjson", config.Remote, "--stat", "--no-mimetype"));
+        string listing;
+        try { listing = Run("lsjson", config.Remote, "--stat", "--no-mimetype"); }
+        catch (RcloneFailedException ex) when (!RcloneFailure.IsTransient(ex))
+        {
+            throw StorageRefusal(ex);
+        }
+        using var json = JsonDocument.Parse(listing);
         if (!json.RootElement.TryGetProperty("IsDir", out var isDir) || !isDir.GetBoolean()
             || !json.RootElement.TryGetProperty("ID", out var id) || string.IsNullOrWhiteSpace(id.GetString()))
             throw new InvalidDataException("Google Drive did not identify the dedicated storage folder.");
@@ -99,8 +109,13 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
             if (downloadRefusal is { } refused && refused.Generation == journal.CommittedGeneration
                 && refused.Hash == value.HeadManifestHash && Now() < refused.Until) throw refused.Error;
             try { Download(); }
-            catch (Exception ex) when (ex is InvalidDataException or StorageActionRequiredException
-                || ex is RcloneFailedException failed && (failed.Hints & (RcloneHints.SignIn | RcloneHints.Config | RcloneHints.Quota | RcloneHints.Conflict)) != 0)
+            catch (RcloneFailedException ex) when (!RcloneFailure.IsTransient(ex))
+            {
+                var refusal = StorageRefusal(ex);
+                downloadRefusal = (journal.CommittedGeneration, value.HeadManifestHash, refusal, Now() + TimeSpan.FromMinutes(1));
+                throw refusal;
+            }
+            catch (Exception ex) when (ex is InvalidDataException or StorageActionRequiredException)
             {
                 // A status poll still reads the authoritative journal, but retries a refused head at most once a minute.
                 downloadRefusal = (journal.CommittedGeneration, value.HeadManifestHash, ex, Now() + TimeSpan.FromMinutes(1));
@@ -259,8 +274,8 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
         for (int attempt = 0; attempt < 8; attempt++)
         {
             var current = Read();
-            var requests = current.Value.Requests.Where(r => r.Device.DeviceId != request.Device.DeviceId
-                && DateTimeOffset.UtcNow - r.RequestedAt < HandoffRequest.Lifetime).ToList();
+            var now = Now();
+            var requests = current.Value.Requests.Where(r => r.Device.DeviceId != request.Device.DeviceId && r.IsFreshInCloud(now)).ToList();
             if (!remove) requests.Add(request);
             if (requests.Count > 32) throw new StorageBusyException("Too many PCs are waiting for this library.");
             if (api.CompareExchange(current, current.Value with { Requests = requests })) return;
@@ -275,7 +290,8 @@ internal sealed class CloudCoordination(MedalSyncConfig config, GoogleDriveJourn
         {
             var current = Read();
             if (!current.Value.Requests.Any(r => r == request)) return false;
-            var requests = current.Value.Requests.Where(r => r != request && DateTimeOffset.UtcNow - r.RequestedAt < HandoffRequest.Lifetime).ToList();
+            var now = Now();
+            var requests = current.Value.Requests.Where(r => r != request && r.IsFreshInCloud(now)).ToList();
             if (api.CompareExchange(current, current.Value with { Requests = requests })) return true;
         }
         throw new StorageBusyException("Another PC is updating switch requests. Try again shortly.");

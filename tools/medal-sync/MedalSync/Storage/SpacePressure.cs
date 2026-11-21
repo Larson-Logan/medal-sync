@@ -62,7 +62,7 @@ internal sealed class SpacePressureMonitor(IReadOnlyList<WatchedFolder> folders,
                 seen.Add((folder, volume));
                 continue;
             }
-            if (++probe.Failures == FailuresBeforeNotice && (probe.LastNotice is null || now - probe.LastNotice >= QuietPeriod))
+            if (++probe.Failures >= FailuresBeforeNotice && (probe.LastNotice is null || now - probe.LastNotice >= QuietPeriod))
             {
                 probe.LastNotice = now;
                 notices.Add($"Free space for the {folder.Label} could not be checked: {problem}. Recording continues; "

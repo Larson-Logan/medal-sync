@@ -32,18 +32,11 @@ internal static class EnrollmentCommands
         var current = CoordinationStore.Open(config).ReadJournal();
         if (EnrollmentOwnership.IsPending(current) || IsInterrupted(directory) || IsHandedOff(directory, current, device))
         {
-            using var guard = new Mutex(false, SessionCommands.InstanceMutex);
-            bool held;
-            try { held = guard.WaitOne(0); } catch (AbandonedMutexException) { held = true; }
-            if (!held) throw new UnsafeOperationException("Another medal-sync operation is running on this PC.");
-            try
-            {
-                int code = RecoverInterrupted(config, install, state, CoordinationStore.Open(config), device, directory, rollback, apply, output,
-                    finish: () => SessionCommands.FinishOwnSession(output));
-                if (apply && !rollback && code == 0) LibrarySetupPending.Read(state, config)?.Complete(state, config);
-                return code;
-            }
-            finally { guard.ReleaseMutex(); }
+            using var guard = SessionCommands.SingleInstance();
+            int code = RecoverInterrupted(config, install, state, CoordinationStore.Open(config), device, directory, rollback, apply, output,
+                finish: () => SessionCommands.FinishOwnSession(output));
+            if (apply && !rollback && code == 0) LibrarySetupPending.Read(state, config)?.Complete(state, config);
+            return code;
         }
         if (rollback) throw new UnsafeOperationException("--rollback is only for an interrupted 'enroll --apply' that still holds the library.");
         var review = Json.ReadFile<EnrollmentReview>(Path.Combine(directory, "review.json"), "Enrollment review");
@@ -63,30 +56,23 @@ internal static class EnrollmentCommands
         if (original is null) throw new UnsafeOperationException("No verified original database for this PC was retained in the review directory.");
         output.WriteLine("The exact pre-enrollment shared library replaced this PC's union. Recovery will restore this PC's own saved device settings and the committed union; no media is removed.");
         if (!apply) { output.WriteLine("Preview only. Add --apply with Medal quit to recover this verified case."); return 0; }
-        using var mutex = new Mutex(false, SessionCommands.InstanceMutex);
-        bool locked;
-        try { locked = mutex.WaitOne(0); } catch (AbandonedMutexException) { locked = true; }
-        if (!locked) throw new UnsafeOperationException("Another medal-sync operation is running.");
-        try
-        {
-            // Recheck after acquiring the local guard; keep a forensic copy of
-            // what Medal restored before replacing any settings or library rows.
-            if (new MedalProcess(install).IsRunning() || LibraryDatabase.ReadSnapshot(install.DatabasePath, config.AccountId).Digest() != restoredLibrary.Digest())
-                throw new UnsafeOperationException("Medal or the local library changed before recovery.");
-            var latest = store.ReadJournal();
-            if (latest != journal) throw new UnsafeOperationException("Ownership changed before recovery.");
-            string evidence = Path.Combine(directory, "native-recovery-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(evidence);
-            AtomicFile.CreateNew(Path.Combine(evidence, "before.json"), restoredLibrary.ToCanonicalJson());
-            DeviceSettingsRestorer.Restore(install.DatabasePath, original, config.AccountId, evidence);
-            LibraryRestorer.Restore(install.DatabasePath, candidate, new RestoreOptions(config.AccountId, evidence), DateTimeOffset.UtcNow);
-            CaptureFolderSetting.Change(install.DatabasePath, review.Source, config.Capture.Display);
-            NativeBackupCompatibility.Prepare(config, install, state);
-            AtomicFile.CreateNew(Path.Combine(evidence, "recovered.json"), candidate.ToCanonicalJson());
-            output.WriteLine($"Recovered the union and original device settings. Evidence: {evidence}. Run finish before opening Medal again.");
-            return 0;
-        }
-        finally { mutex.ReleaseMutex(); }
+        using var instance = SessionCommands.SingleInstance();
+        // Recheck after acquiring the local guard; keep a forensic copy of
+        // what Medal restored before replacing any settings or library rows.
+        if (new MedalProcess(install).IsRunning() || LibraryDatabase.ReadSnapshot(install.DatabasePath, config.AccountId).Digest() != restoredLibrary.Digest())
+            throw new UnsafeOperationException("Medal or the local library changed before recovery.");
+        var latest = store.ReadJournal();
+        if (latest != journal) throw new UnsafeOperationException("Ownership changed before recovery.");
+        string evidence = Path.Combine(directory, "native-recovery-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(evidence);
+        AtomicFile.CreateNew(Path.Combine(evidence, "before.json"), restoredLibrary.ToCanonicalJson());
+        DeviceSettingsRestorer.Restore(install.DatabasePath, original, config.AccountId, evidence);
+        LibraryRestorer.Restore(install.DatabasePath, candidate, new RestoreOptions(config.AccountId, evidence), DateTimeOffset.UtcNow);
+        CaptureFolderSetting.Change(install.DatabasePath, review.Source, config.Capture.Display);
+        NativeBackupCompatibility.Prepare(config, install, state);
+        AtomicFile.CreateNew(Path.Combine(evidence, "recovered.json"), candidate.ToCanonicalJson());
+        output.WriteLine($"Recovered the union and original device settings. Evidence: {evidence}. Run finish before opening Medal again.");
+        return 0;
     }
 
     public static int Run(Arguments args, TextWriter output)
@@ -99,10 +85,7 @@ internal static class EnrollmentCommands
         var install = MedalEnvironment.Locate();
         var device = state.Device();
         if (install.AccountId != config.AccountId) throw new IncompatibleLibraryException("Enrollment account differs from this PC's signed-in Medal account.");
-        using var mutex = new Mutex(false, SessionCommands.InstanceMutex);
-        bool locked;
-        try { locked = mutex.WaitOne(0); } catch (AbandonedMutexException) { locked = true; }
-        if (!locked) throw new UnsafeOperationException("Another medal-sync operation is running on this PC.");
+        using var instance = SessionCommands.SingleInstance();
         try
         {
             int code = Run(config, install, state, device, directory, apply, output);
@@ -116,7 +99,6 @@ internal static class EnrollmentCommands
                 + "run the same enroll command again once storage is back.");
             return 3;
         }
-        finally { mutex.ReleaseMutex(); }
     }
 
     private static int Run(MedalSyncConfig config, MedalInstall install, LocalState state, DeviceIdentity device, string directory, bool apply,

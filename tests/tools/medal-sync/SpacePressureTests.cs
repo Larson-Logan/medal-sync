@@ -149,6 +149,29 @@ public sealed class SpacePressureTests
     }
 
     [Fact]
+    public void UnreadableDiskIsReportedAgainAfterABriefReconnectAndTheQuietPeriod()
+    {
+        var monitor = Monitor();
+        string cache = @"E:\Cache";
+        var interval = SpacePressureMonitor.CheckInterval;
+        _volumes[cache] = null;
+        Assert.Empty(monitor.Check(Start));
+        Assert.Empty(monitor.Check(Start + interval));
+        var firstNotice = Start + 2 * interval;
+        Assert.Single(monitor.Check(firstNotice));
+
+        _volumes[cache] = Volume("E", 100);
+        Assert.Empty(monitor.Check(firstNotice + interval));
+        _volumes[cache] = null;
+        var quietEnds = firstNotice + SpacePressureMonitor.QuietPeriod;
+        for (var now = firstNotice + 2 * interval; now < quietEnds; now += interval)
+            Assert.Empty(monitor.Check(now));
+
+        Assert.Contains("could not be checked", Assert.Single(monitor.Check(quietEnds)), StringComparison.Ordinal);
+        Assert.Empty(monitor.Check(quietEnds + interval));
+    }
+
+    [Fact]
     public void ASlowDisk_DoesNotHoldUpTheCheckAndOnlyOneProbeRuns()
     {
         using var gate = new ManualResetEventSlim();

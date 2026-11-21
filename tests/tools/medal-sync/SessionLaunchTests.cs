@@ -13,6 +13,26 @@ namespace MedalSync.Tests;
 public sealed partial class SessionTests
 {
     [Fact]
+    public void APlainLaunchWaitsWhenTheShareCannotWriteItsSwitchRequest()
+    {
+        string session = SessionCoordinator.NewId();
+        _store.Update(r => Ownership.Acquire(r, FirstPc, session, _clock.Now), TimeSpan.FromSeconds(1));
+        var owner = _store.Update(r => Ownership.MarkActive(r, FirstPc, session, _clock.Now), TimeSpan.FromSeconds(1));
+        File.WriteAllText(Path.Combine(_store.Root, "requests"), "synthetic unavailable request directory");
+        List<SessionProgress> progress = [];
+        var pc = Computer(SecondPc, "second", progress: progress.Add);
+
+        var outcome = pc.Coordinator.Launch();
+
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.Equal(LaunchWait.ServerUnreachable, outcome.Wait);
+        Assert.Equal(SessionPhase.WaitingForStorage, progress[^1].Phase);
+        Assert.Equal(owner, _store.ReadJournal());
+        Assert.Equal(0, pc.Medal.Launches);
+        Assert.Empty(pc.Mount.Starts);
+    }
+
+    [Fact]
     public void PendingPersistentMediaRefreshCannotBeAbortedByOrdinaryLaunchOrFinish()
     {
         var pc = Computer(FirstPc, "first");

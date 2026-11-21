@@ -44,7 +44,7 @@ public sealed class CloudHandoffTests : IDisposable
     private sealed class Drive : HttpMessageHandler
     {
         public CloudJournal? Value;
-        public bool Offline, IgnoreConditions, ApplyThenDisconnect;
+        public bool Offline, IgnoreConditions, ApplyThenDisconnect, RejectWrites;
         public HttpStatusCode? Failure;
         /// <summary>When it returns true, a journal write is lost before it applies, as a dropped connection would.</summary>
         public Func<bool>? DropWrite;
@@ -86,6 +86,7 @@ public sealed class CloudHandoffTests : IDisposable
                 using var patch = JsonDocument.Parse(body);
                 if (patch.RootElement.TryGetProperty("description", out var description))
                 {
+                    if (RejectWrites) return Reply(HttpStatusCode.PreconditionFailed);
                     if (DropWrite?.Invoke() == true) throw new HttpRequestException("Synthetic dropped write");
                     Value = Json.Deserialize<CloudJournal>(Encoding.UTF8.GetBytes(description.GetString()!), "synthetic");
                     Writes++;
@@ -620,6 +621,37 @@ public sealed class CloudHandoffTests : IDisposable
     }
 
     [Fact]
+    public void FutureCloudRequestsDoNotPromptAndArePrunedByRequestUpdates()
+    {
+        using var drive = new Drive();
+        var store = Seed(drive, Config("first"), Snapshot("seed", "one"));
+        var future = new HandoffRequest(1, First, new string('3', 32), Now.AddDays(2));
+        var recentWithSkew = new HandoffRequest(1, Second, new string('4', 32), Now.AddMinutes(2));
+
+        store.WriteRequest(future);
+        Assert.Empty(store.PendingRequests(Now));
+        Assert.Equal(future, Assert.Single(store.StaleRequests(Now)));
+        store.WriteRequest(recentWithSkew);
+        Assert.Equal(recentWithSkew, Assert.Single(drive.Value!.Requests));
+        Assert.Equal(recentWithSkew, Assert.Single(store.PendingRequests(Now)));
+
+        store.WriteRequest(future);
+        Assert.True(store.RemoveStaleRequest(future));
+        Assert.Equal(recentWithSkew, Assert.Single(drive.Value!.Requests));
+        Assert.Empty(store.PendingRequests(future.RequestedAt));
+
+        store.WriteRequest(future);
+        var newer = future with { RequestId = new string('5', 32), RequestedAt = Now };
+        store.WriteRequest(newer);
+        Assert.False(store.RemoveStaleRequest(future));
+        Assert.Contains(newer, store.PendingRequests(Now));
+
+        store.WriteRequest(recentWithSkew with { RequestedAt = future.RequestedAt });
+        Assert.True(store.WithdrawRequest(newer));
+        Assert.Empty(drive.Value!.Requests);
+    }
+
+    [Fact]
     public async Task SimultaneousStartsGrantExactlyOnePcAndPreserveTheLosersRequest()
     {
         using var drive = new Drive();
@@ -873,6 +905,83 @@ public sealed class CloudHandoffTests : IDisposable
         public AssetReport OnServer(LibrarySnapshot snapshot) => Report(snapshot);
         public bool ExistsOnServer(string capturePath) => true;
         public void RequireServer() { }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PlainLaunchWaitsWhenCloudSwitchRequestsCannotBeWritten(bool busy)
+    {
+        using var drive = new Drive();
+        var config = Config("first");
+        var store = Seed(drive, config, Snapshot("seed"));
+        string session = new('1', 32);
+        store.Update(j => Ownership.Acquire(j, First, session, Now), TimeSpan.Zero);
+        var active = store.Update(j => Ownership.MarkActive(j, First, session, Now), TimeSpan.Zero);
+        if (busy) drive.RejectWrites = true;
+        else drive.DropWrite = () => true;
+        var clock = new Clock();
+        var mount = new LaunchMount();
+        var medal = new LaunchMedal();
+        var coordinator = new SessionCoordinator(store,
+            new SqliteLocalLibrary(fixture.CreateLibrary("second-db"), MedalFixture.AccountId, fixture.PathFor("second", "backups"), clock),
+            mount, medal, new NoAssets(), clock, new(Second, config.Capture, Versions, TimeSpan.Zero, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(1)));
+
+        var outcome = coordinator.Launch();
+
+        Assert.Equal(LaunchStatus.Waiting, outcome.Status);
+        Assert.Equal(busy ? LaunchWait.OwnedElsewhere : LaunchWait.ServerUnreachable, outcome.Wait);
+        Assert.Contains(busy ? "could not send the switch request" : "Waiting for storage", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal(active, drive.Value!.Journal);
+        Assert.Empty(drive.Value.Requests);
+        Assert.Equal(0, medal.Launches);
+        Assert.Empty(mount.Starts);
+    }
+
+    [Fact]
+    public void RevokedDriveTokenNamesTheActionRequiredAtLaunchAndFinish()
+    {
+        using var drive = new Drive();
+        var config = Config("first");
+        var seeded = Seed(drive, config, Snapshot("seed"));
+        string session = new('1', 32);
+        seeded.Update(j => Ownership.Acquire(j, First, session, Now), TimeSpan.Zero);
+        var active = seeded.Update(j => Ownership.MarkActive(j, First, session, Now), TimeSpan.Zero);
+        var token = new DriveAccessToken("synthetic", config.Remote, config.Replication!.RcloneConfigPath!, execute: arguments =>
+        {
+            if (arguments[0] == "about") throw new RcloneFailedException("synthetic invalid_grant", 1, hints: RcloneHints.SignIn, command: "about");
+            return """{"gdrive":{"type":"drive","token":"{}"}}""";
+        });
+        bool revoked = false;
+        var api = new GoogleDriveJournal(FileId, () => revoked ? token.Get() : "synthetic-token", new HttpClient(drive, disposeHandler: false));
+        var backend = new CloudCoordination(config, api, Run);
+        var store = CoordinationStore.OpenCloud(config, backend);
+        var state = HistoryState(config);
+        var status = new DesktopStatusSource(() => state, () => false, _ => backend);
+        var clock = new Clock();
+        var mount = new LaunchMount();
+        var medal = new LaunchMedal();
+        var coordinator = new SessionCoordinator(store,
+            new SqliteLocalLibrary(fixture.CreateLibrary("local-db"), MedalFixture.AccountId, fixture.PathFor("first", "backups"), clock),
+            mount, medal, new NoAssets(), clock, new(First, config.Capture, Versions, TimeSpan.Zero, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(1)));
+        revoked = true;
+
+        var launched = coordinator.Launch();
+        var finished = coordinator.Finish(session);
+        var desktop = status.Read();
+
+        Assert.True(store.IsReachable());
+        Assert.Equal(LaunchStatus.Blocked, launched.Status);
+        Assert.False(launched.StorageOffline);
+        Assert.Equal(FinishStatus.Pending, finished.Status);
+        Assert.Equal(PendingCause.NeedsAction, finished.Cause);
+        Assert.Contains("rclone config reconnect \"gdrive:\"", launched.Message, StringComparison.Ordinal);
+        Assert.Contains("rclone config reconnect \"gdrive:\"", finished.Message, StringComparison.Ordinal);
+        Assert.Equal(SessionPhase.RecoveryNeeded, desktop.Phase);
+        Assert.Contains("rclone config reconnect \"gdrive:\"", desktop.NextAction, StringComparison.Ordinal);
+        Assert.Equal(active, drive.Value!.Journal);
+        Assert.Equal(0, medal.Launches);
+        Assert.Empty(mount.Starts);
     }
 
     /// <summary>A cloud launch on the first PC; <paramref name="beforeActive"/> runs after storage is prepared, just before the session is marked Active.</summary>

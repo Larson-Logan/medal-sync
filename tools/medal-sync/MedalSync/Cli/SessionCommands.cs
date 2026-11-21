@@ -110,7 +110,7 @@ internal static class SessionCommands
             store = CoordinationStore.Open(config);
             journal = store.ReadJournal();
         }
-        catch (IOException)
+        catch (IOException ex) when (ex is not StorageActionRequiredException)
         {
             const string waiting = "Waiting for storage: the shared library's server cannot be reached right now. Clips and any session stay on this PC.";
             if (json)
@@ -345,23 +345,21 @@ internal static class SessionCommands
             context.Log.Write($"launch: the server was still unreachable after {wait.TotalSeconds:0} s");
         }
         if (shutdown.Ending) return 3;
-        if (context.Config.StorageMode != StorageMode.Cloud && !Directory.Exists(context.Config.CoordinationRoot)) return WaitForStorage(context, output, status);
+        if (context.Config.StorageMode != StorageMode.Cloud && !Directory.Exists(context.Config.CoordinationRoot))
+            return ReportJournalFailure(context, output, status, "launch");
         GuardStartup(context);
-        SessionCoordinator coordinator;
         CoordinationStore store;
-        RcloneClipMount mount;
         OwnershipRecord journal;
         try
         {
-            (coordinator, store, mount) = Coordinator(context, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report,
-                StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null, askOwnerToSwitch: !quiet);
-            journal = store.ReadJournal();
+            (store, journal) = ReadSessionJournal(context.Config, shutdown.RequireTime);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // The share dropped between the check and the journal read.
-            return WaitForStorage(context, output, status);
+            return ReportJournalFailure(context, output, status, "launch", ex);
         }
+        var (coordinator, mount) = Coordinator(context, store, acceptChanges: false, replaceLocal, reviewLibraryChanges, shutdown, link, status.Report,
+            StorageCheck.HasRemotes(context.Config) ? () => CheckStorageBeforeLaunch(context, shutdown) : null, askOwnerToSwitch: !quiet);
         if (journal.Owner?.DeviceId == context.Device.DeviceId) mount.Attach(journal.SessionId!);
         var outcome = LaunchOrWait(context, output, coordinator, handoff, shutdown, offerHandoffWait);
         Report(context, output, $"launch: {outcome.Status}: {outcome.Message}");
@@ -530,13 +528,19 @@ internal static class SessionCommands
         using var retry = ReplicaRetryInterlock.Launch();
         using var sessionEnd = new WindowsSessionEnd(shutdown, context.Log.Write);
         using var status = new DesktopStatusPublisher(context.State, context.Config.LibraryId, context.Config.AccountId, context.Device.DeviceId);
-        var (coordinator, store, mount) = Coordinator(context, accept, shutdown: shutdown, progress: status.Report);
-        var journal = store.ReadJournal();
+        CoordinationStore store;
+        OwnershipRecord journal;
+        try { (store, journal) = ReadSessionJournal(context.Config, shutdown.RequireTime); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ReportJournalFailure(context, output, status, "finish", ex);
+        }
         if (journal.Owner?.DeviceId != context.Device.DeviceId)
         {
             output.WriteLine("This PC has no unfinished session.");
             return 0;
         }
+        var (coordinator, mount) = Coordinator(context, store, accept, shutdown: shutdown, progress: status.Report);
         mount.Attach(journal.SessionId!);
         var finished = coordinator.Finish(journal.SessionId!);
         Report(context, output, $"finish: {finished.Status}: {finished.Message}");
@@ -668,12 +672,11 @@ internal static class SessionCommands
         return new SpacePressureMonitor(folders, warning, critical, StorageVolume.Describe, bitrate);
     }
 
-    private static (SessionCoordinator, CoordinationStore, RcloneClipMount) Coordinator(Context context, bool acceptChanges,
+    private static (SessionCoordinator, RcloneClipMount) Coordinator(Context context, CoordinationStore store, bool acceptChanges,
         bool replaceLocal = false, Func<LibraryChangeReview, bool>? reviewLibraryChanges = null, SessionShutdown? shutdown = null,
         string? launchLink = null, Action<SessionProgress>? progress = null, Func<LaunchPreflight>? preflight = null, bool askOwnerToSwitch = true)
     {
         var clock = new SystemClock();
-        var store = CoordinationStore.Open(context.Config, () => shutdown?.RequireTime());
         double bitrate;
         using (var connection = LibraryDatabase.OpenReadOnly(context.Install.DatabasePath))
         {
@@ -707,7 +710,7 @@ internal static class SessionCommands
                 if (new MedalProcess(context.Install).IsRunning())
                     throw new IOException("Medal reopened during replication. Quit normally, then retry finish on this PC.");
             }, progress: progress, primary: checker), new MedalCompatibilityGuard(context.Install), progress, SpaceMonitor(context.Config, bitrate), preflight,
-            idle.IsIdle, idleMedia.Sync, guard => PrimaryStorage.Checker(context.Config, context.State, guard)), store, mount);
+            idle.IsIdle, idleMedia.Sync, guard => PrimaryStorage.Checker(context.Config, context.State, guard)), mount);
     }
 
     /// <summary>
@@ -761,13 +764,29 @@ internal static class SessionCommands
         return directory;
     }
 
-    /// <summary>An outage is a wait, never an error: nothing was acquired or changed.</summary>
-    private static int WaitForStorage(Context context, TextWriter output, DesktopStatusPublisher status)
+    internal static (CoordinationStore Store, OwnershipRecord Journal) ReadSessionJournal(MedalSyncConfig config, Action? requireTime = null)
     {
-        status.Report(new SessionProgress(SessionPhase.WaitingForStorage,
-            "Waiting for storage: the shared library's server cannot be reached. Open Medal again once it is back.", IsOutcome: true));
-        Report(context, output, "launch: Waiting: the shared library's server cannot be reached right now; nothing was changed.");
-        return 3;
+        if (config.StorageMode != StorageMode.Cloud && !Directory.Exists(config.CoordinationRoot))
+            throw new StorageOfflineException("The shared library's server cannot be reached right now.");
+        var store = CoordinationStore.Open(config, requireTime);
+        return (store, store.ReadJournal());
+    }
+
+    private static int ReportJournalFailure(Context context, TextWriter output, DesktopStatusPublisher status, string command, Exception? cause = null)
+    {
+        var (phase, message, code) = DescribeJournalFailure(command, cause);
+        status.Report(new SessionProgress(phase, message, IsOutcome: true));
+        Report(context, output, $"{command}: {(code == 3 ? "Waiting" : "Blocked")}: {message}");
+        return code;
+    }
+
+    internal static (SessionPhase Phase, string Message, int Code) DescribeJournalFailure(string command, Exception? cause)
+    {
+        if (cause is StorageActionRequiredException action)
+            return (SessionPhase.RecoveryNeeded, $"Action needed before {command}: {action.Message}", 1);
+        string retry = command == "finish" ? "Run finish again once storage is back." : "Open Medal again once storage is back.";
+        string detail = cause is StaleCoordinationReadException stale ? stale.Message : "The shared library's server cannot be reached right now.";
+        return (SessionPhase.WaitingForStorage, $"Waiting for storage: {detail} {retry}", 3);
     }
 
     private static void Report(Context context, TextWriter output, string message)

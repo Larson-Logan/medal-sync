@@ -100,7 +100,7 @@ internal sealed partial class SessionCoordinator
         $"Stopped waiting after {HandoffWaitUpdate.Duration(wait.Timeout)}: the other PC handed off the library just as the wait ended, "
         + "so Medal was not started. Open Medal again to start it.");
 
-    private static LaunchOutcome WaitTimedOut(HandoffWait wait, HandoffWaitUpdate update)
+    private LaunchOutcome WaitTimedOut(HandoffWait wait, HandoffWaitUpdate update)
     {
         string after = $"Stopped waiting after {HandoffWaitUpdate.Duration(wait.Timeout)}";
         if (!update.Fresh)
@@ -110,9 +110,10 @@ internal sealed partial class SessionCoordinator
         }
         string where = update.Owner?.DisplayName ?? "another PC";
         string what = update.State is { } state ? $" ({Ownership.Describe(state)})" : "";
+        string request = _waitRequestSent ? ". Medal Sync will try to withdraw this PC's switch request" : ", and this PC could not confirm a switch request";
         return new LaunchOutcome(LaunchStatus.Waiting,
-            $"{after}: {where} still has the library{what}. Medal was not started and this PC's switch request was withdrawn; "
-            + $"quit Medal on {where}, then open Medal again here.");
+            $"{after}: {where} still has the library{what}. Medal was not started{request}. "
+            + $"Quit Medal on {where}, then open Medal again here.");
     }
 
     /// <summary>Sleeps in short slices so cancellation and shutdown stop the wait promptly. False when stopped.</summary>
@@ -163,6 +164,7 @@ internal sealed partial class SessionCoordinator
         if (shutdown?.SuppressUi == true) return new LaunchOutcome(LaunchStatus.Waiting, ShutdownMessage);
         OwnershipRecord journal;
         try { journal = store.ReadJournal(); }
+        catch (StorageActionRequiredException ex) { return StorageActionLaunch(ex); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return StorageOfflineLaunch(ex);
@@ -197,7 +199,9 @@ internal sealed partial class SessionCoordinator
         {
             var previous = ResolveOwnSession(journal);
             if (previous is not null) return previous;
-            journal = store.ReadJournal();
+            try { journal = store.ReadJournal(); }
+            catch (StorageActionRequiredException ex) { return StorageActionLaunch(ex); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return StorageOfflineLaunch(ex); }
         }
         if (journal.State != OwnershipState.Clean)
         {
@@ -206,9 +210,20 @@ internal sealed partial class SessionCoordinator
             {
                 return new LaunchOutcome(LaunchStatus.Blocked, $"Medal's library is waiting for recovery on {where}: {journal.Reason}");
             }
-            bool asked = _waitRequest is not null || options.AskOwnerToSwitch;
-            if (asked && !SendRequest()) return StorageOfflineLaunch();
-            return new LaunchOutcome(LaunchStatus.Waiting, OwnedElsewhereMessage(journal.State, where, asked, Ownership.QuietSince(journal, clock.Now)),
+            bool shouldAsk = _waitRequest is not null || options.AskOwnerToSwitch;
+            bool asked;
+            try { asked = shouldAsk && SendRequest(); }
+            catch (StorageActionRequiredException ex) { return StorageActionLaunch(ex); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return new LaunchOutcome(LaunchStatus.Waiting,
+                    "Waiting for storage: this PC could not confirm the switch request. Open Medal again once storage is back.",
+                    StorageOffline: true, Wait: LaunchWait.ServerUnreachable);
+            }
+            string message = shouldAsk && !asked && !Ownership.IsFinishing(journal.State)
+                ? $"Medal is {Ownership.Describe(journal.State)} on {where}. This PC could not send the switch request because storage is busy. Try again shortly."
+                : OwnedElsewhereMessage(journal.State, where, asked, Ownership.QuietSince(journal, clock.Now));
+            return new LaunchOutcome(LaunchStatus.Waiting, message,
                 Wait: LaunchWait.OwnedElsewhere, Journal: journal);
         }
         return StartSession();
@@ -239,35 +254,25 @@ internal sealed partial class SessionCoordinator
             : "Waiting for storage: the shared library's server cannot be reached right now. Nothing was changed; open Medal again once it is back.",
         StorageOffline: true, Wait: LaunchWait.ServerUnreachable);
 
+    private static LaunchOutcome StorageActionLaunch(StorageActionRequiredException cause) => new(LaunchStatus.Blocked,
+        $"Action needed before opening Medal: {cause.Message}");
+
     /// <summary>
-    /// A plain launch sends a new request every time. An explicit wait sends its one request once, and an outage
-    /// while sending it is only a reason to keep waiting. False when that request could not be written.
+    /// A plain launch sends a new request every time. An explicit wait reuses its request once it has been sent.
+    /// A busy writer leaves the request unsent, so an explicit wait tries again on the next check.
     /// </summary>
     private bool SendRequest()
     {
-        if (_waitRequest is null)
-        {
-            var request = new HandoffRequest(HandoffRequest.CurrentFormat, Me, NewId(), clock.Now);
-            store.WriteRequest(request);
-            _sentRequest = request;
-            return true;
-        }
         if (_waitRequestSent) return true;
+        var request = _waitRequest ?? new HandoffRequest(HandoffRequest.CurrentFormat, Me, NewId(), clock.Now);
         try
         {
-            store.WriteRequest(_waitRequest);
-            _waitRequestSent = true;
-            return true;
+            store.WriteRequest(request);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (StorageBusyException)
-        {
-            // Other PCs are updating cloud requests at the same moment; the journal was read, so retry on the next check.
-            return true;
-        }
+        catch (StorageBusyException) { return false; }
+        if (_waitRequest is null) _sentRequest = request;
+        else _waitRequestSent = true;
+        return true;
     }
 
     /// <summary>Clears this PC's own unfinished session before a new one starts.</summary>
@@ -313,6 +318,7 @@ internal sealed partial class SessionCoordinator
             // Another PC acquired between the Clean read and this update; a waiting PC keeps waiting.
             return new LaunchOutcome(LaunchStatus.Waiting, ex.Message, Wait: LaunchWait.OwnedElsewhere);
         }
+        catch (StorageActionRequiredException ex) { return StorageActionLaunch(ex); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return StorageOfflineLaunch(ex);

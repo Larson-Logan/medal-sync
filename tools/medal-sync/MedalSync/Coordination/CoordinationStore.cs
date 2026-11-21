@@ -17,6 +17,10 @@ internal sealed record HandoffRequest(int Format, DeviceIdentity Device, string 
 
     /// <summary>After this, a request no longer prompts the owner: the PC that asked stopped waiting long ago, or no longer exists.</summary>
     public static readonly TimeSpan Lifetime = TimeSpan.FromHours(6);
+
+    private static readonly TimeSpan CloudClockSkew = TimeSpan.FromMinutes(5);
+
+    public bool IsFreshInCloud(DateTimeOffset now) => now - RequestedAt < Lifetime && RequestedAt - now <= CloudClockSkew;
 }
 
 /// <summary>
@@ -85,12 +89,13 @@ internal sealed partial class CoordinationStore
 
     public static bool IsValidId(string? value) => value is not null && IdPattern().IsMatch(value);
 
-    /// <summary>False when the journal cannot be seen, which distinguishes an outage from a refusal.</summary>
+    /// <summary>False for an outage. A provider that refuses access still counts as reachable.</summary>
     public bool IsReachable()
     {
         if (cloud is not null)
         {
             try { _ = cloud.Read(); return true; }
+            catch (StorageActionRequiredException) { return true; }
             catch (IOException) { return false; }
         }
         try { return File.Exists(JournalPath); }
@@ -320,11 +325,12 @@ internal sealed partial class CoordinationStore
     public IReadOnlyList<HandoffRequest> StaleRequests(DateTimeOffset now) => ReadRequests().Where(r => !IsFresh(r, now)).Select(r => r.Request).ToList();
 
     /// <summary>
-    /// Both the requesting PC's clock and the share's file time must say the request is recent, so a PC whose
-    /// clock runs ahead cannot keep an old request alive. A time in the future counts as recent.
+    /// Share requests use the file time as well as the requesting PC's clock. Drive requests use the requesting
+    /// PC's clock with a bounded allowance for skew, because a journal update can contain several requests.
     /// </summary>
-    private static bool IsFresh((HandoffRequest Request, DateTimeOffset WrittenAt) stored, DateTimeOffset now) =>
-        now - stored.Request.RequestedAt < HandoffRequest.Lifetime && now - stored.WrittenAt < HandoffRequest.Lifetime;
+    private bool IsFresh((HandoffRequest Request, DateTimeOffset WrittenAt) stored, DateTimeOffset now) => cloud is not null
+        ? stored.Request.IsFreshInCloud(now)
+        : now - stored.Request.RequestedAt < HandoffRequest.Lifetime && now - stored.WrittenAt < HandoffRequest.Lifetime;
 
     private List<(HandoffRequest Request, DateTimeOffset WrittenAt)> ReadRequests()
     {
@@ -360,9 +366,9 @@ internal sealed partial class CoordinationStore
     /// </summary>
     public bool RemoveStaleRequest(HandoffRequest stale)
     {
-        // Cloud requests are pruned under CAS whenever requests change; never remove a newer request by name.
-        if (cloud is not null) return false;
-        return RemoveExactRequest(stale);
+        if (cloud is null) return RemoveExactRequest(stale);
+        try { return cloud.Withdraw(stale); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MedalSyncException) { return false; }
     }
 
     /// <summary>
