@@ -213,6 +213,26 @@ can use memory instead of disk. This uses more RAM; see
 [Medal's buffer guide](https://support.medal.tv/support/solutions/articles/48001165759-what-is-the-recording-buffer-).
 Medal Sync does not change that preference.
 
+Without a persistent local copy, you can instead hold the buffer on this PC:
+set [`mount.recordingBufferHoldSeconds`](configuration.md#mount-the-clip-drive)
+to, for example, `600`. While Medal records a game, the clip drive then waits
+that long before uploading a closed file. Every five seconds Medal Sync releases
+each queued file outside `Temp\RecordingBuffer` once it has waited the usual
+`mount.writeBackSeconds`, so saved clips and overlays upload as quickly as
+before. Medal deletes replay segments long before the hold ends, and a deleted
+file leaves rclone's upload queue, so it never reaches the server. Pick a hold
+longer than Medal's replay buffer.
+
+When Medal is open but not recording, and on every finish pass before uploads
+are drained, everything is released, buffer included, so draining and
+verification are exactly as without the hold. If a release cannot be made, the
+supervisor shows a notice once and the held files upload when the hold ends; if
+Medal Sync itself stops while the drive keeps running, saved clips stay in the
+SSD cache until then. The hold is ignored with a persistent local copy, in local
+mode and with a cloud primary, where buffer segments never reach primary
+storage anyway. CI cannot measure Medal's real segment lifetime or how long
+clips wait under game load.
+
 A separate mount just for the buffer folder is not supported. rclone's
 [combine](https://rclone.org/combine/) builds a synthetic directory layout and
 [union](https://rclone.org/union/) routes writes using upstream policies.

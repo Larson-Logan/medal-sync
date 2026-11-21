@@ -72,6 +72,7 @@ The defaults suit most PCs.
 | `controlPort` | `53684` | 1024 to 65535 | Local port for rclone's control API, on 127.0.0.1 only. `config create --spike` uses `53683`. Avoid `53682` (browser sign-in) and `5572` (rclone's default control API). |
 | `bandwidthLimitMiB` | `null` (2 MiB/s) | 1 to 10000 | Clip-drive transfer limit in MiB/s while Medal runs. See [limit upload speed while recording](storage.md#limit-upload-speed-while-recording). |
 | `finishBandwidthLimitMiB` | `null` (unlimited) | 1 to 10000 | Clip-drive transfer limit in MiB/s after Medal exits, while uploads finish. |
+| `recordingBufferHoldSeconds` | `null` (off) | 60 to 3600, above `writeBackSeconds` | Server mode without a persistent local copy only: while a game records, Medal's replay-buffer segments wait this long on this PC instead of uploading, and every other file still uploads after `writeBackSeconds`. See [keep replay-buffer traffic off the server](storage.md#keep-replay-buffer-traffic-off-the-server). Omitted unless set; earlier versions refuse a file with this field. |
 
 Older setups may use `53682`. rclone's [browser sign-in server](https://github.com/rclone/rclone/blob/v1.75.2/lib/oauthutil/oauthutil.go)
 needs that port for `rclone config` and `rclone config reconnect`, so a clip drive
