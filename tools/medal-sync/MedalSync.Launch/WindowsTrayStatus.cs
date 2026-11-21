@@ -38,6 +38,12 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     private string? _finishFailure;
     private string? _exitFailure;
     private string? _actionFailure;
+    private static readonly TimeSpan PrefetchInterval = TimeSpan.FromMinutes(10);
+    private readonly Func<bool> _prefetchDue;
+    private readonly Func<Process?> _startPrefetch;
+    private readonly Platform.WindowsIdle _idle = new();
+    private Process? _prefetch;
+    private DateTime _nextPrefetch = DateTime.UtcNow + TimeSpan.FromMinutes(1);
 
     public static int Run(bool show)
     {
@@ -92,8 +98,11 @@ internal sealed class WindowsTrayStatus : ApplicationContext
 
     internal WindowsTrayStatus(bool show, Func<DesktopStatus>? readStatus = null, string eventName = OpenEventName,
         Func<Task<FinishCommandResult>>? runFinish = null, Func<bool>? operationRunning = null,
-        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null, Action<ProcessStartInfo>? startProcess = null)
+        Func<Task<CloudRetryCommandResult>>? runCloudRetry = null, Action<ProcessStartInfo>? startProcess = null,
+        Func<bool>? prefetchDue = null, Func<Process?>? startPrefetch = null)
     {
+        _prefetchDue = prefetchDue ?? (() => PrefetchEnabled() && _idle.IsIdle());
+        _startPrefetch = startPrefetch ?? StartPrefetch;
         _readStatus = readStatus ?? SessionCommands.ReadDesktopStatus;
         _runFinish = runFinish ?? RunFinish;
         _runCloudRetry = runCloudRetry ?? RunCloudRetry;
@@ -191,12 +200,64 @@ internal sealed class WindowsTrayStatus : ApplicationContext
         var status = _last.At(DateTimeOffset.UtcNow);
         if (status.Phase is SessionPhase.Ready or SessionPhase.Active or SessionPhase.Waiting) _finishFailure = null;
         if (status.Phase == SessionPhase.Ready && !_finishing && !_retryingCloud) _exitFailure = null;
+        MaybePrefetch(status);
         _retry.Enabled = !_finishing && !_retryingCloud && status.CanRetry;
         _retryCloud.Enabled = !_finishing && !_retryingCloud && status.Phase == SessionPhase.Ready && status.CanRetryCloudCopies;
         _icon.Text = "Medal Sync: " + status.Title;
         var icon = _icons.For(status.Phase, status.Recording);
         if (!ReferenceEquals(_icon.Icon, icon)) _icon.Icon = icon;
         RenderStatus(status);
+    }
+
+    /// <summary>
+    /// Every ten minutes while this PC is idle and Ready, or another PC holds the library, start the background
+    /// prefetch. It stops by itself on input, Medal starting, a launch, shutdown or low space; nothing else waits on it.
+    /// </summary>
+    private void MaybePrefetch(DesktopStatus status)
+    {
+        if (_prefetch is { } running)
+        {
+            bool exited;
+            try { exited = running.HasExited; }
+            catch (InvalidOperationException) { exited = true; }
+            if (!exited) return;
+            running.Dispose();
+            _prefetch = null;
+        }
+        var now = DateTime.UtcNow;
+        if (_ending || _finishing || _retryingCloud || now < _nextPrefetch || status.Phase is not (SessionPhase.Ready or SessionPhase.Waiting)) return;
+        _nextPrefetch = now + PrefetchInterval;
+        try
+        {
+            if (!_prefetchDue()) return;
+            _prefetch = _startPrefetch();
+        }
+        catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException
+            or InvalidDataException or MedalSyncException) { /* Advisory: launch downloads what it needs. */ }
+    }
+
+    private static bool PrefetchEnabled() => Platform.MediaPrefetch.Enabled(Config.MedalSyncConfig.Load(LocalState.ForCurrentUser().ConfigPath));
+
+    private static Process? StartPrefetch()
+    {
+        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "medal-sync.exe"))
+            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = false, RedirectStandardError = false };
+        start.ArgumentList.Add("prefetch");
+        start.ArgumentList.Add("--apply");
+        var process = Process.Start(start);
+        try { if (process is not null) process.PriorityClass = ProcessPriorityClass.Idle; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* Its downloads already run at low priority. */ }
+        return process;
+    }
+
+    /// <summary>Exit and shutdown end a running prefetch; it keeps nothing partial in the local copy.</summary>
+    private void StopPrefetch()
+    {
+        if (_prefetch is not { } running) return;
+        try { if (!running.HasExited) running.Kill(entireProcessTree: true); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* Already gone. */ }
+        running.Dispose();
+        _prefetch = null;
     }
 
     private void RenderStatus(DesktopStatus status)
@@ -369,6 +430,7 @@ internal sealed class WindowsTrayStatus : ApplicationContext
     protected override void ExitThreadCore()
     {
         _ending = true;
+        StopPrefetch();
         _timer.Stop();
         _icon.Visible = false;
         _panel.Close();

@@ -18,6 +18,13 @@ internal enum CredentialCheckPolicy { Warn, Refuse }
 internal sealed record ReplicationConfig(string? LocalCopyRoot, string? RcloneConfigPath, IReadOnlyList<ReplicaTarget> Targets)
 {
     public int TimeoutMinutes { get; init; } = 240;
+
+    /// <summary>
+    /// Whether an idle PC that does not own the library downloads clips another PC published into its persistent local
+    /// copy, so its next launch starts sooner. Absent means on whenever <see cref="LocalCopyRoot"/> is set.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? PrefetchWhileIdle { get; init; }
     public int? BandwidthLimitMiB { get; init; }
     public ReplicaConflictPolicy ConflictPolicy { get; init; } = ReplicaConflictPolicy.Stop;
 

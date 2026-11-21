@@ -64,6 +64,8 @@ internal static class CommandRunner
           storage cloud-id --remote NAME:FOLDER --rclone-config FILE [--rclone-path FILE]
                                                  Allocate a Google Drive journal ID for a new cloud library; creates no file
           replicate retry [--target NAME] [--apply]  Preview/retry pending optional cloud copies while Ready
+          prefetch [--apply]                     Preview/download clips another PC published into this PC's
+                                                 persistent local copy while idle; never takes ownership
           replica verify [--target NAME] [--apply]  Preview/read back cloud copies while Ready; never copies or deletes
           replica prune --target NAME --out FILE [--grace-days N] [--history-older-than D]
                                                  Review unreferenced files at an optional cloud copy
@@ -161,6 +163,7 @@ internal static class CommandRunner
             "storage check" => SessionCommands.CheckStorage(args, output),
             "storage cloud-id" => SessionCommands.CloudId(args, output),
             "replicate retry" => ReplicationCommands.Retry(args, output),
+            "prefetch" => PrefetchCommands.Run(args, output),
             "replica verify" => ReplicaCommands.Verify(args, output),
             "replica history" => ReplicaCommands.History(args, output),
             "replica prune" => ReplicaCommands.Prune(args, output),
