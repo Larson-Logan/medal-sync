@@ -10,7 +10,7 @@ internal sealed record ReplicaRetryPlan(long Generation, long Revision, string S
 
 /// <summary>A generation-bound background copy. Reads ownership but never acquires, changes or releases it.</summary>
 internal sealed class ReadyReplicaRetry(MedalSyncConfig config, LocalState state, CoordinationStore store,
-    Action requireIdle, Action<IReadOnlyList<string>>? execute = null, Action<SessionProgress>? progress = null)
+    Action requireIdle, Action<IReadOnlyList<string>>? execute = null, Action<SessionProgress>? progress = null, IKeepAwake? keepAwake = null)
 {
     public ReplicaRetryPlan Plan(string? targetName = null)
     {
@@ -39,6 +39,8 @@ internal sealed class ReadyReplicaRetry(MedalSyncConfig config, LocalState state
         if (snapshot.Digest() != plan.SnapshotDigest) throw new InvalidDataException("The committed snapshot differs from the retry plan.");
         var originalPending = StorageReplication.Pending(state, config.LibraryId);
         var replication = new StorageReplication(config, state, Guard, execute, progress);
+        // Only while something is actually transferring; released on success, cancellation and failure alike.
+        using var awake = KeepAwakeHold.Take(keepAwake);
         try { return replication.RetryPending(snapshot, targetName); }
         catch
         {
