@@ -85,6 +85,9 @@ internal static class Program
         Until(view, () => status.Text.Contains("Synthetic other PC", StringComparison.Ordinal));
         Check(prefetches == 1, "An idle PC starts one background prefetch per interval while another PC holds the library");
         prefetchDue = false;
+        // Back to this PC's own session: Waiting above told the notifier that nothing of this PC's is finishing.
+        lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
+        Until(view, () => status.Text.Contains("Next action: Synthetic recording\r\n", StringComparison.Ordinal));
         Check(!ReferenceEquals(icons.For(SessionPhase.Active, recording: false), icons.For(SessionPhase.Active)), "Medal open without a game has its own dot");
         CheckIcons(icons, panel);
         Check(status.ReadOnly && status.TabStop && status.AccessibleName!.Contains("next action", StringComparison.Ordinal), "Status supports keyboard and accessibility APIs");
