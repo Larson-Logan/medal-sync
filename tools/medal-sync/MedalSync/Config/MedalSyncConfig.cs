@@ -93,6 +93,13 @@ internal sealed record MedalSyncConfig(
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? DeviceLabel { get; init; }
 
+    /// <summary>
+    /// Whether this PC asks Windows not to sleep on its idle timer while a finish, idle sync or cloud retry is
+    /// transferring and verifying. Absent means on; left out of the file unless set, so older versions still load it.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? KeepAwakeWhileFinishing { get; init; }
+
     public string MountRemote => Replication?.LocalCopyRoot ?? Remote;
 
     /// <summary>

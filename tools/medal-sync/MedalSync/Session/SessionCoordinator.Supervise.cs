@@ -9,8 +9,25 @@ namespace MedalSync.Session;
 /// <summary>Supervision while Medal runs, then the finish it hands over to.</summary>
 internal sealed partial class SessionCoordinator
 {
+    // Held from Medal's exit while uploads are still running between finish attempts, so Windows' idle timer cannot put
+    // the PC to sleep in the short pause between them. Released on Ready, a refusal, a retry backoff (waiting for
+    // storage, action needed, a failure), when Medal reopens and when supervision ends.
+    private IDisposable? _finishingHold;
+
+    private void Rest()
+    {
+        _finishingHold?.Dispose();
+        _finishingHold = null;
+    }
+
     /// <summary>Watches a running session until Medal exits, then finishes it.</summary>
     public FinishOutcome Supervise(string session, Action<string> notify, CancellationToken cancellation, FinishOutcome? pendingFinish = null)
+    {
+        try { return SuperviseCore(session, notify, cancellation, pendingFinish); }
+        finally { Rest(); }
+    }
+
+    private FinishOutcome SuperviseCore(string session, Action<string> notify, CancellationToken cancellation, FinishOutcome? pendingFinish)
     {
         var told = new HashSet<string>(StringComparer.Ordinal);
         int consecutiveStatusFailures = 0;
@@ -35,11 +52,13 @@ internal sealed partial class SessionCoordinator
             if (shutdown?.Ending == true) return FinishShutdown(session);
             if (!medal.IsRunning())
             {
+                _finishingHold ??= StayAwake();
                 var outcome = pendingFinish ?? Finish(session);
                 pendingFinish = null;
                 if (outcome.Status != FinishStatus.Pending) return outcome;
                 if (outcome.Cause != PendingCause.None)
                 {
+                    Rest();
                     // Bounded retries that never repeat the same notice. An outage is cheap to probe: 30 s doubling to
                     // 5 minutes. Any other failure repeats a full copy-and-verify pass, so it waits up to 10 minutes.
                     // Each attempt still verifies from scratch; backoff only changes how often one starts.
@@ -52,10 +71,12 @@ internal sealed partial class SessionCoordinator
                     continue;
                 }
                 failedAttempts = 0;
+                if (medal.IsRunning()) Rest(); // Reopened: the session carries on, nothing is finishing.
                 Once(outcome.Message);
             }
             else
             {
+                Rest();
                 if (recoveringPreviousSession)
                 {
                     // Medal can also reopen while the previous finish waits between attempts.
