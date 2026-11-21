@@ -40,10 +40,13 @@ internal static class Program
         }
         bool operationRunning = true;
         bool failStart = true;
+        var notifications = new List<DesktopNotification>();
+        var savedNotifications = new List<bool>();
         using var view = new WindowsTrayStatus(true, Read, @"Local\MedalSync.DesktopTest." + Guid.NewGuid().ToString("N"),
             () => { finishes++; return Task.FromResult(finishResult); }, () => operationRunning,
             () => { cloudRetries++; return cloudRetryTask; },
-            _ => { if (failStart) throw new System.ComponentModel.Win32Exception(); });
+            _ => { if (failStart) throw new System.ComponentModel.Win32Exception(); },
+            notifications.Add, () => true, savedNotifications.Add);
         var panel = Field<Form>(view, "_panel");
         var status = Field<TextBox>(view, "_status");
         var retry = Field<Button>(view, "_retry");
@@ -64,6 +67,8 @@ internal static class Program
             Check(ReferenceEquals(icon.Icon, icons.For(phase, recording: false)), "The tray shows the Medal Sync icon with this state's dot");
             Check(icon.Text == "Medal Sync: " + new DesktopStatus(phase, "", null).Title, "The tooltip names the state, so color is never the only cue");
         }
+        Check(notifications.Count == 1 && notifications[0].Kind == DesktopNotificationKind.Ready
+            && notifications[0].Message == DesktopNotifier.ReadyMessage, "Ready after this PC's finish notifies exactly once");
         lock (gate) current = new(SessionPhase.Active, "Synthetic recording", DateTimeOffset.UtcNow, Recording: true);
         Until(view, () => status.Text.Contains("Next action: Synthetic recording\r\n", StringComparison.Ordinal));
         Check(icon.Text == "Medal Sync: Recording" && ReferenceEquals(icon.Icon, icons.For(SessionPhase.Active)), "Only a recording session shows the red recording dot");
@@ -74,6 +79,8 @@ internal static class Program
         Check(icon.BalloonTipText.Length == 0, "Background status never shows a balloon");
         lock (gate) current = new(SessionPhase.RecoveryNeeded, "Retry after recovery", DateTimeOffset.UtcNow, CanRetry: true);
         Until(view, () => retry.Enabled);
+        Check(notifications.Count == 2 && notifications[1].Kind == DesktopNotificationKind.NeedsAction
+            && notifications[1].Message.StartsWith("Retry after recovery", StringComparison.Ordinal), "A finish that needs the user notifies with the panel's text");
         retry.PerformClick();
         Until(view, () => status.Text.Contains("Run audit and repair before retrying.", StringComparison.Ordinal) && retry.Enabled);
         Check(finishes == 1, "A blocked finish exposes its diagnostic and required recovery action");
@@ -81,11 +88,16 @@ internal static class Program
         retry.PerformClick();
         Until(view, () => !status.Text.Contains("Last finish result:", StringComparison.Ordinal));
         Check(finishes == 2, "A successful retry clears the previous refusal");
+        var notify = icon.ContextMenuStrip!.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Show &notifications");
+        notify.PerformClick();
+        Check(savedNotifications.SequenceEqual([false]), "The tray toggle saves turning notifications off");
+        int shown = notifications.Count;
         lock (gate) disconnected = true;
         Until(view, () => status.Text.StartsWith("Unknown / unreachable", StringComparison.Ordinal) && !retry.Enabled);
         Check(status.Text.Contains("Last confirmed:", StringComparison.Ordinal), "Disconnect retains the last confirmation");
         lock (gate) { disconnected = false; current = new(SessionPhase.Ready, "Synthetic handoff completed", DateTimeOffset.UtcNow); }
         Until(view, () => status.Text.StartsWith("Ready\r\n", StringComparison.Ordinal));
+        Check(notifications.Count == shown, "Turned-off notifications stay quiet while the panel still updates");
         lock (gate) current = current with { ConfirmedAt = DateTimeOffset.UtcNow.AddMinutes(-1) };
         Until(view, () => status.Text.StartsWith("Unknown / unreachable", StringComparison.Ordinal));
         int before = reads;
