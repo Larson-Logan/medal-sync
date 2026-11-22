@@ -1,3 +1,4 @@
+using System.Reflection;
 using MedalSync.Cli;
 using MedalSync.Config;
 using MedalSync.Coordination;
@@ -53,7 +54,21 @@ internal sealed class WindowsConfigurationWizard : Form
     private readonly Button _getJournalId = new() { Text = "&Get ID", AutoSize = true, AccessibleName = "Get a new cloud journal ID from the cloud storage folder" };
 
     /// <summary>Published documentation; each field's Learn more link opens its section of the wizard guide.</summary>
-    internal const string DocsUrl = "https://github.com/Larson-Logan/medal-sync/blob/main/docs/";
+    internal static readonly string DocsUrl = DocsUrlFor(typeof(WindowsConfigurationWizard).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+
+    /// <summary>
+    /// The docs from the commit this build came from (the SDK appends it to the informational version), so every
+    /// section a field links to exists and describes this version. main gains new sections only at a release.
+    /// Without a commit, a beta uses dev and a release uses main.
+    /// </summary>
+    internal static string DocsUrlFor(string? informationalVersion)
+    {
+        string[] parts = (informationalVersion ?? "").Split('+', 2);
+        string reference = parts.Length == 2 && parts[1].Length == 40 && parts[1].All(Uri.IsHexDigit) ? parts[1].ToLowerInvariant()
+            : parts[0].Contains('-', StringComparison.Ordinal) ? "dev" : "main";
+        return $"https://github.com/Larson-Logan/medal-sync/blob/{reference}/docs/";
+    }
 
     internal const string WizardGuide = "configuration.md#configuration-wizard-field-by-field";
 

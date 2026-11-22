@@ -76,6 +76,17 @@ internal static class ConfigurationWizardTests
             var links = rows.Keys.Cast<string>().Select(key => (Key: key, Link: Help(wizard, key))).ToList();
             var guides = wizard.Controls.OfType<Control>().SelectMany(Descendants).OfType<LinkLabel>().Where(l => !links.Any(r => r.Link == l)).ToList();
             check(guides.Count == 2, "The wizard links to the field guide and to choosing a storage mode");
+            const string Commit = "70aba9a700c962e7612ec2134d8b1e1d3f5ecbae";
+            check(WindowsConfigurationWizard.DocsUrlFor("1.6.0.00+" + Commit) == $"https://github.com/Larson-Logan/medal-sync/blob/{Commit}/docs/"
+                && WindowsConfigurationWizard.DocsUrlFor("1.6.0.01-beta.8+" + Commit.ToUpperInvariant()).Contains("/blob/" + Commit + "/", StringComparison.Ordinal),
+                "Guide links use the docs from the commit the build came from, whose sections exist");
+            check(WindowsConfigurationWizard.DocsUrlFor("1.6.0.01-beta.8").Contains("/blob/dev/", StringComparison.Ordinal)
+                && WindowsConfigurationWizard.DocsUrlFor("1.6.0.00").Contains("/blob/main/", StringComparison.Ordinal)
+                && WindowsConfigurationWizard.DocsUrlFor("1.6.0.00+not-a-commit").Contains("/blob/main/", StringComparison.Ordinal)
+                && WindowsConfigurationWizard.DocsUrlFor(null).Contains("/blob/main/", StringComparison.Ordinal),
+                "Without a commit, betas link to dev and releases to main");
+            check(System.Text.RegularExpressions.Regex.IsMatch(WindowsConfigurationWizard.DocsUrl, "/blob/[0-9a-f]{40}/docs/$"),
+                "This build's guide links name its commit: " + WindowsConfigurationWizard.DocsUrl);
             foreach (var link in links.Select(l => l.Link).Concat(guides))
             {
                 string url = (string)link.Tag!;
