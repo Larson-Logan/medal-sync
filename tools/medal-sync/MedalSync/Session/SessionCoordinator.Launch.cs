@@ -219,8 +219,8 @@ internal sealed partial class SessionCoordinator
         {
             var previous = ResolveOwnSession(journal);
             if (previous is not null) return previous;
-            // As with a recovery that had to retry, sign-in finishes the old session without reacquiring the library.
-            if (atSignIn)
+            // A PC that waited through this PC's interrupted shutdown gets the library; otherwise sign-in starts Medal as usual.
+            if (atSignIn && AnotherPcIsWaiting())
                 return new LaunchOutcome(LaunchStatus.RecoveredPreviousSession, "This PC recovered and released its previous session.");
             try { journal = store.ReadJournal(); }
             catch (StorageActionRequiredException ex) { return StorageActionLaunch(ex); }
@@ -251,6 +251,16 @@ internal sealed partial class SessionCoordinator
                 Wait: LaunchWait.OwnedElsewhere, Journal: journal);
         }
         return StartSession();
+    }
+
+    /// <summary>
+    /// Whether another PC asked for the library. A request this PC left itself does not count. When the requests
+    /// cannot be read, sign-in keeps the library released rather than risk taking it from a waiting PC.
+    /// </summary>
+    private bool AnotherPcIsWaiting()
+    {
+        try { return store.PendingRequests(clock.Now).Any(r => r.Device.DeviceId != Me.DeviceId); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }
     }
 
     private LaunchOutcome CheckRunningSession(OwnershipRecord journal, string? expectedSession = null)

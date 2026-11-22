@@ -36,9 +36,14 @@ Medal Sync is being submitted to the Windows Package Manager. Once the
 terminal instead of downloading the setup EXE:
 
 ```powershell
+winget install LarsonLogan.MedalSync                   # just you; winget installs WinFsp first
 winget install LarsonLogan.MedalSync --scope machine   # all users; installs WinFsp if missing
-winget install LarsonLogan.MedalSync --scope user      # just you; winget installs WinFsp first
 ```
+
+For a per-user install, leave out `--scope`. With `--scope user`, winget also
+asks for a per-user WinFsp, which does not exist, and stops before installing
+anything. Without it, winget installs WinFsp for the whole PC (Windows asks for
+administrator approval once) and then Medal Sync just for you.
 
 This runs the same setup EXE silently, so the readiness checks below still
 apply: quit Medal, wait for **Ready** and exit Medal Sync first, or setup
