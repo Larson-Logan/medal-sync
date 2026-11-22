@@ -33,12 +33,15 @@ class WingetManifestTests(unittest.TestCase):
                 return error.code, stderr.getvalue()
 
     def test_matches_the_setup_scripts_identity(self):
-        # winget matches installed apps by product code and publisher, so these
-        # must follow AppId and AppPublisher if the setup script changes them.
+        # winget matches installed apps by product code, display name and publisher,
+        # so these must follow AppId, UninstallDisplayName and AppPublisher.
         setup = (ROOT / 'installer/windows/medal-sync.iss').read_text(encoding='utf-8')
         app_id = re.search(r'^AppId=\{(\{[0-9A-F-]{36}\})$', setup, re.MULTILINE).group(1)
         self.assertEqual(f'{app_id}_is1', winget.PRODUCT_CODE)
         self.assertIn(f'AppPublisher={winget.PUBLISHER}\n', setup)
+        # Without UninstallDisplayName, Inno Setup appends the version to the name.
+        names = re.findall(r'^UninstallDisplayName=(.*)$', setup, re.MULTILINE)
+        self.assertEqual(['Medal Sync Test {#IsolatedTestId}', winget.DISPLAY_NAME], names)
         self.assertIn('OutputBaseFilename=medal-sync-{#AppVersion}-setup-win-x64\n', setup)
         self.assertIn('PrivilegesRequiredOverridesAllowed=dialog\n', setup)
 
@@ -55,6 +58,7 @@ class WingetManifestTests(unittest.TestCase):
         self.assertEqual(2, installer.count(f'InstallerUrl: {url}\n'))
         self.assertEqual(2, installer.count(f'InstallerSha256: {HASH.upper()}\n'))
         self.assertIn('Scope: machine\n  InstallerUrl', installer)
+        self.assertIn('AppsAndFeaturesEntries:\n- DisplayName: Medal Sync\n', installer)
         self.assertIn('Custom: /ALLUSERS\n', installer)
         self.assertIn('Custom: /CURRENTUSER\n', installer)
         # Only per-user setup needs WinFsp from winget; all-users setup bundles it.

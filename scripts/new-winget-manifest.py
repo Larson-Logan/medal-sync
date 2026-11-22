@@ -25,6 +25,8 @@ REPOSITORY = 'https://github.com/Larson-Logan/medal-sync'
 PRODUCT_CODE = '{168562DF-1041-441D-96D0-2244EA744E18}_is1'
 # AppPublisher in installer/windows/medal-sync.iss, as Windows shows it.
 PUBLISHER = 'Medal Sync contributors'
+# UninstallDisplayName in installer/windows/medal-sync.iss, as Installed apps shows it.
+DISPLAY_NAME = 'Medal Sync'
 # Stable release tags are vMAJOR.MINOR.PATCH.NN. Betas are never submitted.
 STABLE = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0[0-9]|[1-9][0-9]+)')
 SHA256 = re.compile(r'[0-9a-fA-F]{64}')
@@ -65,7 +67,7 @@ def manifests(version, sha256, release_date):
             f"ProductCode: '{PRODUCT_CODE}'\n"
             f'ReleaseDate: {release_date}\n'
             f'AppsAndFeaturesEntries:\n'
-            f'- DisplayName: Medal Sync\n'
+            f'- DisplayName: {DISPLAY_NAME}\n'
             f'  Publisher: {PUBLISHER}\n'
             f'  DisplayVersion: {version}\n'
             f"  ProductCode: '{PRODUCT_CODE}'\n"

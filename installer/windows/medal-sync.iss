@@ -30,9 +30,13 @@
 #ifdef IsolatedTestId
 AppId={#IsolatedTestId}
 AppName=Medal Sync Test {#IsolatedTestId}
+UninstallDisplayName=Medal Sync Test {#IsolatedTestId}
 #else
 AppId={{168562DF-1041-441D-96D0-2244EA744E18}
 AppName=Medal Sync
+; Installed apps shows the version in its own column. Without this, Inno Setup
+; names the entry "Medal Sync VERSION" and the winget manifest stops matching.
+UninstallDisplayName=Medal Sync
 #endif
 AppVersion={#AppVersion}
 AppPublisher=Medal Sync contributors

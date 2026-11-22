@@ -7,6 +7,7 @@
 - Run retention, primary and replica cleanup, and persistent-media refresh in cloud mode. A maintenance lease holds the library until the reviewed work completes (#249).
 - Migrate a server-mode or cloud library to Google Drive with its retained generations, media and device identities. The migration can resume after an interruption (#250).
 - Share a library without an SMB server using OneDrive or Dropbox. Each provider must prove it rejects stale ownership writes (#252).
+- Installed apps lists Medal Sync without the version in its name, as the winget manifest declares it. The version stays in its own column.
 
 ## 1.6.0 — 2026-11-21
 
