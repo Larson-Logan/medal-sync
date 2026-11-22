@@ -110,13 +110,15 @@ function Test-SamePath([string]$Left, [string]$Right) {
     return [IO.Path]::GetFullPath($Left).TrimEnd('\') -ieq [IO.Path]::GetFullPath($Right).TrimEnd('\')
 }
 
-function Assert-Installed($Scope, [string]$Version, [bool]$ExpectWinFsp) {
+function Assert-Installed($Scope, [string]$Version, [bool]$ExpectWinFsp, [switch]$Previous) {
     $registration = Get-Registration $Scope.Hive
     Add-Check "Installed apps entry $ProductCode exists in $($Scope.Hive)" ($null -ne $registration)
     Add-Check "no Installed apps entry in $($Scope.OtherHive)" ($null -eq (Get-Registration $Scope.OtherHive))
     if ($registration) {
         # UninstallDisplayName in medal-sync.iss; the winget manifest declares the same name.
-        Add-Check 'display name is Medal Sync' ($registration.DisplayName -ceq 'Medal Sync') $registration.DisplayName
+        # Releases up to 1.6.0.00 set none, so Inno Setup appended the version.
+        $names = if ($Previous) { @('Medal Sync', "Medal Sync $Version") } else { @('Medal Sync') }
+        Add-Check 'display name is Medal Sync' ($names -ccontains $registration.DisplayName) $registration.DisplayName
         Add-Check "display version is $Version" ($registration.DisplayVersion -eq $Version) $registration.DisplayVersion
         Add-Check "publisher is $Publisher" ($registration.Publisher -eq $Publisher) $registration.Publisher
         Add-Check 'install location is the default for the scope' (Test-SamePath $registration.InstallLocation $Scope.Directory) $registration.InstallLocation
@@ -217,7 +219,7 @@ function Test-Upgrade([string]$ScopeName) {
     $sentinel = Join-Path $scope.Directory 'user-file-kept-by-upgrade.txt'
     [void](Invoke-Step "$ScopeName-install-previous" $ScopeName {
         Install-Setup $scope $run.previousSetup "$ScopeName-install-previous"
-        Assert-Installed $scope $run.previousVersion $expectWinFsp
+        Assert-Installed $scope $run.previousVersion $expectWinFsp -Previous
         if (Test-Path -LiteralPath $scope.Directory) { Set-Content -LiteralPath $sentinel -Value 'preserve me' }
     })
     # A failed check still leaves something to upgrade; only a missing installation stops the sequence.
