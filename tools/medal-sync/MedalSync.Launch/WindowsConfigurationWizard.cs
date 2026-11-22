@@ -566,10 +566,17 @@ internal sealed class WindowsConfigurationWizard : Form
         _busy = true;
         _next.Enabled = _getJournalId.Enabled = false;
         SetHint("cloudJournal", "Getting a journal ID from " + remote + "...");
+        // The fields stay editable while the provider answers; a reservation is bound to the folder it was made in.
+        var inputs = JournalInputs();
         try
         {
             string id = await Task.Run(() => _reserveCloudJournal(rclone, remote, credentials));
             if (_ending) return;
+            if (JournalInputs() != inputs)
+            {
+                SetHint("cloudJournal", "The cloud folder, sign-in or library choice changed while getting the ID, so it was not used. Choose Get ID again.");
+                return;
+            }
             _fields["cloudJournal"].Text = id;
             SetHint("cloudJournal", "Done. On every other PC that shares this library, paste this same ID.");
         }
@@ -588,6 +595,10 @@ internal sealed class WindowsConfigurationWizard : Form
             }
         }
     }
+
+    private (StorageMode Mode, bool NewLibrary, string Remote, string Credentials, string Rclone, string Journal) JournalInputs() =>
+        (SelectedMode, CanReserveJournal, _fields["remote"].Text.Trim(), _fields["cloudConfig"].Text.Trim(),
+            _fields["rclone"].Text.Trim(), _fields["cloudJournal"].Text);
 
     /// <summary>A configuration that uses a remote whose sign-in failed here is never saved.</summary>
     private void RequireSignedIn(MedalSyncConfig candidate)

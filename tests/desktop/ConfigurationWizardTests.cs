@@ -61,10 +61,16 @@ internal static class ConfigurationWizardTests
         var state = new LocalState(root);
         var opened = new List<string>();
         var reserved = new List<(string Rclone, string Remote, string Config)>();
+        ManualResetEventSlim? hold = null;
         try
         {
             using var wizard = new WindowsConfigurationWizard(state, (_, _) => { }, () => new Guard(), openLink: opened.Add,
-                reserveCloudJournal: (rclone, remote, config) => { reserved.Add((rclone, remote, config)); return "drive-synthetic-journal"; });
+                reserveCloudJournal: (rclone, remote, config) =>
+                {
+                    hold?.Wait(TimeSpan.FromSeconds(10));
+                    lock (reserved) reserved.Add((rclone, remote, config));
+                    return "drive-synthetic-journal";
+                });
             wizard.Show();
             var rows = (System.Collections.IDictionary)wizard.GetType().GetField("_rows", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(wizard)!;
             var links = rows.Keys.Cast<string>().Select(key => (Key: key, Link: Help(wizard, key))).ToList();
@@ -98,6 +104,24 @@ internal static class ConfigurationWizardTests
             Until(() => !Field<bool>(wizard, "_busy"));
             check(reserved.Single().Remote == "gdrive:MedalSync" && reserved[0].Config == @"C:\Private\rclone.conf"
                 && fields["cloudJournal"].Text == "drive-synthetic-journal", "Get ID reserves a journal with the signed-in folder and fills the field");
+
+            fields["cloudJournal"].Text = "";
+            hold = new ManualResetEventSlim(false);
+            Click(getId);
+            fields["remote"].Text = "gdrive:OtherFolder";
+            hold.Set();
+            Until(() => !Field<bool>(wizard, "_busy"));
+            check(fields["cloudJournal"].Text.Length == 0 && Hint(wizard, "cloudJournal").Text.Contains("changed", StringComparison.Ordinal),
+                "A reservation made for a folder changed during the wait is not used");
+            fields["remote"].Text = "gdrive:MedalSync";
+            hold.Reset();
+            Click(getId);
+            Field<ComboBox>(wizard, "_identity").SelectedIndex = 1;
+            fields["cloudJournal"].Text = "pasted-existing-journal";
+            hold.Set();
+            Until(() => !Field<bool>(wizard, "_busy"));
+            check(reserved.Count == 3 && fields["cloudJournal"].Text == "pasted-existing-journal", "Switching to Join during the wait keeps the pasted journal ID");
+            hold = null;
             Field<ComboBox>(wizard, "_identity").SelectedIndex = 1;
             check(!getId.Enabled, "A PC joining a library reuses the first PC's journal ID instead of reserving another");
             wizard.Close();
