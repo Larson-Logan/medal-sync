@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Finish at Windows shutdown no longer tries to restart the clip drive, which always failed with `rclone exited with code -1073741502` (0xC0000142). A stopped drive whose cache holds only read copies (such as the library marker) now verifies and releases the library. If clips are still unsent, finish returns Pending at once, with no Windows error popup, and the next sign-in uploads them.
 - Run retention, primary and replica cleanup, and persistent-media refresh in cloud mode. A maintenance lease holds the library until the reviewed work completes (#249).
 - Migrate a server-mode or cloud library to Google Drive with its retained generations, media and device identities. The migration can resume after an interruption (#250).
 - Share a library without an SMB server using OneDrive or Dropbox. Each provider must prove it rejects stale ownership writes (#252).

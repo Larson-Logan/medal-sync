@@ -96,8 +96,10 @@ The tray shows when finished clips and library changes are synced. New edits
 or queued uploads clear that indication on the next supervisor poll. You can
 shut down Windows with Medal open. Windows asks Medal to exit, and Medal Sync
 finishes any remaining work and releases ownership when it can verify the final
-state. If Windows already stopped the clip drive and its cache is empty, finish
-skips restarting rclone.
+state. Windows usually stops the clip drive first, and rclone cannot start again
+while Windows shuts down. If the drive's cache holds only clean copies of files
+already on storage, finish verifies and releases without it. If clips are still
+unsent, they stay on this PC and finish at next sign-in.
 
 At quit or shutdown, finish reuses the background verification receipts for
 matching media. Idle checks do not consume

@@ -113,7 +113,7 @@ public sealed partial class SessionTests : IDisposable
 
         public bool EmptyStoppedCache { get; set; }
 
-        public bool StoppedCacheIsEmpty(string session) => !IsRunning && EmptyStoppedCache;
+        public bool StoppedCacheHoldsNoUploads(string session) => !IsRunning && EmptyStoppedCache;
 
         public Action? OnStart { get; set; }
         public Action<string>? OnStarted { get; set; }

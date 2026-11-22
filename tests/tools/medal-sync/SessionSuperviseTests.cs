@@ -256,18 +256,31 @@ public sealed partial class SessionTests
     }
 
     [Fact]
-    public void ShutdownResumesCacheIfWindowsAlreadyStoppedUploader()
+    public void ShutdownLeavesUnsentCacheForSignInWithoutRestartingAStoppedDrive()
     {
+        // Every real attempt to start rclone at this point exited 0xC0000142 after a Windows error popup.
         var shutdown = new SessionShutdown(_clock);
         var pc = Computer(FirstPc, "first", shutdown: shutdown);
         string session = pc.Coordinator.Launch().Session!;
         pc.Medal.Running = false;
         pc.Mount.Stop();
+        pc.Mount.OnStart = () => Assert.Fail("Windows cannot start rclone during session end.");
         shutdown.RequestEnd();
-        Assert.Equal(FinishStatus.Unchanged, pc.Coordinator.Supervise(session, _ => Assert.Fail(), CancellationToken.None).Status);
-        Assert.Equal(new[] { session, session }, pc.Mount.Starts);
-        Assert.Equal(new[] { true, false }, pc.Mount.ForRecording);
-        Assert.Equal(OwnershipState.Clean, _store.ReadJournal().State);
+
+        var outcome = pc.Coordinator.Supervise(session, _ => Assert.Fail(), CancellationToken.None);
+
+        Assert.Equal(FinishStatus.Pending, outcome.Status);
+        Assert.Equal(SessionCoordinator.StoppedDriveAtShutdown, outcome.Message);
+        Assert.Equal(session, Assert.Single(pc.Mount.Starts));
+        Assert.Empty(pc.Mount.Forgotten);
+        var journal = _store.ReadJournal();
+        Assert.Equal(OwnershipState.Draining, journal.State);
+        Assert.Equal(FirstPc.DeviceId, journal.Owner!.DeviceId);
+
+        // Next sign-in restarts the drive on the same cache and finishes the switch.
+        var rebooted = Computer(FirstPc, "rebooted", database: pc.Database);
+        Assert.Equal(LaunchStatus.Started, rebooted.Coordinator.Launch().Status);
+        Assert.Equal(session, rebooted.Mount.Starts[0]);
     }
 
     [Fact]

@@ -114,7 +114,13 @@ exception. A refused request is logged once and changes nothing else.
 # Windows shutdown
 
 `SessionShutdown.cs` and `WindowsSessionEnd.cs` give finish Windows' 25-second
-shutdown budget. An already-stopped drive with an empty cache needs no remount.
+shutdown budget. Windows ends rclone, a console program, before it notifies this
+lowest-level supervisor, and a process started during session end fails with
+0xC0000142. Finish therefore never restarts the drive at shutdown. A stopped
+drive whose cache holds no rclone item marked `Dirty` (only read copies, such as
+the library marker) needs no write-back, so finish goes straight to the final
+verification. Otherwise finish returns Pending at once and the next sign-in
+resumes the uploads from the same cache.
 If finish is interrupted, the journal retains the most recent committed
 generation and the original PC retains its cache. An operator who knows the
 original PC fully shut down can switch to that generation from the launch dialog.

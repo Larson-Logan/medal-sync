@@ -127,8 +127,8 @@ internal sealed class RcloneClipMount(MedalSyncConfig config, LocalState state, 
         return VfsStatus.Evaluate(control.Call("vfs/stats"), control.Call("vfs/queue"), config.MountRemote);
     }
 
-    public bool StoppedCacheIsEmpty(string session) => !IsRunning
-        && AbortedStartRecovery.CacheIsEmptyOrAbsent(config.SessionCacheDirectory(session), allowEmptyDirectories: true);
+    public bool StoppedCacheHoldsNoUploads(string session) => !IsRunning
+        && StoppedVfsCache.HoldsNoUnsentFiles(config.SessionCacheDirectory(session));
 
     public string? UseUploadLimit(bool recording) => _uploadLimit.Apply(Control(), recording);
 

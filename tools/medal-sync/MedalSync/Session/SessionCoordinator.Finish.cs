@@ -289,9 +289,15 @@ internal sealed partial class SessionCoordinator
         }
         if (!mount.IsRunning)
         {
-            // Windows may already have stopped rclone. An empty cache needs no write-back, and the usual
-            // final library and storage verification still runs before releasing ownership.
-            if (shutdown?.Ending == true && mount.StoppedCacheIsEmpty(session)) return null;
+            if (shutdown?.Ending == true)
+            {
+                // Windows ends console programs, rclone included, before it reaches this lowest-level supervisor, and
+                // a program started now fails to initialize (0xC0000142). A cache of clean read copies needs no
+                // write-back, and the usual final library and storage verification still runs before releasing
+                // ownership. Unsent or uncertain files stay in the cache for the next sign-in.
+                if (mount.StoppedCacheHoldsNoUploads(session)) return null;
+                return new FinishOutcome(FinishStatus.Pending, StoppedDriveAtShutdown, 0);
+            }
             // After a restart the session's cache may still hold unsent files;
             // the same cache folder resumes them.
             mount.Start(session, forRecording: false);
@@ -337,6 +343,10 @@ internal sealed partial class SessionCoordinator
             Pause(options.PollInterval);
         }
     }
+
+    internal const string StoppedDriveAtShutdown =
+        "Windows stopped the clip drive before its last uploads finished, and the drive cannot restart while Windows shuts down. "
+        + "The unsent clips stay on this PC, which keeps the library; they upload and the switch finishes at next sign-in.";
 
     private bool UploadRetriesNeedAction(DrainVerdict verdict)
     {
