@@ -154,6 +154,40 @@ git fetch origin main dev --tags
 python scripts/check-promotion.py --main origin/main --dev origin/dev
 ```
 
+### Check setup on a clean Windows (optional)
+
+CI tests setup on a hosted runner, and
+`scripts/test-windows-installer-isolated.ps1` tests it under a separate
+identity on your own PC. Neither starts from a clean Windows with the real
+product code. Before promoting, you can test the setup EXE of the `dev` beta,
+or a local build, in Windows Sandbox. Pass the latest stable release's setup
+EXE as `-PreviousSetup` to also test the upgrade:
+
+```powershell
+gh release download v1.6.0.01-beta.2 -p '*setup-win-x64.exe' -D .validation/candidate
+gh release download v1.6.0.00 -p '*setup-win-x64.exe' -D .validation/previous
+pwsh -File scripts/test-installer-in-sandbox.ps1 `
+  -Setup .validation/candidate/medal-sync-1.6.0.01-beta.2-setup-win-x64.exe `
+  -PreviousSetup .validation/previous/medal-sync-1.6.0.00-setup-win-x64.exe
+```
+
+The script starts a sandbox with networking off and the setup EXEs in a
+read-only folder. Inside, it installs silently for the current user and
+uninstalls, then installs for all users and uninstalls, then upgrades from the
+previous setup in both scopes. Each step checks the Installed apps entry
+(display name, version, publisher, product code and whether it is per-user or
+all-users), the program files, the Start menu shortcuts and WinFsp: all-users
+setup installs WinFsp and uninstall keeps it, and per-user setup leaves it
+alone. The script prints pass or fail for each step and exits 1 if any failed.
+`result.json`, a transcript and every setup log stay in
+`.validation/sandbox-installer-TIMESTAMP/results`.
+
+The run takes several minutes. Windows runs one sandbox at a time, so the
+script closes one that is already open. Pass `-KeepSandbox` to leave the
+sandbox open for inspection. The script needs the Windows Sandbox optional
+feature (Windows Pro, Enterprise or Education). Without it, and in CI, it
+prints `SKIP` and exits 0.
+
 ## GitHub pipeline
 
 Pull requests run [validation](../.github/workflows/validate.yml), and a newer

@@ -52,6 +52,8 @@ RULES = [
       'scripts/check-repository.py', 'scripts/check-doc-links.mjs',
       'scripts/update-source-manifest.py', 'scripts/generate-icon.py',
       'scripts/setup-github-project.ps1', 'scripts/setup-github-rulesets.ps1',
+      # The Windows Sandbox installer check runs only on a maintainer PC.
+      'scripts/test-installer-in-sandbox.ps1', 'scripts/sandbox/',
       'tests/test_*.py'], []),
     # The shared Medal fixture is compiled into the integration program too.
     (['tests/tools/medal-sync/Fixtures/'], ALL),
