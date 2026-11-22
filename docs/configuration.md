@@ -10,6 +10,182 @@ add settings the wizard does not offer, such as more cloud copies.
 `config.json` holds no passwords or tokens. SMB uses the PC's saved Windows
 login, and cloud sign-in stays in the separate rclone credential file.
 
+## Configuration wizard, field by field
+
+The wizard shows only the fields your storage mode uses. Each field's
+**Learn more** link opens its section below. Create the folders you name
+before choosing **Review**; the wizard checks them but does not create them.
+
+A typical first setup with a server, on a PC whose SSD is `E:`:
+
+| Field | Example |
+| --- | --- |
+| Storage mode | Server (SMB) |
+| Library choice | Create a new library ID |
+| Medal account ID | Filled in for you |
+| Storage share or remote | `\\SERVER\Data\Media\Videos` |
+| Coordination share | `\\SERVER\Data\AppData\MedalSync` |
+| Capture folder / drive | `M:\Clips` (keep the default) |
+| SSD cache folder | `E:\MedalCache` |
+| Everything else | Keep the default, or leave empty |
+
+### Storage mode
+
+Where your clips live, and how PCs take turns with the library. Not sure?
+Answer [which mode should I pick?](getting-started.md#which-mode-should-i-pick)
+
+- **Server (SMB):** clips go to a NAS or home server share. Pick this if you
+  record on two or more PCs and have a server. You can also enter an rclone
+  remote here; see [use a cloud provider as primary storage](storage.md#use-a-cloud-provider-or-personal-server-as-primary-storage).
+- **Local storage:** clips stay on this PC. Pick this for one PC with no server.
+- **Cloud (no server):** Google Drive, OneDrive or Dropbox holds the clips and
+  decides which PC owns the library. Pick this for several PCs without a
+  server. See [cloud mode without a server](storage.md#cloud-mode-without-a-server).
+
+### Library choice and library ID
+
+On the **first** PC, choose **Create a new library ID**. The wizard makes one
+when you choose **Review**.
+
+On **every other** PC, choose **Join an existing library ID** and paste the ID
+from the first PC. To find it there, open the `config.json` shown at the top of
+the wizard on that PC (usually `%USERPROFILE%\.medal-sync\config.json`) and
+copy the `libraryId` value: 32 letters and digits. Never create a second library for clips another PC already shares.
+
+### Medal account ID
+
+The number Medal uses for your account. Sign in to Medal on this PC first; the
+wizard then fills it in. If it is empty, sign in to Medal and choose **Detect**,
+or run `medal-sync inspect` and copy the account ID it prints. Every PC sharing
+a library must use the same Medal account.
+
+### PC display name
+
+Optional. A friendly name, such as `Desk PC` or `Living room`, that other PCs
+show in status and history. Leave it empty to show the computer and user name
+instead.
+
+### Storage folder
+
+Where the complete clip collection is kept. Its label depends on the mode:
+
+- **Server:** a UNC path to a folder on your server, such as
+  `\\SERVER\Data\Media\Videos`, that every PC can open with its saved Windows
+  login. Use the `\\SERVER\...` form rather than a mapped drive letter.
+- **Local:** an empty, dedicated folder on a disk with room for every clip,
+  such as `D:\MedalLibrary`.
+- **Cloud:** the rclone remote name you signed in with, a colon, and a folder,
+  such as `gdrive:MedalSync`. Sign in under **Cloud sign-in** first; the remote
+  name you chose there goes before the colon.
+
+### Coordination folder
+
+A small folder that records which PC owns the library and the history of
+library changes. It never holds clips.
+
+- **Server:** a separate folder on the same server, such as
+  `\\SERVER\Data\AppData\MedalSync`. Every PC must use the same one.
+- **Local** and **Cloud:** filled in for you with a folder in Medal Sync's own
+  settings folder. Keep the default.
+
+Keep it apart from the storage, cache and capture folders.
+
+### Cloud journal ID
+
+Cloud mode only. It identifies the file in your cloud folder that decides which
+PC owns the library.
+
+On the **first** PC, fill in the cloud storage folder and sign in, then choose
+**Get ID**. On **every other** PC, paste the same ID from the first PC's
+`config.json` (`cloudJournalId`). See [cloud mode without a server](storage.md#cloud-mode-without-a-server).
+
+### Capture folder and drive
+
+The folder Medal records into. Keep the default, `M:\Clips`, unless another
+program already uses `M:`. Medal Sync creates this drive each time it starts
+Medal, so it does not exist yet; that is why there is no **Browse** button. Use
+a drive letter from D to Z and a folder, not just `M:\`.
+
+### SSD cache folder
+
+An empty folder on this PC's fastest local disk, such as `E:\MedalCache`. Medal
+records here first, then the clips upload. It must not be a network drive, the
+storage folder or the capture drive. See
+[choose drives and file systems](storage.md#choose-drives-and-file-systems).
+
+### Rclone executable
+
+The program Medal Sync uses to create the clip drive and copy clips. The copy
+installed with Medal Sync is selected for you; keep it unless you were told
+otherwise.
+
+### Persistent local copy
+
+A folder on this PC that keeps every clip, so you can play any clip without
+reaching the server.
+
+- **Server mode:** optional. Leave it empty to keep only recent clips in the
+  cache. Use it on a slow connection, or when the storage folder is an rclone
+  remote (then it is required). It needs room for your whole collection. See
+  [keep a local copy](storage.md#keep-a-local-copy-and-upload-to-the-server).
+- **Cloud mode:** required. Medal records into this folder, and Medal Sync
+  uploads it.
+
+### Provider credential file and cloud sign-in
+
+The credential file is where rclone keeps your Google Drive, OneDrive or
+Dropbox sign-in. You don't need to create it: leave **Provider credential
+file** empty, then use **Cloud sign-in**.
+
+1. Choose the provider.
+2. Type a short remote name, such as `gdrive`, `onedrive` or `dropbox`. You
+   will reuse this name in the storage folder or cloud targets
+   (`gdrive:MedalSync`).
+3. Choose **Sign in** and approve access in the browser page that opens.
+
+When the check passes, the wizard fills in the credential file. Medal Sync
+never sees your password or token. For Google Drive, consider
+[your own OAuth client](https://rclone.org/drive/#making-your-own-client-id);
+publish it, because a client left in *Testing* status expires every sign-in
+after seven days. Leave this section alone in server or local
+mode unless you add cloud copies. To sign in from a terminal instead, see
+[add OneDrive, Dropbox or Google Drive](storage.md#add-onedrive-dropbox-or-google-drive).
+
+### Cloud targets
+
+Optional extra copies of your clips in the cloud, one per line, in the form
+`name=remote:folder`:
+
+```text
+optional onedrive=onedrive:MedalSync
+required gdrive=gdrive:MedalBackup
+```
+
+`name` is your label, shown in status. `remote` is a name you signed in with
+under **Cloud sign-in**. Start a line with `required ` if another PC must wait
+until that copy is verified, or `optional ` to let it catch up later. Leave the
+box empty for no cloud copies. See [targets](#replication-local-copy-and-cloud-copies).
+
+### Syncthing exclusion
+
+Leave both fields empty unless you use Syncthing and one of its shared folders
+contains your clip folder. Then enter that Syncthing folder's ID and the clip
+folder's path inside it, such as `/Videos/Clips`, so Syncthing ignores the
+clips Medal Sync already handles.
+
+### Cache limit, free space and session hours
+
+The defaults suit most PCs.
+
+- **Cache limit:** the most GiB of uploaded clips the SSD cache keeps for quick
+  replay. New recordings stay until they upload, even above this.
+- **Minimum free space:** GiB Medal Sync always leaves free on the cache's disk.
+- **Maximum session hours:** your longest recording session. Medal Sync starts
+  Medal only when this much recording fits on the cache's disk.
+
+Lower the numbers if Medal Sync refuses to launch for lack of space on a small
+SSD. See [low disk space while recording](storage.md#low-disk-space-while-recording).
+
 ## Before editing
 
 - Wait for **Ready**, and keep a copy of the current file.

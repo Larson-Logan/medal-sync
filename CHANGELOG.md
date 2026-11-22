@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The configuration wizard explains each field in plainer words, says which ones to leave empty or at their defaults, and adds a **Learn more** link under every field. Each link opens that field's section of a new [field-by-field guide](docs/configuration.md#configuration-wizard-field-by-field). In cloud mode, **Get ID** reserves a new library's cloud journal ID without a terminal.
+- The AI agent setup prompt in [getting started](docs/getting-started.md#optional-let-an-ai-agent-set-it-up-for-you) now asks what you want in plain words, chooses the storage mode and folders itself, and completes the setup: folders, cloud sign-in, configuration, a library backup, creating or joining the library and, optionally, starting Medal at sign-in. It asks for your yes before each step that changes the library, your clips or Medal's startup.
 - Start Medal at sign-in again after Windows shut down before the session finished. Sign-in still finishes the interrupted session first, and leaves the library released only when another PC asked for it.
 - Finish at Windows shutdown no longer tries to restart the clip drive, which always failed with `rclone exited with code -1073741502` (0xC0000142). A stopped drive whose cache holds only read copies (such as the library marker) now verifies and releases the library. If clips are still unsent, finish returns Pending at once, with no Windows error popup, and the next sign-in uploads them.
 - Run retention, primary and replica cleanup, and persistent-media refresh in cloud mode. A maintenance lease holds the library until the reviewed work completes (#249).

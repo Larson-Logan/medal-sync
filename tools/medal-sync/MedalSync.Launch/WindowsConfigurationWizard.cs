@@ -48,6 +48,16 @@ internal sealed class WindowsConfigurationWizard : Form
     private CancellationTokenSource? _signInCancel;
     /// <summary>Remotes whose sign-in in this wizard did not pass the storage check; a configuration using one is never saved.</summary>
     private readonly HashSet<string> _failedSignIns = new(StringComparer.Ordinal);
+    private readonly Action<string> _openLink;
+    private readonly Func<string, string, string, string> _reserveCloudJournal;
+    private readonly Button _getJournalId = new() { Text = "&Get ID", AutoSize = true, AccessibleName = "Get a new cloud journal ID from the cloud storage folder" };
+
+    /// <summary>Published documentation; each field's Learn more link opens its section of the wizard guide.</summary>
+    internal const string DocsUrl = "https://github.com/Larson-Logan/medal-sync/blob/main/docs/";
+
+    internal const string WizardGuide = "configuration.md#configuration-wizard-field-by-field";
+
+    internal const string ModeChoiceGuide = "getting-started.md#which-mode-should-i-pick";
 
     public static int Run(LocalState state)
     {
@@ -67,9 +77,14 @@ internal sealed class WindowsConfigurationWizard : Form
 
     internal WindowsConfigurationWizard(LocalState state, Action<MedalSyncConfig, bool>? validate = null, Func<IDisposable>? acquireGuard = null,
         Func<string>? detectAccount = null, Func<string[], (int Code, string Text)>? runSetupCommand = null,
-        Func<string, CloudProvider?, string?, CancellationToken, SignInResult>? signIn = null)
+        Func<string, CloudProvider?, string?, CancellationToken, SignInResult>? signIn = null,
+        Action<string>? openLink = null, Func<string, string, string, string>? reserveCloudJournal = null)
     {
         _state = state;
+        _openLink = openLink ?? (validate is null ? OpenInBrowser
+            : _ => throw new InvalidOperationException("Tests must provide an isolated link opener."));
+        _reserveCloudJournal = reserveCloudJournal ?? (validate is null ? CloudJournalProvider.Reserve
+            : (_, _, _) => throw new InvalidOperationException("Tests must provide an isolated cloud journal reservation."));
         _signIn = signIn ?? (validate is null ? SignInWithRclone
             : (_, _, _, _) => throw new InvalidOperationException("Tests must provide an isolated sign-in."));
         _runSetupCommand = runSetupCommand ?? (validate is null ? RunSetupCommand
@@ -94,9 +109,15 @@ internal sealed class WindowsConfigurationWizard : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(750, 0), Text = $"Resolved configuration: {state.ConfigPath}\r\n"
-            + (_existing is null ? "Choose a storage mode; review and save it, then review creating or joining the library. Quit Medal before library setup."
-                : "Existing setup found. Account, library and device identities are preserved. Quit Medal and wait for Ready before changing it.") }, 0, 0);
+        var header = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill };
+        header.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(750, 0), Text = $"Resolved configuration: {state.ConfigPath}\r\n"
+            + (_existing is null ? "Choose a storage mode, fill in the fields it shows, then Review and save. Afterwards, review creating or joining the library. Quit Medal before library setup."
+                : "Existing setup found. Account, library and device identities are preserved. Quit Medal and wait for Ready before changing it.") });
+        var guides = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 4, 0, 0) };
+        guides.Controls.Add(DocLink("Setup guide: what to enter in each field", WizardGuide, "Open the configuration wizard guide"));
+        guides.Controls.Add(DocLink("Which storage mode should I pick?", ModeChoiceGuide, "Open the guide to choosing a storage mode"));
+        header.Controls.Add(guides);
+        layout.Controls.Add(header, 0, 0);
         _edit = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         var fields = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Padding = new Padding(0, 12, 12, 12) };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -113,7 +134,12 @@ internal sealed class WindowsConfigurationWizard : Form
         Field(fields, "library", _existing?.LibraryId ?? "");
         _fields["library"].ReadOnly = _existing is not null;
         _fields["library"].Enabled = _identity.SelectedIndex == 1;
-        _identity.SelectedIndexChanged += (_, _) => { _fields["library"].Enabled = _identity.SelectedIndex == 1; ShowLibraryHint(); };
+        _identity.SelectedIndexChanged += (_, _) =>
+        {
+            _fields["library"].Enabled = _identity.SelectedIndex == 1;
+            _getJournalId.Enabled = CanReserveJournal;
+            ShowLibraryHint();
+        };
         Button? detect = _existing is null && _detectAccount is not null
             ? new Button { Text = "De&tect", AutoSize = true, AccessibleName = "Detect the signed-in Medal account" } : null;
         Field(fields, "account", _existing?.AccountId ?? "", action: detect);
@@ -121,7 +147,6 @@ internal sealed class WindowsConfigurationWizard : Form
         _fields["account"].ReadOnly = _existing is not null;
         Field(fields, "remote", _existing?.Remote ?? "", Pick.Folder);
         Field(fields, "coordination", _existing?.CoordinationRoot ?? DefaultCoordination(SelectedMode), Pick.Folder);
-        Field(fields, "cloudJournal", _existing?.CloudJournalId ?? "");
         Field(fields, "capture", _existing?.CaptureFolder ?? @"M:\Clips");
         Field(fields, "cache", _existing?.CacheRoot ?? "", Pick.Folder);
         Field(fields, "rclone", _existing?.RclonePath ?? ConfigCommands.DefaultRclonePath(), Pick.Executable);
@@ -133,6 +158,10 @@ internal sealed class WindowsConfigurationWizard : Form
         signInRow.Controls.AddRange([_provider, _signInRemote, _signInButton]);
         _signInButton.Click += async (_, _) => await SignIn();
         AddRow(fields, "signIn", signInRow);
+        // After sign-in, because a new journal ID is reserved with that sign-in.
+        _getJournalId.Enabled = CanReserveJournal;
+        _getJournalId.Click += async (_, _) => await GetCloudJournalId();
+        Field(fields, "cloudJournal", _existing?.CloudJournalId ?? "", action: _getJournalId);
         Field(fields, "targets", string.Join(Environment.NewLine, _existing?.Replication?.Targets.Select(t => (t.Required ? "required " : "optional ") + t.Name + "=" + t.Remote) ?? []), multiline: true);
         Field(fields, "syncFolder", _existing?.SyncExclusions.FirstOrDefault()?.FolderId ?? "");
         Field(fields, "syncPattern", _existing?.SyncExclusions.FirstOrDefault()?.Pattern ?? "/Videos/Clips");
@@ -173,7 +202,31 @@ internal sealed class WindowsConfigurationWizard : Form
 
     private enum Pick { None, Folder, Executable, Credentials }
 
-    private sealed record Row(Label Caption, Control Input, Button? Action, Label Hint);
+    private sealed record Row(Label Caption, Control Input, Button? Action, Label Hint, LinkLabel Help);
+
+    /// <summary>The section of the docs folder that explains a field in plain language, with examples.</summary>
+    internal static string HelpSection(string key) => "configuration.md#" + key switch
+    {
+        "mode" => "storage-mode",
+        "identity" or "library" => "library-choice-and-library-id",
+        "account" => "medal-account-id",
+        "deviceLabel" => "pc-display-name",
+        "remote" => "storage-folder",
+        "coordination" => "coordination-folder",
+        "cloudJournal" => "cloud-journal-id",
+        "capture" => "capture-folder-and-drive",
+        "cache" => "ssd-cache-folder",
+        "rclone" => "rclone-executable",
+        "copy" => "persistent-local-copy",
+        "cloudConfig" or "signIn" => "provider-credential-file-and-cloud-sign-in",
+        "targets" => "cloud-targets",
+        "syncFolder" or "syncPattern" => "syncthing-exclusion",
+        "cacheLimit" or "reserve" or "hours" => "cache-limit-free-space-and-session-hours",
+        _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Unknown configuration field."),
+    };
+
+    /// <summary>Only a brand-new library reserves a journal; other PCs reuse the first PC's ID.</summary>
+    private bool CanReserveJournal => _existing is null && _identity.SelectedIndex == 0;
 
     private StorageMode SelectedMode => _mode.SelectedIndex switch { 2 => StorageMode.Cloud, 1 => StorageMode.Local, _ => StorageMode.Server };
 
@@ -194,46 +247,46 @@ internal sealed class WindowsConfigurationWizard : Form
     {
         "mode" => ("Storage &mode", mode switch
         {
-            StorageMode.Local => "Clips and the ownership journal stay on this PC.",
-            StorageMode.Cloud => "Clips and library handoff go through Google Drive, OneDrive or Dropbox. Medal records into a persistent local copy.",
-            _ => "Clips upload to a private SMB share or rclone remote. PCs hand off the library through a journal on the share.",
+            StorageMode.Local => "For one PC with no server. Clips and library records stay on this PC.",
+            StorageMode.Cloud => "For several PCs without a server. Google Drive, OneDrive or Dropbox holds the clips and decides which PC has the library; each PC also keeps every clip locally.",
+            _ => "For several PCs and a NAS or home server. Clips upload to a server share, and the PCs take turns with the library through a folder on the server.",
         }),
         "identity" => ("&Library choice", ""),
         "library" => ("&Existing library ID", ""),
         "account" => ("Medal &account ID", ""),
-        "deviceLabel" => ("PC display &name", "Optional name other PCs see, such as Desk PC or Living room. Up to 64 printable characters; ownership still uses this PC's unique ID."),
+        "deviceLabel" => ("PC display &name (optional)", "A friendly name other PCs show for this one, such as Desk PC. Leave empty to show the computer and user name."),
         "remote" => mode switch
         {
-            StorageMode.Local => ("&Storage folder", @"Dedicated folder on this PC that keeps every clip, such as D:\MedalLibrary."),
-            StorageMode.Cloud => ("Cloud &storage folder", "Direct Google Drive, OneDrive or Dropbox rclone remote and folder, such as onedrive:MedalSync."),
-            _ => ("&Storage share or remote", @"Private UNC share such as \\server\Medal\Media, or an rclone remote and folder such as onedrive:MedalSync."),
+            StorageMode.Local => ("&Storage folder", @"An empty folder on this PC with room for every clip, such as D:\MedalLibrary. Create it first, then Browse to it."),
+            StorageMode.Cloud => ("Cloud &storage folder", "The remote name from Cloud sign-in below, a colon, then a folder name, such as gdrive:MedalSync. Sign in first."),
+            _ => ("&Storage share or remote", @"The server folder that will hold your clips, such as \\SERVER\Data\Media\Videos. Every PC must be able to open it. Use the \\SERVER form, not a mapped drive letter."),
         },
         "coordination" => mode switch
         {
-            StorageMode.Server => ("&Coordination share", @"UNC folder on the private share for the ownership journal, such as \\server\Medal\Coordination."),
-            StorageMode.Cloud => ("&Coordination history cache", "Dedicated local folder for downloaded library history."),
-            _ => ("&Coordination folder", "Dedicated local folder for the ownership journal, outside the storage, cache and capture folders."),
+            StorageMode.Server => ("&Coordination share", @"A separate small folder on the same server, such as \\SERVER\Data\AppData\MedalSync. Every PC uses the same one. It never holds clips."),
+            StorageMode.Cloud => ("&Coordination history cache", "Filled in for you. Keep the default."),
+            _ => ("&Coordination folder", "Filled in for you. Keep the default."),
         },
-        "cloudJournal" => ("Cloud &journal ID", "From 'medal-sync storage cloud-id'. Use the same ID on every PC that shares this library."),
-        "capture" => ("Capture folder / &drive", @"Folder on the clip drive Medal Sync mounts at launch, such as M:\Clips. Drive D to Z, and not a drive root."),
-        "cache" => ("SSD cac&he folder", "Local SSD folder for the clip drive's cache. Not the share or the clip drive."),
-        "rclone" => ("&Rclone executable", "The rclone.exe installed with Medal Sync is selected by default."),
+        "cloudJournal" => ("Cloud &journal ID", "First PC: fill in the cloud storage folder, sign in above, then choose Get ID. Every other PC: paste cloudJournalId from the first PC's config.json."),
+        "capture" => ("Capture folder / &drive", @"Keep the default, M:\Clips, unless another program uses M:. Medal Sync creates this drive when it starts Medal, so it does not exist yet."),
+        "cache" => ("SSD cac&he folder", @"An empty folder on this PC's fastest local disk, such as E:\MedalCache. Medal records here first; clips then upload."),
+        "rclone" => ("&Rclone executable", "Selected for you. Keep the default."),
         "copy" => mode == StorageMode.Cloud
-            ? ("Persistent local cop&y", "Required. Medal records into this complete local copy and syncs it to the cloud folder.")
-            : ("Persistent local cop&y (optional)", "Keeps the complete library on this PC and avoids uploading unreferenced replay-buffer segments. Needs space for every clip; recommended on slow links. Required for an rclone remote."),
+            ? ("Persistent local cop&y", @"Required. An empty folder on this PC with room for every clip, such as E:\MedalLibrary. Medal records here and Medal Sync uploads it.")
+            : ("Persistent local cop&y (optional)", "Leave empty unless you want every clip on this PC as well as the server (useful on a slow connection). Required if the storage above is an rclone remote such as gdrive:Medal."),
         "cloudConfig" => mode == StorageMode.Cloud
-            ? ("Provider credential &file", "rclone.conf with the sign-in for the cloud storage folder. Required in this mode.")
-            : ("Provider credential &file (optional)", "rclone.conf from 'rclone config'. Required for cloud copies or an rclone storage remote."),
-        "signIn" => ("Cloud sign-&in", "Choose the provider and a remote name (such as gdrive), then Sign in: the provider's page opens in your browser. "
-            + "Medal Sync saves the sign-in to the provider credential file above, or to one in its private folder, only after a storage check passes. "
-            + "It never sees the token. For Google Drive, consider your own OAuth client (" + ProviderSignIn.GoogleClientGuide + "). "
-            + ProviderSignIn.GoogleTestingWarning),
-        "targets" => ("Cloud targets (one per line)", "Use name=remote:folder. Prefix with 'required ' to block handoff until verified, or 'optional ' to allow retry later. Existing names keep their requirement when no prefix is given."),
-        "syncFolder" => ("Sync folder ID (optional)", "Only when Syncthing shares a folder that contains the clip folder. Most setups leave this empty."),
-        "syncPattern" => ("Sync exclusion pattern", "Rooted folder the Syncthing folder must ignore, such as /Videos/Clips."),
-        "cacheLimit" => ("Cache limit (GiB)", "Soft size limit for cached clips. New recordings stay cached until they upload."),
-        "reserve" => ("Minimum free space (GiB)", "Free space to keep on the cache's disk."),
-        "hours" => ("Maximum session hours", "Launch checks that this much recording fits on the cache's disk above the free-space reserve."),
+            ? ("Provider credential &file", "Leave empty and use Cloud sign-in below; it fills this in.")
+            : ("Provider credential &file (optional)", "Leave empty unless you add cloud copies. Cloud sign-in below fills it in."),
+        "signIn" => ("Cloud sign-&in", "Pick the provider, type a short remote name such as gdrive, then Sign in and approve access in your browser. "
+            + "Use that name in the cloud folders, such as gdrive:MedalSync. The sign-in is saved only after a storage check passes, and Medal Sync never sees your password or token. "
+            + "Google Drive users: see Learn more about using your own OAuth client. " + ProviderSignIn.GoogleTestingWarning),
+        "targets" => ("Cloud copies (optional, one per line)", "Leave empty for none. Otherwise name=remote:folder, such as optional onedrive=onedrive:MedalSync. "
+            + "Start with 'required ' if other PCs must wait until the copy is verified, or 'optional ' to let it catch up later. Existing names keep their setting when no prefix is given."),
+        "syncFolder" => ("Syncthing folder ID (optional)", "Leave empty unless Syncthing shares a folder that contains your clip folder."),
+        "syncPattern" => ("Syncthing exclusion pattern", "Only with a Syncthing folder ID: the clip folder inside it, such as /Videos/Clips."),
+        "cacheLimit" => ("Cache limit (GiB)", "Keep the default unless your SSD is small. How much space uploaded clips may use on the SSD for quick replay; new recordings stay until they upload."),
+        "reserve" => ("Minimum free space (GiB)", "Keep the default. Space Medal Sync always leaves free on the cache's disk."),
+        "hours" => ("Maximum session hours", "Your longest recording session. Medal starts only if this much recording fits on the cache's disk."),
         _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Unknown configuration field."),
     };
 
@@ -254,10 +307,34 @@ internal sealed class WindowsConfigurationWizard : Form
         }
         var hint = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, MaximumSize = new Size(600, 0), Margin = new Padding(3, 0, 3, 8), UseMnemonic = false };
         int hintRow = table.RowCount++;
+        // Under the caption, so every field offers its guide even when it has no hint.
+        var help = DocLink("Learn more", HelpSection(key), "");
+        help.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+        help.Margin = new Padding(3, 0, 3, 8);
+        table.Controls.Add(help, 0, hintRow);
         table.Controls.Add(hint, 1, hintRow);
         table.SetColumnSpan(hint, 2);
-        _rows.Add(key, new(caption, input, action, hint));
+        _rows.Add(key, new(caption, input, action, hint, help));
     }
+
+    private LinkLabel DocLink(string text, string section, string accessibleName)
+    {
+        var link = new LinkLabel { Text = text, AutoSize = true, UseMnemonic = false, Tag = DocsUrl + section, AccessibleName = accessibleName };
+        link.LinkClicked += (_, _) => OpenLink((string)link.Tag);
+        return link;
+    }
+
+    private void OpenLink(string url)
+    {
+        try { _openLink(url); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
+        {
+            _message.Text = "The guide could not open in your browser. Open " + url + " yourself.";
+        }
+    }
+
+    private static void OpenInBrowser(string url) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true })?.Dispose();
 
     private void Field(TableLayoutPanel table, string key, string value, Pick pick = Pick.None, bool multiline = false, Button? action = null)
     {
@@ -285,7 +362,8 @@ internal sealed class WindowsConfigurationWizard : Form
             bool shown = Applies(key, mode);
             var (caption, hint) = Describe(key, mode);
             row.Caption.Text = caption;
-            row.Caption.Visible = row.Input.Visible = shown;
+            row.Caption.Visible = row.Input.Visible = row.Help.Visible = shown;
+            row.Help.AccessibleName = "Learn more about " + caption.Replace("&", "", StringComparison.Ordinal);
             if (row.Input is TextBox) row.Input.AccessibleName = caption.Replace("&", "", StringComparison.Ordinal);
             if (row.Action is not null)
             {
@@ -310,8 +388,8 @@ internal sealed class WindowsConfigurationWizard : Form
     }
 
     private void ShowLibraryHint() => SetHint("library", _existing is not null ? "Kept from the existing setup."
-        : _identity.SelectedIndex == 0 ? "A new ID is generated when you review. Other PCs join this library with that ID."
-        : "Copy libraryId from config.json on a PC that already uses this library.");
+        : _identity.SelectedIndex == 0 ? "First PC only. A new ID is made when you choose Review. On your other PCs, choose Join and paste that ID."
+        : "Paste libraryId from config.json on the first PC. The wizard there shows that file's location at the top.");
 
     /// <summary>Reads only the signed-in library's file name; Medal's database is never opened here.</summary>
     private void DetectAccount()
@@ -463,6 +541,52 @@ internal sealed class WindowsConfigurationWizard : Form
         string rclone = Environment.ExpandEnvironmentVariables(_fields["rclone"].Text.Trim());
         if (!File.Exists(rclone)) throw new UnsafeOperationException("The rclone executable is missing. Select the bundled rclone.exe before signing in.");
         return new ProviderSignIn(rclone, _state).SignIn(remote, provider, configPath, cancel);
+    }
+
+    /// <summary>
+    /// Reserves a new cloud journal ID with the signed-in storage folder, as 'storage cloud-id' does, and fills the field.
+    /// Only offered for a new library: every other PC reuses the first PC's ID.
+    /// </summary>
+    private async Task GetCloudJournalId()
+    {
+        if (_busy || _ending || !CanReserveJournal) return;
+        string remote = _fields["remote"].Text.Trim();
+        string credentials = Environment.ExpandEnvironmentVariables(_fields["cloudConfig"].Text.Trim());
+        string rclone = Environment.ExpandEnvironmentVariables(_fields["rclone"].Text.Trim());
+        if (ProviderSignIn.RemoteOf(remote) is null)
+        {
+            SetHint("cloudJournal", "Enter the cloud storage folder first, such as gdrive:MedalSync, then choose Get ID.");
+            return;
+        }
+        if (credentials.Length == 0 || _failedSignIns.Contains(ProviderSignIn.RemoteOf(remote)!))
+        {
+            SetHint("cloudJournal", "Sign in under Cloud sign-in first, so the provider credential file is filled in, then choose Get ID.");
+            return;
+        }
+        _busy = true;
+        _next.Enabled = _getJournalId.Enabled = false;
+        SetHint("cloudJournal", "Getting a journal ID from " + remote + "...");
+        try
+        {
+            string id = await Task.Run(() => _reserveCloudJournal(rclone, remote, credentials));
+            if (_ending) return;
+            _fields["cloudJournal"].Text = id;
+            SetHint("cloudJournal", "Done. On every other PC that shares this library, paste this same ID.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or MedalSyncException
+            or System.ComponentModel.Win32Exception or KeyNotFoundException or System.Text.Json.JsonException)
+        {
+            if (!_ending) SetHint("cloudJournal", "Could not get an ID: " + ex.Message + " Check the cloud storage folder and sign-in, then try again.");
+        }
+        finally
+        {
+            _busy = false;
+            if (!_ending)
+            {
+                _getJournalId.Enabled = CanReserveJournal;
+                _next.Enabled = _proposal is null;
+            }
+        }
     }
 
     /// <summary>A configuration that uses a remote whose sign-in failed here is never saved.</summary>

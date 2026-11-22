@@ -129,81 +129,148 @@ For cross-PC handoff using Google Drive, OneDrive or Dropbox, follow
 Local mode keeps media and coordination on this PC, with optional cloud copies
 and no SMB dependency. It does not provide automatic handoff to another PC.
 
-## Optional: let an AI agent configure it
+## Optional: let an AI agent set it up for you
 
 If you use a coding agent with terminal access on this PC (for example Claude
-Code or Codex), you can paste the prompt below to have it gather the details,
-ask you the remaining questions and prepare `config.json` for you. It follows
-the same preview-then-apply rules as the manual steps in the next section. It
-stops before anything that creates or joins a library, changes Medal's startup
-entries or touches your clips, and shows you those steps to review instead.
+Code or Codex), paste the prompt below and answer its questions. You don't
+need to know the settings: it asks what you want in plain words (how many PCs,
+whether you have a server, whether you want a cloud copy), works out the
+storage mode and folders from what it finds on this PC, and does the whole
+setup. That covers the folders, cloud sign-in, `config.json`, a backup of your
+library, creating or joining the library and, if you want, starting Medal
+through Medal Sync at sign-in.
+
+It uses the same preview-then-apply commands as the manual steps below. Before
+each step that changes your library, your clips or how Medal starts, it tells
+you what will happen and waits for your yes. It never runs recovery or cleanup
+commands and stops to show you any refusal instead of working around it.
 Prefer doing it yourself? Skip to the next section.
 
 Do not paste passwords, cloud tokens or Medal login details into the chat. The
-agent never needs them: cloud sign-in happens in rclone's own prompt, which you
-run yourself.
+agent never needs them: cloud sign-in happens in your browser.
 
 ```text
-Help me configure Medal Sync on this Windows PC. Follow
+Set up Medal Sync on this Windows PC for me, from start to finish. I am not
+technical: ask me simple questions about what I want, work out the settings
+yourself and do the setup for me. Your reference is
 https://github.com/Larson-Logan/medal-sync/blob/main/docs/getting-started.md
-and docs/storage.md in the same repository. Work step by step, explain each
-command before running it, and ask me whenever a choice is mine.
+with docs/storage.md, docs/configuration.md and docs/commands.md in the same
+repository.
+
+How to work with me:
+- Ask one plain question at a time, without jargon. Never ask me for anything
+  you can find out yourself with the commands below.
+- Reading, checking, previews and creating empty folders need no question.
+  Before any step that changes my library, my clips or how Medal starts, tell
+  me in one or two sentences what it will do and wait for my yes.
+- Never ask for or accept passwords, cloud tokens or Medal login details.
+  Cloud sign-in happens in my browser.
+- If a command refuses or reports a problem, stop, show me its exact output,
+  explain it simply and suggest a fix. Do not work around it.
 
 1. Find the CLI. Check, in order: "$env:ProgramFiles\Medal Sync\bin",
    "$env:LOCALAPPDATA\Programs\Medal Sync\bin" and "$HOME\.medal-sync\bin".
-   Use medal-sync.exe from the first folder that has it and tell me which one.
-2. Read-only checks: run `compatibility` and `inspect --json`. Report the
-   Medal versions, whether the schema is supported, the account ID
-   (library.accountId), WinFsp status, existing capture folder and free SSD
-   space. Note the stateRoot that inspect reports. If compatibility fails,
-   stop and tell me.
-3. If config.json already exists in that state root, stop. Show me its
-   storage, cache and library settings and do not replace it.
-4. Ask me, one at a time:
-   - Storage type: server with SSD cache, server plus a persistent local
-     copy, local only, or an rclone primary (see docs/storage.md).
-   - For server modes: the SMB media share (for example
-     \\SERVER\Data\Media\Videos) and the coordination share (for example
-     \\SERVER\Data\AppData\MedalSync). Test that both paths are reachable.
-   - Whether this is a NEW library or joining an EXISTING one. If joining,
-     ask for the library ID from the other PC's config.json.
-   - SSD cache folder (for example E:\MedalCache) and, if used, the
-     persistent local copy folder (for example E:\MedalLibrary). Both must
-     be dedicated folders on a local SSD, outside OneDrive/Dropbox/Google
-     Drive/Syncthing folders, on NTFS, ReFS or exFAT (not FAT32, a RAM disk
-     or, for the cache, a network drive). Offer to create them.
-   - Capture folder (default M:\Clips); confirm the drive letter is free.
-   - Optional cloud copies. If I want them, have me run
-     `rclone config --config "$HOME\.medal-sync\rclone.conf"` myself and
-     sign in; you only need the remote name, such as onedrive:MedalSync.
-5. Build the `config create` command with my answers and
-   --out "$HOME\medal-sync-candidate.json". Use --new-library only for a
-   genuinely new library; use --library-id ID when joining. Run it WITHOUT
-   --apply, show me the full preview and wait for my OK. Then run the same
-   command with --apply.
-6. Run `config validate --config` on the candidate and fix any reported
-   field with me. If the stateRoot from step 2 has no config.json, copy the
-   validated candidate there as config.json. Never overwrite an existing
-   config.json and never copy device.json from another PC.
-7. Run `inspect` again and summarise what is configured.
-   Then list the remaining steps from getting-started.md for me to do
-   (init preview for a new library or enroll preview for a joining PC,
-   backups, startup helper), with the exact commands. Do not run anything
-   with --apply in those steps.
+   Use medal-sync.exe from the first folder that has it. If none has it,
+   tell me to install Medal Sync from
+   https://github.com/Larson-Logan/medal-sync/releases/latest and stop.
+2. Look at this PC (read-only): run `compatibility` and `inspect --json`.
+   Note the Medal account ID (library.accountId), the stateRoot, every drive
+   with its type, file system and free space, whether M: is free, where Medal
+   saves clips now and how much space they use, WinFsp, and any blockers. If
+   compatibility fails, stop and tell me why. If Medal is running, ask me to
+   quit it normally; never close it yourself.
+3. If config.json already exists in the stateRoot, do not replace it. Tell me
+   in plain words how this PC is set up and ask what I want to change. Make a
+   change only on a copy: validate it with `config validate --config`, check
+   that `status` says Ready, keep a backup of the original, then put the copy
+   in place.
+4. Ask me only what you could not find out, in this order, skipping anything
+   an earlier answer already settles:
+   a. How many PCs do you record Medal clips on?
+   b. Is this the first PC you are setting up, or does another PC already use
+      Medal Sync? If another PC does, ask me to open config.json on that PC
+      (the configuration window there shows its location at the top) and
+      paste its libraryId, storageMode, remote, coordinationRoot and, if
+      present, cloudJournalId. None of these are secrets.
+   c. Do you have a NAS or home server that every PC can reach? If yes, ask
+      for its name and offer to list its shared folders (`net view \\NAME`).
+   d. Would you like an extra copy of your clips in Google Drive, OneDrive or
+      Dropbox? If yes, which one?
+   e. Optional: a friendly name for this PC, such as Desk PC.
+5. Choose the setup yourself and explain it in plain words, then wait for my
+   OK before creating anything:
+   - One PC and no server: local mode.
+   - A server: server mode, with media in \\SERVER\SHARE\Medal\Media and
+     coordination in \\SERVER\SHARE\Medal\Coordination (when joining, use the
+     other PC's exact values). Add a persistent local copy only if I want
+     every clip on this PC too or the connection to the server is slow.
+   - Several PCs and no server: cloud mode with the provider I chose, plus a
+     persistent local copy.
+   Choose the drives from the inspect output: the SSD cache and any local
+   copy or local library folder go on a local disk (the cache on an SSD),
+   formatted NTFS, ReFS or exFAT (not FAT32), not a RAM disk, network drive
+   or optical drive, and outside OneDrive, Dropbox, Google Drive and
+   Syncthing folders. A local copy or local library needs room for all my
+   clips plus at least 20 GiB. Tell me which drive you chose and its free
+   space. Keep the capture folder M:\Clips unless M: is taken.
+6. Prepare storage. Create the empty local folders and, in server mode, the
+   two server folders if they do not exist yet (tell me if access is denied).
+   For cloud mode or a cloud copy, run
+   `storage sign-in --remote NAME --provider drive|onedrive|dropbox` with a
+   short NAME such as gdrive, tell me to approve access in the browser page
+   that opens, and wait. It saves the sign-in only after its check passes;
+   note the credential file it reports. For a NEW cloud library, run
+   `storage cloud-id --remote NAME:Medal --rclone-config FILE`. When joining,
+   reuse the other PC's cloudJournalId instead.
+7. Create the configuration. Build `config create` from the plan with
+   --out "$HOME\medal-sync-candidate.json": --new-library only on the first
+   PC, --library-id ID when joining, and --device-label if I gave a name. Run
+   it without --apply and check the preview, then run it with --apply. Run
+   `config validate --config` on the candidate and fix anything it reports.
+   Copy it to config.json in the stateRoot, creating the folder if needed.
+   Never overwrite an existing config.json and never copy device.json from
+   another PC. Then run `inspect`, plus `storage check` if there is a cloud
+   remote, and fix anything reported.
+8. Back up before touching the library (Medal quit): run
+   `snapshot export --out FILE` into a new private folder in my user profile
+   (not a synced folder) and `snapshot verify --in FILE`. Ask whether I
+   already have a separate copy of my clips. If not, offer to copy Medal's
+   current clip folder to a disk I choose, and check that the copy has the
+   same number of files and total size.
+9. Create or join the library (Medal quit):
+   - First PC: preview `init`. If the preview says clips must first be
+     brought into the library, preview the step it names (usually
+     `relocate --from MEDAL_CLIP_FOLDER`), explain it, run it with --apply on
+     my yes, then preview `init` again. Summarise the preview and, on my yes,
+     run `init --apply`.
+   - Every other PC: preview `enroll --out "$HOME\medal-sync-enroll-review"`
+     and summarise what will be merged. If it needs manual review, stop and
+     show me. On my yes, run the same command with --apply. If apply is
+     interrupted, preview `enroll recover --out` with the same folder, show
+     me, and apply it only on my yes.
+10. Finish. Run `status` and `inspect` and confirm the library is Ready. Ask
+    whether Medal should start through Medal Sync every time I sign in to
+    Windows. If yes, preview `startup`, tell me what it changes, and on my
+    yes run `startup --apply`. Then tell me, in plain words: open Medal with
+    the Medal Library shortcut (or at sign-in), wait for Ready in the Medal
+    Sync status icon before switching PCs, and where my configuration and
+    backup are. If another PC will join, list the values from this PC's
+    config.json that I will paste on that PC.
 
-Rules: never run `init --apply`, `enroll --apply`, `abandon`, `repair`,
-`finish --accept-library-changes`, `startup --apply` or set-medal-startup.ps1 -Apply. Never
-force-close Medal, delete SQLite -wal/-shm files, clear the cache, reset or
-initialize an existing journal, or edit Medal's database. If any command
-refuses or reports a problem, stop, show me its exact output and explain it;
-do not work around it. Keep config files, snapshots and logs out of Git and
-synced folders, and do not print tokens or credentials.
+Never run these, even if a message suggests them: `abandon`, `repair`,
+`recover-start`, `finish --accept-library-changes`,
+`launch --replace-local-library`, `retention`, `primary prune`,
+`replica prune`, any `purge-trash`, `storage migrate`, or `init` against a
+library that already exists. Never force-close Medal, delete SQLite -wal or
+-shm files, clear the cache, delete or move clips yourself, edit Medal's
+database or reset a journal. Keep config files, snapshots and logs out of Git
+and synced folders, and never print tokens or credentials.
 ```
 
-The agent's result is the same `config.json` the wizard or CLI would produce,
-so the remaining steps in this guide still apply. Review its summary before
-continuing; you can always rerun `config validate` or the configuration wizard
-to check its work.
+The agent's result is the same setup the wizard and the commands below
+produce, so everything else in this guide still applies. Read its summary;
+you can rerun `config validate`, `status` or the configuration wizard at any
+time to check its work.
 
 ## Plan configuration before using live data
 
@@ -211,7 +278,10 @@ Run `medal-sync-launch.exe --configure`, choose **Configure** from the status
 tray menu, or accept the wizard offered by an unconfigured desktop launch.
 Choose server (SMB), local or cloud storage. The wizard then shows only
 the fields that mode uses, each with a short explanation and example, and
-ignores values in hidden fields. Explicitly choose a new library ID or enter the
+ignores values in hidden fields. Each field's **Learn more** link opens its
+section of the [field-by-field guide](configuration.md#configuration-wizard-field-by-field).
+In cloud mode, **Get ID** next to the cloud journal ID reserves one for a new
+library, as `storage cloud-id` does. Explicitly choose a new library ID or enter the
 existing ID to join. A new setup fills in the Medal account ID from the account
 signed in on this PC (it reads only the library file name); if none is found,
 sign in to Medal and choose **Detect**, or enter the ID from `medal-sync

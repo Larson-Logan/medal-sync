@@ -94,8 +94,8 @@ includes .NET and rclone, and offers the WinFsp driver.
 3. **Configure.** Open **Medal Sync Setup Guide** from the Start menu, or
    launch Medal Sync and follow the configuration wizard. It previews every
    setting before saving. [Getting started](docs/getting-started.md) walks
-   through creating or joining a library, and includes a prompt for letting an
-   AI coding agent prepare the configuration with you.
+   through creating or joining a library, and includes a prompt that lets an
+   AI coding agent ask what you want and set everything up for you.
    After saving, the wizard offers the library preview and a separate
    confirmation to create or join it. Quit Medal before this step.
 4. **Record.** Launch Medal through Medal Sync. After you quit Medal, wait for

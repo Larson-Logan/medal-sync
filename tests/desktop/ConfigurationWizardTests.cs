@@ -54,9 +54,80 @@ internal static class ConfigurationWizardTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }
 
+    /// <summary>Every field links to a guide section that exists, and Get ID fills a new cloud library's journal ID.</summary>
+    private static void HelpAndJournal(Action<bool, string> check)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MedalSyncWizardHelp-" + Guid.NewGuid().ToString("N"));
+        var state = new LocalState(root);
+        var opened = new List<string>();
+        var reserved = new List<(string Rclone, string Remote, string Config)>();
+        try
+        {
+            using var wizard = new WindowsConfigurationWizard(state, (_, _) => { }, () => new Guard(), openLink: opened.Add,
+                reserveCloudJournal: (rclone, remote, config) => { reserved.Add((rclone, remote, config)); return "drive-synthetic-journal"; });
+            wizard.Show();
+            var rows = (System.Collections.IDictionary)wizard.GetType().GetField("_rows", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(wizard)!;
+            var links = rows.Keys.Cast<string>().Select(key => (Key: key, Link: Help(wizard, key))).ToList();
+            var guides = wizard.Controls.OfType<Control>().SelectMany(Descendants).OfType<LinkLabel>().Where(l => !links.Any(r => r.Link == l)).ToList();
+            check(guides.Count == 2, "The wizard links to the field guide and to choosing a storage mode");
+            foreach (var link in links.Select(l => l.Link).Concat(guides))
+            {
+                string url = (string)link.Tag!;
+                check(url.StartsWith(WindowsConfigurationWizard.DocsUrl, StringComparison.Ordinal) && AnchorExists(url[WindowsConfigurationWizard.DocsUrl.Length..]),
+                    "Guide link points to an existing docs heading: " + url);
+                check(link.AccessibleName?.Length > 0, "Guide links are named for screen readers: " + url);
+            }
+            check(Help(wizard, "cache").Visible && !Help(wizard, "cloudJournal").Visible, "Learn more is shown only for the fields the mode shows");
+            var cache = Help(wizard, "cache");
+            typeof(LinkLabel).GetMethod("OnLinkClicked", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(cache, [new LinkLabelLinkClickedEventArgs(cache.Links[0])]);
+            check(opened.SequenceEqual([WindowsConfigurationWizard.DocsUrl + "configuration.md#ssd-cache-folder"]), "Learn more opens that field's guide section");
+
+            var fields = Field<Dictionary<string, TextBox>>(wizard, "_fields");
+            Field<ComboBox>(wizard, "_mode").SelectedIndex = 2;
+            var getId = Action(wizard, "cloudJournal")!;
+            check(getId.Visible && getId.Enabled && Browse(wizard, "cloudJournal") is null, "A new cloud library offers Get ID for its journal");
+            Click(getId);
+            check(reserved.Count == 0 && Hint(wizard, "cloudJournal").Text.Contains("cloud storage folder first", StringComparison.Ordinal),
+                "Get ID explains what to fill in before it contacts the provider");
+            fields["remote"].Text = "gdrive:MedalSync";
+            Click(getId);
+            check(reserved.Count == 0 && Hint(wizard, "cloudJournal").Text.Contains("Sign in", StringComparison.Ordinal), "Get ID asks for a sign-in first");
+            fields["cloudConfig"].Text = @"C:\Private\rclone.conf";
+            Click(getId);
+            Until(() => !Field<bool>(wizard, "_busy"));
+            check(reserved.Single().Remote == "gdrive:MedalSync" && reserved[0].Config == @"C:\Private\rclone.conf"
+                && fields["cloudJournal"].Text == "drive-synthetic-journal", "Get ID reserves a journal with the signed-in folder and fills the field");
+            Field<ComboBox>(wizard, "_identity").SelectedIndex = 1;
+            check(!getId.Enabled, "A PC joining a library reuses the first PC's journal ID instead of reserving another");
+            wizard.Close();
+            check(!Directory.Exists(root), "Opening guides and getting a journal ID write no Medal Sync state");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    private static IEnumerable<Control> Descendants(Control control) => control.Controls.OfType<Control>().SelectMany(Descendants).Prepend(control);
+
+    /// <summary>GitHub's heading anchors: lower case, punctuation removed, spaces as hyphens.</summary>
+    private static bool AnchorExists(string section)
+    {
+        string[] parts = section.Split('#', 2);
+        string? repository = null;
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null && repository is null; directory = directory.Parent)
+            if (File.Exists(Path.Combine(directory.FullName, "global.json")) && File.Exists(Path.Combine(directory.FullName, "docs", "configuration.md")))
+                repository = directory.FullName;
+        if (repository is null) throw new DirectoryNotFoundException("Cannot locate the repository docs.");
+        return File.ReadLines(Path.Combine(repository, "docs", parts[0]))
+            .Where(line => line.StartsWith('#'))
+            .Select(line => new string(line.TrimStart('#').Trim().ToLowerInvariant()
+                .Where(c => char.IsLetterOrDigit(c) || c is ' ' or '-' or '_').ToArray()).Replace(' ', '-'))
+            .Contains(parts[1]);
+    }
+
     internal static void Run(Action<bool, string> check)
     {
         SignIn(check);
+        HelpAndJournal(check);
         string root = Path.Combine(Path.GetTempPath(), "MedalSyncWizardTest-" + Guid.NewGuid().ToString("N"));
         var state = new LocalState(root);
         try
@@ -261,6 +332,7 @@ internal static class ConfigurationWizardTests
     }
     private static T RowPart<T>(object view, string key, string part) => (T)RowFor(view, key).GetType().GetProperty(part)!.GetValue(RowFor(view, key))!;
     private static Label Hint(object view, string key) => RowPart<Label>(view, key, "Hint");
+    private static LinkLabel Help(object view, string key) => RowPart<LinkLabel>(view, key, "Help");
     private static Button? Action(object view, string key) => (Button?)RowFor(view, key).GetType().GetProperty("Action")!.GetValue(RowFor(view, key));
     private static Button? Browse(object view, string key) => Action(view, key) is { Tag: not null } button ? button : null;
     private sealed class Guard : IDisposable { public void Dispose() { } }
