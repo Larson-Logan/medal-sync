@@ -10,6 +10,7 @@
 - Migrate a server-mode or cloud library to Google Drive with its retained generations, media and device identities. The migration can resume after an interruption (#250).
 - Share a library without an SMB server using OneDrive or Dropbox. Each provider must prove it rejects stale ownership writes (#252).
 - Installed apps lists Medal Sync without the version in its name, as the winget manifest declares it. The version stays in its own column.
+- A persistent local copy, cloud mode and cloud copies no longer refuse a library whose clips use Medal's newer keyboard overlay files (`Temp\InputActions\*.kbm.jsonl.zst.enc`), which stopped launch with "A library reference points to private state instead of media". These overlays are now copied and verified like the older `.json` ones. An optional overlay that cannot be copied safely, such as a stale path in an earlier capture folder, is left out instead of refusing the library, as the asset check already treats it. Clips, thumbnails and film reels keep the strict check.
 
 ## 1.6.0 — 2026-11-21
 

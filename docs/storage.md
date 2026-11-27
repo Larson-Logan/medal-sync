@@ -594,7 +594,11 @@ SMB journal or cloud mode for cross-PC handoff.
 ## Verification, conflicts and recovery
 
 Copies use an exact list of known media references, including thumbnails and
-available keyboard overlays. Full Medal databases, native database backups,
+available keyboard overlays (`.json`, or `.kbm.jsonl.zst.enc` input logs under
+`Temp\InputActions`). An overlay outside the capture folder or in another
+format is left out without refusing the library; a clip, thumbnail or film reel
+that is not media or lies outside the capture folder refuses replication. Full
+Medal databases, native database backups,
 logins, arbitrary metadata paths and the live coordination journal are not
 uploaded by media replication. Optional cloud copies contain media only; use
 the existing snapshot workflow to retain library records separately. Cloud

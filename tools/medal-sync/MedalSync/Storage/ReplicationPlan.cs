@@ -20,21 +20,42 @@ internal static class ReplicationPlan
         return files;
     }
 
-    /// <summary>Every safe, known media reference relative to the capture folder, with whether the library requires it.</summary>
+    /// <summary>
+    /// Keyboard overlay files Medal writes: the original plain JSON and the newer compressed, encrypted input log
+    /// (<c>Temp\InputActions\ID.kbm.jsonl.zst.enc</c>).
+    /// </summary>
+    private static bool IsOverlayFile(string relative) =>
+        relative.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+        || relative.EndsWith(".kbm.jsonl.zst.enc", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Every safe, known media reference relative to the capture folder, with whether the library requires it.
+    /// A required file that is outside the capture folder or is not media refuses replication. An optional keyboard
+    /// overlay that cannot be copied safely is left out instead, as the asset check already treats it as a warning:
+    /// Medal keeps stale overlay paths from earlier capture folders and adds new overlay formats over time.
+    /// </summary>
     public static IReadOnlyList<(string Relative, bool Required)> Media(LibrarySnapshot snapshot, WindowsPath capture)
     {
         var files = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var reference in AssetInventory.Collect(snapshot).Where(r => r.Role != AssetRole.Unrecognized))
         {
+            bool optional = reference.Role == AssetRole.Optional;
             if (!WindowsPath.TryParse(reference.Path, out var path, out _) || !path.IsWithin(capture) || path.Equals(capture))
+            {
+                if (optional) continue;
                 throw new UnsafeOperationException("A media reference is outside the capture folder; replication was refused.");
+            }
             string relative = string.Join('/', path.Segments.Skip(capture.Segments.Count));
             string extension = Path.GetExtension(relative).ToLowerInvariant();
-            bool overlay = reference is { Role: AssetRole.Optional, Field: "metadata:$.keyboardOverlayFilePath" } && extension == ".json";
+            bool overlay = optional && reference.Field == "metadata:$.keyboardOverlayFilePath" && IsOverlayFile(relative);
             if (relative.Split('/').Any(s => s.Equals("Databases", StringComparison.OrdinalIgnoreCase) || s.Equals(".medal-sync-history", StringComparison.OrdinalIgnoreCase))
                 || (!overlay && extension is not (".mp4" or ".mkv" or ".webm" or ".mov" or ".avi" or ".m4v"
                     or ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp" or ".avif" or ".heic")))
+            {
+                // Never copied either way; only a required reference is worth refusing the whole library over.
+                if (optional) continue;
                 throw new UnsafeOperationException("A library reference points to private state instead of media; replication was refused.");
+            }
             bool required = reference.Role == AssetRole.Required;
             files[relative] = files.TryGetValue(relative, out bool already) ? already || required : required;
         }

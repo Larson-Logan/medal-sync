@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MedalSync.Config;
 using MedalSync.Coordination;
 using MedalSync.Library;
@@ -178,8 +179,33 @@ public sealed class ReplicationTests : IDisposable
         Assert.Empty(ReplicationPlan.Files(snapshot, capture, source, new FakeProbe(exists: false)));
     }
 
+    [Fact]
+    public void EncryptedInputLogOverlayIsCopied()
+    {
+        string db = _fixture.CreateLibrary("source");
+        MedalFixture.AddContent(db, "a", video: @"M:\Clips\clip.mp4",
+            metadata: """{"keyboardOverlayFilePath":"M:\\Clips\\Temp\\InputActions\\0b1c.kbm.jsonl.zst.enc"}""");
+        var files = ReplicationPlan.Files(LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId),
+            WindowsPath.Parse(@"M:\Clips"), WindowsPath.Parse(@"E:\Media"), new FakeProbe());
+        Assert.Equal(new[] { "Temp/InputActions/0b1c.kbm.jsonl.zst.enc", "clip.mp4" }, files);
+    }
+
+    [Theory]
+    [InlineData(@"D:\Clips\Temp\InputActions\old.kbm.jsonl.zst.enc")] // stale path from an earlier capture folder
+    [InlineData(@"M:\Clips\Temp\InputActions\unknown.bin")]
+    [InlineData(@"M:\Clips\Databases\backup.json")]
+    public void UncopyableOptionalOverlayIsLeftOutWithoutRefusingTheLibrary(string overlay)
+    {
+        string db = _fixture.CreateLibrary("source");
+        MedalFixture.AddContent(db, "a", video: @"M:\Clips\clip.mp4",
+            metadata: JsonSerializer.Serialize(new { keyboardOverlayFilePath = overlay }));
+        var snapshot = LibraryDatabase.ReadSnapshot(db, MedalFixture.AccountId);
+        Assert.Equal(new[] { ("clip.mp4", true) }, ReplicationPlan.Media(snapshot, WindowsPath.Parse(@"M:\Clips")));
+    }
+
     [Theory]
     [InlineData(@"C:\Private\secret.mp4", true, false)]
+    [InlineData(@"M:\Clips\Temp\InputActions\a.kbm.jsonl.zst.enc", true, false)]
     [InlineData(@"M:\Clips\Databases\backup.db", true, false)]
     [InlineData(@"M:\Clips\secret.conf", true, false)]
     [InlineData(@"M:\Clips\clip.mp4", false, false)]
